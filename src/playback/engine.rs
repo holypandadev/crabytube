@@ -27,6 +27,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+use super::live;
 use crate::{
     music::Track,
     playback::resolver::{
@@ -54,6 +55,8 @@ pub struct PlaybackStatus {
     pub state: PlaybackState,
     pub track: Option<Track>,
     pub duration: Option<Duration>,
+    /// A live broadcast: it has no duration and cannot be sought.
+    pub live: bool,
     pub position: Duration,
     pub volume: f32,
     pub underruns: u64,
@@ -89,6 +92,7 @@ impl Default for PlaybackStatus {
             state: PlaybackState::Idle,
             track: None,
             duration: None,
+            live: false,
             position: Duration::ZERO,
             volume: 0.8,
             underruns: 0,
@@ -149,6 +153,7 @@ fn playback_status_event_changed(old: &PlaybackStatus, new: &PlaybackStatus) -> 
     old.state != new.state
         || old.track != new.track
         || old.duration != new.duration
+        || old.live != new.live
         || old.underruns != new.underruns
         || old.output_device != new.output_device
         || old.resolved_format != new.resolved_format
@@ -671,7 +676,8 @@ async fn actor(
                     output_device_id = device_id;
                 }
                 Some(Command::Seek(position)) => {
-                    if let Some(audio) = active.as_ref() {
+                    // A live broadcast has no position to go back to.
+                    if let Some(audio) = active.as_ref().filter(|_| !status.live) {
                         seek_generation = seek_generation.wrapping_add(1);
                         let current_seek_generation = seek_generation;
                         let (reply, response) = tokio::sync::oneshot::channel();
@@ -757,6 +763,7 @@ async fn actor(
                         }
                         status.track = Some(track);
                         status.duration = duration;
+                        status.live = active_audio.live;
                         status.position = Duration::ZERO;
                         status.underruns = 0;
                         observed_underruns = 0;
@@ -987,6 +994,33 @@ async fn prepare_stream(
         return Some((None, Err(error)));
     }
     let initial_duration = stream.duration;
+    if stream.live {
+        // A broadcast has no length: its fragments are fetched as they come, from the live edge.
+        let stream = stream.into_stream();
+        let client = match media_client(&stream) {
+            Ok(client) => client,
+            Err(error) => return Some((None, Err(error))),
+        };
+        let url = match reqwest::Url::parse(&stream.url) {
+            Ok(url) => url,
+            Err(error) => {
+                return Some((None, Err(EngineError::Network(error.to_string()))));
+            }
+        };
+        let fetch_error = Arc::new(Mutex::new(None));
+        let reader = live::open_broadcast(client, url, token.clone(), Arc::clone(&fetch_error));
+        let source = create_audio_source(
+            reader,
+            MediaKind::Live,
+            token,
+            generation,
+            events,
+            fetch_error,
+            for_playback,
+        )
+        .await;
+        return Some((None, source));
+    }
     let opened = tokio::select! {
         _ = token.cancelled() => return None,
         opened = open_stream(stream.into_stream()) => opened,
@@ -995,8 +1029,17 @@ async fn prepare_stream(
         Ok(opened) => opened,
         Err(error) => return Some((None, Err(error))),
     };
-    let source =
-        create_audio_source(reader, token, generation, events, fetch_error, for_playback).await;
+    let byte_len = reader.content_length();
+    let source = create_audio_source(
+        reader,
+        MediaKind::Progressive { byte_len },
+        token,
+        generation,
+        events,
+        fetch_error,
+        for_playback,
+    )
+    .await;
     Some((initial_duration, source))
 }
 
@@ -1009,6 +1052,7 @@ struct PreparedAudio {
     worker: Sender<WorkerCommand>,
     first_sample_output: Arc<AtomicBool>,
     underruns: Arc<AtomicU64>,
+    live: bool,
 }
 
 struct PlaybackOutput {
@@ -1232,6 +1276,25 @@ impl SourceStream for YoutubeHttpSource {
     }
 }
 
+/// The HTTP client for a media URL, with the headers the player response asked for.
+fn media_client(stream: &AudioStream) -> Result<reqwest::Client, EngineError> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    for (name, value) in &stream.request_headers {
+        let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+            .map_err(|error| EngineError::Network(error.to_string()))?;
+        let value = reqwest::header::HeaderValue::from_str(value)
+            .map_err(|error| EngineError::Network(error.to_string()))?;
+        headers.insert(name, value);
+    }
+    crate::network::configure_http(reqwest::Client::builder())
+        .connect_timeout(Duration::from_secs(6))
+        // A per-read timeout: a total timeout cuts off slow links that are still delivering data.
+        .read_timeout(Duration::from_secs(15))
+        .default_headers(headers)
+        .build()
+        .map_err(|error| EngineError::Network(error.to_string()))
+}
+
 async fn open_stream(
     stream: AudioStream,
 ) -> Result<
@@ -1241,21 +1304,7 @@ async fn open_stream(
     ),
     EngineError,
 > {
-    let mut headers = reqwest::header::HeaderMap::new();
-    for (name, value) in &stream.request_headers {
-        let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
-            .map_err(|error| EngineError::Network(error.to_string()))?;
-        let value = reqwest::header::HeaderValue::from_str(value)
-            .map_err(|error| EngineError::Network(error.to_string()))?;
-        headers.insert(name, value);
-    }
-    let client = crate::network::configure_http(reqwest::Client::builder())
-        .connect_timeout(Duration::from_secs(6))
-        // A per-read timeout: a total timeout cuts off slow links that are still delivering data.
-        .read_timeout(Duration::from_secs(15))
-        .default_headers(headers)
-        .build()
-        .map_err(|error| EngineError::Network(error.to_string()))?;
+    let client = media_client(&stream)?;
     let url = reqwest::Url::parse(&stream.url)
         .map_err(|error| EngineError::Network(error.to_string()))?;
     let fetch_error = Arc::new(Mutex::new(None));
@@ -1284,7 +1333,7 @@ fn stream_temp_dir() -> std::path::PathBuf {
     dir
 }
 
-fn record_fetch_error(target: &Mutex<Option<String>>, error: String) {
+pub(super) fn record_fetch_error(target: &Mutex<Option<String>>, error: String) {
     if let Ok(mut value) = target.lock() {
         *value = Some(error);
     }
@@ -1300,17 +1349,32 @@ fn fetch_error_message(source: &Mutex<Option<String>>) -> Option<String> {
     source.lock().ok().and_then(|value| value.clone())
 }
 
-async fn create_audio_source(
-    reader: StreamDownload<TempStorageProvider>,
+/// What the decoder reads: a file of known or unknown length, or a live broadcast.
+#[derive(Clone, Copy)]
+enum MediaKind {
+    Progressive { byte_len: Option<u64> },
+    Live,
+}
+
+async fn create_audio_source<R>(
+    reader: R,
+    media: MediaKind,
     cancellation: CancellationToken,
     generation: u64,
     events: mpsc::UnboundedSender<Event>,
     fetch_error: Arc<Mutex<Option<String>>>,
     #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))] for_playback: bool,
-) -> Result<PreparedAudio, EngineError> {
+) -> Result<PreparedAudio, EngineError>
+where
+    R: std::io::Read + std::io::Seek + Send + Sync + 'static,
+{
     let (prepared_tx, prepared_rx) = tokio::sync::oneshot::channel();
+    let live = matches!(media, MediaKind::Live);
+    let byte_len = match media {
+        MediaKind::Progressive { byte_len } => byte_len,
+        MediaKind::Live => None,
+    };
     tokio::task::spawn_blocking(move || {
-        let byte_len = reader.content_length();
         let builder = Decoder::builder()
             .with_data(reader)
             .with_mime_type("audio/mp4")
@@ -1357,6 +1421,7 @@ async fn create_audio_source(
             worker: worker_tx,
             first_sample_output: Arc::clone(&first_sample_output),
             underruns: Arc::clone(&underruns),
+            live,
         };
         let mut decoder = decoder;
         let mut samples_sent = 0_usize;

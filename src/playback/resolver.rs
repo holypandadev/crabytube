@@ -153,6 +153,8 @@ pub struct AudioStream {
     pub bitrate: Option<u32>,
     pub content_length: Option<u64>,
     pub duration: Option<Duration>,
+    /// True for a live broadcast: the media is a fragment stream that never ends.
+    pub live: bool,
     pub title: String,
     /// Channel name from `videoDetails`, used when the caller only knows the video ID.
     pub author: Option<String>,
@@ -361,6 +363,8 @@ pub enum StreamError {
     AudioDevice(String),
     #[error("playback failed: {0}")]
     Playback(String),
+    #[error("live streams are not supported yet")]
+    LiveUnsupported,
     #[error("operation cancelled")]
     Cancelled,
 }
@@ -371,6 +375,7 @@ impl StreamError {
             Self::Network(_) => "A temporary network problem interrupted playback. Try again.",
             Self::Config(_) => "YouTube configuration could not be loaded. Try again shortly.",
             Self::PlayerUnavailable(_) => "This track is unavailable for playback.",
+            Self::LiveUnsupported => "Live streams are not supported yet",
             Self::AuthenticationRequired(_) => {
                 "YouTube requires sign-in for this track; it can't be played without an account."
             }
@@ -407,6 +412,8 @@ pub struct YouTubeStreamResolver {
     profile: ClientProfile,
     runtime: tokio::sync::Mutex<Option<PlayerRuntime>>,
     player_cache: tokio::sync::Mutex<HashMap<String, PlayerJsCacheEntry>>,
+    /// Plays live broadcasts that the primary client refuses: the mobile web client serves their audio.
+    live_fallback: Option<Box<YouTubeStreamResolver>>,
 }
 
 #[derive(Clone)]
@@ -566,12 +573,19 @@ pub struct ProbeCredentials {
 }
 
 impl YouTubeStreamResolver {
-    pub fn new(_session: YouTubeSession) -> Self {
+    pub fn new(session: YouTubeSession) -> Self {
+        let token_provider: std::sync::Arc<dyn PoTokenProvider> =
+            std::sync::Arc::new(BotguardHelper::new());
         Self {
-            token_provider: std::sync::Arc::new(BotguardHelper::new()),
+            token_provider: std::sync::Arc::clone(&token_provider),
             profile: ClientProfile::WebMusic,
             runtime: tokio::sync::Mutex::new(None),
             player_cache: tokio::sync::Mutex::new(HashMap::new()),
+            live_fallback: Some(Box::new(Self::with_provider(
+                session,
+                token_provider,
+                ClientProfile::Mweb,
+            ))),
         }
     }
 
@@ -585,6 +599,7 @@ impl YouTubeStreamResolver {
             profile,
             runtime: tokio::sync::Mutex::new(None),
             player_cache: tokio::sync::Mutex::new(HashMap::new()),
+            live_fallback: None,
         }
     }
 
@@ -1120,6 +1135,26 @@ impl StreamResolver for YouTubeStreamResolver {
                 .pointer("/playabilityStatus/status")
                 .and_then(Value::as_str);
             if playability.is_some_and(|status| status != "OK") {
+                // The primary client cannot serve a live broadcast. Its player response says
+                // so (`isLiveContent`), so the live fallback is tried only for those videos.
+                if self.profile == ClientProfile::WebMusic && is_live_content(&payload) {
+                    warn!(
+                        resolution_id,
+                        client = runtime.profile.name,
+                        "live broadcast refused by the primary client; trying the live fallback"
+                    );
+                    let Some(fallback) = self.live_fallback.as_deref() else {
+                        return Err(StreamError::LiveUnsupported);
+                    };
+                    return match fallback.resolve(track, quality, cancellation.clone()).await {
+                        Ok(resolution) => Ok(resolution),
+                        Err(StreamError::Cancelled) => Err(StreamError::Cancelled),
+                        Err(error) => {
+                            warn!(?error, "live fallback could not resolve the broadcast");
+                            Err(StreamError::LiveUnsupported)
+                        }
+                    };
+                }
                 let reason = payload
                     .pointer("/playabilityStatus/reason")
                     .and_then(Value::as_str)
@@ -1213,6 +1248,7 @@ impl StreamResolver for YouTubeStreamResolver {
                 set_po_token(&mut stream_url, gvs_token);
             }
             let media_url = stream_url.to_string();
+            let live = is_live_media_url(&media_url);
             let player_js_fp = player_js_fp.unwrap_or_else(|| "not-required".into());
             let selected_pot = tokens.as_ref().map(|tokens| match runtime.gvs_binding {
                 GvsPoBinding::VisitorData => &tokens.session.value,
@@ -1259,6 +1295,7 @@ impl StreamResolver for YouTubeStreamResolver {
                     .as_str()
                     .and_then(|value| value.parse().ok()),
                 duration,
+                live,
                 title: payload
                     .pointer("/videoDetails/title")
                     .and_then(Value::as_str)
@@ -2081,6 +2118,22 @@ fn has_video_id_gvs_binding(config: &Value) -> bool {
         })
 }
 
+/// Whether the player response describes a live broadcast.
+fn is_live_content(payload: &Value) -> bool {
+    payload
+        .pointer("/videoDetails/isLiveContent")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Live audio URLs carry `live=1`. Their media is a fragment stream that ends with the broadcast.
+fn is_live_media_url(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.query_pairs()
+            .any(|(key, value)| key == "live" && value == "1")
+    })
+}
+
 fn choose_aac_format(formats: &[Value], quality: AudioQuality) -> Option<&Value> {
     formats
         .iter()
@@ -2143,9 +2196,10 @@ mod tests {
     use super::{
         AudioCodec, AudioQuality, AudioStream, AudioStreamDiagnostics, ClientProfile, GvsPoBinding,
         MWEB_UA, StreamError, StreamResolver, TV_UA, TrackId, ValidatedPlaybackResolution,
-        YouTubeStreamResolver, choose_aac_format, has_video_id_gvs_binding,
-        parse_signature_timestamp, parse_yt_at_n, parse_ytcfg, persisted_player_js_ready,
-        player_js_url, player_request, retryable_config_status, set_po_token,
+        YouTubeStreamResolver, choose_aac_format, has_video_id_gvs_binding, is_live_content,
+        is_live_media_url, parse_signature_timestamp, parse_yt_at_n, parse_ytcfg,
+        persisted_player_js_ready, player_js_url, player_request, retryable_config_status,
+        set_po_token,
     };
 
     #[test]
@@ -2344,6 +2398,7 @@ mod tests {
             bitrate: None,
             content_length: None,
             duration: None,
+            live: false,
             title: "fixture".into(),
             author: None,
             thumbnail_url: None,
@@ -2461,6 +2516,24 @@ mod tests {
             )
             .await;
         assert!(matches!(result, Err(StreamError::Cancelled)));
+    }
+
+    #[test]
+    fn live_broadcasts_are_recognised_from_the_response_and_the_media_url() {
+        let live = json!({"videoDetails": {"isLiveContent": true}});
+        let vod = json!({"videoDetails": {"isLiveContent": false}});
+        assert!(is_live_content(&live));
+        assert!(!is_live_content(&vod));
+        assert!(!is_live_content(&json!({})));
+        assert!(is_live_media_url(
+            "https://rr1.googlevideo.com/videoplayback?itag=140&live=1&ei=abc"
+        ));
+        assert!(!is_live_media_url(
+            "https://rr1.googlevideo.com/videoplayback?itag=140&live=0&ei=abc"
+        ));
+        assert!(!is_live_media_url(
+            "https://rr1.googlevideo.com/videoplayback?itag=140&notlive=1"
+        ));
     }
 
     #[test]
