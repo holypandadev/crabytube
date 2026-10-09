@@ -1,0 +1,36 @@
+# Build output
+**/target/
+
+# Local scratch space
+/work/
+
+# Dependency and tool caches
+node_modules/
+.cargo/
+.deno/
+.cache/
+**/.cargo-ok
+**/.cargo_vcs_info.json
+__pycache__/
+*.pyc
+
+# Local credentials, sessions and diagnostic captures
+.env
+.env.*
+*.log
+*.har
+*.pcap
+*.pcapng
+cookies*.txt
+*credentials*.json
+*tokens*.json
+*session*.json
+*.snapshot
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db

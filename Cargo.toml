@@ -1,0 +1,118 @@
+[package]
+name = "crabytube"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+build = "build.rs"
+
+[package.metadata.bundle]
+# `cargo bundle --release` (cargo-bundle) builds the macOS .app with this icon.
+name = "CrabyTube"
+identifier = "app.crabytube.CrabyTube"
+icon = ["packaging/macos/crabytube.icns", "packaging/icons/hicolor/512x512/apps/crabytube.png"]
+category = "public.app-category.music"
+short_description = "Lightweight YouTube Music player"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[features]
+default = []
+# Development-only diagnostics: command-line test modes (--scroll-test, --soak,
+# --autoplay, --screenshots, ...) and Iced's debug timing overlay.
+diagnostics = ["iced/debug"]
+
+[workspace]
+members = ["botguard-helper", "js-challenge-helper"]
+default-members = [".", "botguard-helper", "js-challenge-helper"]
+resolver = "3"
+
+[patch.crates-io]
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
+rustypipe-botguard = { path = "botguard-helper/vendor/rustypipe-botguard" }
+
+[dependencies]
+async-trait = "0.1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "http2"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time", "process", "io-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp4"] }
+cpal = "0.17.3"
+stream-download = { version = "0.24.4", default-features = false, features = ["temp-storage"] }
+crossbeam-channel = "0.5"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+bytes = "1"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+json5 = "1.3"
+sha2 = "0.10"
+dirs = "6"
+
+roxmltree = "0.20"
+rand = "0.8"
+discord-rich-presence = "1.1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Both renderers are compiled in. tiny-skia (CPU, patched copy in
+# vendor/iced_tiny_skia) is the default; the "GPU rendering" preference makes
+# Iced try wgpu first and fall back to tiny-skia (see
+# `ui::configure_renderer_from_preferences`).
+iced = { version = "0.14", default-features = false, features = ["image-without-codecs", "svg", "tokio", "tiny-skia", "wgpu", "crisp", "thread-pool", "linux-theme-detection", "x11", "wayland"] }
+zbus = "5.19"
+ksni = "0.3.6"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+iced = { version = "0.14", features = ["image-without-codecs", "svg", "tokio"] }
+
+[profile.dev]
+# Line tables only: full debug info for this dependency tree (V8, wgpu, OXC)
+# makes target/ very large.
+debug = "line-tables-only"
+
+[profile.release]
+# Optimise for binary size and memory by default; the per-package overrides
+# below compile the rendering, image, audio and app code at full speed.
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Hot rendering, image decoding and AAC decoding run at opt-level 3.
+
+[profile.release.package.tiny-skia]
+opt-level = 3
+
+[profile.release.package.iced_tiny_skia]
+opt-level = 3
+
+[profile.release.package.iced_graphics]
+opt-level = 3
+
+[profile.release.package.cosmic-text]
+opt-level = 3
+
+[profile.release.package.image]
+opt-level = 3
+
+[profile.release.package.zune-jpeg]
+opt-level = 3
+
+[profile.release.package.png]
+opt-level = 3
+
+[profile.release.package.fdeflate]
+opt-level = 3
+
+[profile.release.package.resvg]
+opt-level = 3
+
+[profile.release.package.symphonia-codec-aac]
+opt-level = 3
+
+[profile.release.package.crabytube]
+opt-level = 3

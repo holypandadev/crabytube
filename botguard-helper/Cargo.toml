@@ -1,0 +1,17 @@
+[package]
+name = "botguard-helper"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "botguard-helper"
+path = "src/main.rs"
+
+[dependencies]
+rustypipe-botguard = "=0.1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

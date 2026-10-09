@@ -1,0 +1,665 @@
+//! Window chrome shared by every page: title bar, top tabs and player bar.
+
+use super::theme::{
+    self, BLACK, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, NAV_H, PLAYER_H, TITLE_BAR_H, hrule,
+    icon, label, vrule,
+};
+use super::{App, Message, Page, Preference, format_duration};
+use crate::playback::PlaybackState;
+use crate::preferences::RepeatMode;
+use iced::widget::{
+    Space, button, column, container, image, mouse_area, responsive, row, sensor, slider, svg, text,
+};
+use iced::{Alignment, Background, Border, Color, Element, Length, Size};
+
+/// Shortens `value` to fit `width` pixels at `size`. JetBrains Mono advances
+/// 0.6 em per glyph, so a character budget is exact for Latin text.
+pub(super) fn fit(value: &str, width: f32, size: f32) -> String {
+    let budget = (width / (size * 0.6)).floor().max(1.0) as usize;
+    let count = value.chars().count();
+    if count <= budget {
+        return value.to_owned();
+    }
+    let mut out: String = value.chars().take(budget.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Home,
+    Favorites,
+    Settings,
+}
+
+impl App {
+    /// The highlighted tab. Now Playing highlights none, so Home reads as a
+    /// way back rather than the current page.
+    fn active_tab(&self) -> Option<Tab> {
+        match self.page {
+            Page::Library => Some(Tab::Favorites),
+            Page::Settings => Some(Tab::Settings),
+            Page::Home => Some(Tab::Home),
+            // Playlists, albums, search results and Now Playing are reached from
+            // Home but are not Home; a lit Home tab would hide the way back.
+            Page::NowPlaying | Page::Search | Page::CollectionDetail(_) => None,
+        }
+    }
+
+    /// Square cover with a 1 px white outline, or an outlined empty square.
+    /// A cover that just arrived fades in over `COVER_FADE`.
+    pub(super) fn cover<'a>(
+        &self,
+        url: Option<&str>,
+        size: f32,
+        variant: u32,
+    ) -> Element<'a, Message> {
+        let found = url.and_then(|url| self.artwork_cache.get_for_with_age(url, variant));
+        let opacity = match found {
+            Some((_, age)) if !self.preferences.reduced_motion => {
+                (age.as_secs_f32() / COVER_FADE.as_secs_f32()).clamp(0.0, 1.0)
+            }
+            _ => 1.0,
+        };
+        cover_box_faded(found.map(|(handle, _)| handle.clone()), size, opacity)
+    }
+
+    /// The page for the area it actually gets, so layout never depends on a
+    /// possibly stale window size.
+    fn page_view(&self, area: Size) -> Element<'_, Message> {
+        match &self.page {
+            Page::Search => self.search_page(area),
+            Page::Library => self.favorites_page(area),
+            Page::Settings => self.settings_page(area),
+            Page::NowPlaying => self.now_playing_page(area),
+            Page::CollectionDetail(_) => self.collection_content(area),
+            Page::Home => self.home_page(area),
+        }
+    }
+
+    pub(super) fn shell_view(&self) -> Element<'_, Message> {
+        // The sensor reports the measured area to `update`, which sizes
+        // artwork requests, carousel steps and virtual lists from it.
+        let page = sensor(responsive(move |area| self.page_view(area)))
+            .on_show(Message::AreaMeasured)
+            .on_resize(Message::AreaMeasured);
+        let mut body = column![
+            self.title_bar(),
+            self.top_nav(),
+            container(page)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding([0.0, gutter_for(self.window_width)]),
+        ];
+        // The player bar appears once something is loaded.
+        if !matches!(self.page, Page::NowPlaying) && self.playback_status.track.is_some() {
+            body = body.push(hrule(INK)).push(
+                container(responsive(move |size| self.player_bar(size.width)))
+                    .width(Length::Fill)
+                    .height(PLAYER_H),
+            );
+        }
+        let framed = container(body)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(theme::hairline())
+            .style(theme::frame);
+        iced::widget::stack![framed, resize_grips()].into()
+    }
+
+    fn title_bar(&self) -> Element<'_, Message> {
+        let dot = |message: Message, glyph: &'static str| {
+            button(
+                container(text(glyph).size(9).font(MONO_BOLD))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .on_press(message)
+            .width(14)
+            .height(14)
+            .padding(0)
+            .style(|_, status| {
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(Background::Color(if hovered { BLACK } else { INK })),
+                    text_color: if hovered { INK } else { Color::TRANSPARENT },
+                    border: Border {
+                        color: INK,
+                        width: theme::hairline(),
+                        radius: 7.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+        };
+        let brand = row![
+            svg(logo_handle()).width(20).height(20),
+            svg(wordmark_handle())
+                .width(WORDMARK_H * WORDMARK_ASPECT)
+                .height(WORDMARK_H)
+                .style(|_, _| svg::Style { color: Some(INK) }),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+        let drag = mouse_area(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::StartDrag)
+        .on_double_click(Message::ToggleMaximize);
+        let bar = if cfg!(target_os = "macos") {
+            row![
+                dot(Message::CloseWindow, "×"),
+                dot(Message::MinimizeWindow, "–"),
+                dot(Message::ToggleMaximize, "+"),
+                Space::new().width(10),
+                brand,
+                drag,
+            ]
+        } else {
+            row![
+                brand,
+                drag,
+                dot(Message::MinimizeWindow, "–"),
+                dot(Message::ToggleMaximize, "+"),
+                dot(Message::CloseWindow, "×"),
+            ]
+        };
+        column![
+            container(bar.spacing(8).align_y(Alignment::Center))
+                .height(TITLE_BAR_H)
+                .padding([0.0, 14.0])
+                .center_y(TITLE_BAR_H),
+            hrule(INK),
+        ]
+        .into()
+    }
+
+    fn top_nav(&self) -> Element<'_, Message> {
+        const TITLES: [&str; 3] = ["Home", "Favorite Songs", "Settings"];
+        let active = self.active_tab();
+        let widest = TITLES
+            .iter()
+            .map(|title| self.tr(title).chars().count())
+            .max()
+            .unwrap_or(8) as f32;
+        // JetBrains Mono advances 0.6 em per glyph. On narrow windows the
+        // three tabs share the available width and the labels shrink to fit.
+        let room = ((self.window_width - 2.0 * gutter_for(self.window_width) - 4.0) / 3.0).floor();
+        let tab_width = (widest * 14.0 * 0.6 + 56.0).ceil().min(room);
+        let label_size = ((tab_width - 12.0) / (widest * 0.6))
+            .clamp(10.0, 14.0)
+            .floor();
+        let tab = |title: &'static str, page: Page, which: Tab| {
+            button(
+                container(label(
+                    fit(&self.tr(title), tab_width - 8.0, label_size),
+                    label_size,
+                ))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+            )
+            .on_press(Message::Navigate(page))
+            .width(tab_width)
+            .height(40)
+            .padding(0)
+            .style(theme::tab_style(active == Some(which)))
+        };
+        let tabs = container(
+            row![
+                tab("Home", Page::Home, Tab::Home),
+                vrule(40.0, INK),
+                tab("Favorite Songs", Page::Library, Tab::Favorites),
+                vrule(40.0, INK),
+                tab("Settings", Page::Settings, Tab::Settings),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .padding(theme::hairline())
+        .style(theme::boxed);
+        container(tabs)
+            .width(Length::Fill)
+            .height(NAV_H)
+            .center_x(Length::Fill)
+            .center_y(NAV_H)
+            .into()
+    }
+
+    pub(super) fn is_playing(&self) -> bool {
+        matches!(
+            self.playback_status.state,
+            PlaybackState::Playing | PlaybackState::Buffering | PlaybackState::Seeking
+        )
+    }
+
+    pub(super) fn can_toggle_playback(&self) -> bool {
+        self.playback_status.track.is_some() || self.queue_index.is_some()
+    }
+
+    /// Shuffle, previous, play/pause, next and repeat at the given icon size.
+    pub(super) fn transport(&self, size: f32) -> Element<'_, Message> {
+        self.transport_controls(size, true)
+    }
+
+    /// Transport buttons; `full` adds shuffle and repeat.
+    fn transport_controls(&self, size: f32, full: bool) -> Element<'_, Message> {
+        let can_prev = self.prev_queue_index().is_some() || self.playback_status.track.is_some();
+        let can_next = self.next_queue_index().is_some();
+        let small = (size * 0.8).round();
+        let control =
+            |name: &'static str, icon_size: f32, color: Color, message: Option<Message>| {
+                button(icon(name, icon_size, color))
+                    .on_press_maybe(message)
+                    .padding(7)
+                    .style(theme::icon_button)
+            };
+        let shuffle = control(
+            "shuffle",
+            small,
+            if self.shuffle { INK } else { FADED },
+            Some(Message::ToggleShuffle),
+        );
+        let repeat = control(
+            if self.repeat == RepeatMode::One {
+                "repeat-one"
+            } else {
+                "repeat"
+            },
+            small,
+            if self.repeat == RepeatMode::Off {
+                FADED
+            } else {
+                INK
+            },
+            Some(Message::CycleRepeat),
+        );
+        let mut controls = row![];
+        if full {
+            controls = controls.push(shuffle);
+        }
+        controls = controls
+            .push(control(
+                "prev",
+                size,
+                if can_prev { INK } else { FADED },
+                can_prev.then_some(Message::PrevTrack),
+            ))
+            .push(control(
+                if self.is_playing() { "pause" } else { "play" },
+                size + 6.0,
+                INK,
+                self.can_toggle_playback()
+                    .then_some(Message::TogglePlayback),
+            ))
+            .push(control(
+                "next",
+                size,
+                if can_next { INK } else { FADED },
+                can_next.then_some(Message::NextTrack),
+            ));
+        if full {
+            controls = controls.push(repeat);
+        }
+        controls.spacing(14).align_y(Alignment::Center).into()
+    }
+
+    /// Elapsed time, seek rail and total time.
+    pub(super) fn seek_row(&self, time_size: f32) -> Element<'_, Message> {
+        let max_position = self
+            .playback_status
+            .duration
+            .map(|duration| duration.as_secs_f32())
+            .unwrap_or(0.0);
+        let shown = self
+            .seek_preview
+            .unwrap_or(self.playback_status.position.as_secs_f32())
+            .clamp(0.0, max_position.max(0.0));
+        let total = self.playback_status.duration.unwrap_or_default();
+        row![
+            label(
+                format_duration(std::time::Duration::from_secs_f32(shown)),
+                time_size
+            )
+            .color(DIM),
+            slider(0.0..=max_position.max(0.1), shown, Message::SeekChanged)
+                .on_release(Message::SeekReleased)
+                .step(0.1_f32)
+                .width(Length::Fill)
+                .height(theme::SLIDER_H)
+                .style(theme::seek_style),
+            label(format_duration(total), time_size).color(DIM),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    pub(super) fn like_button(&self, video_id: Option<&str>, size: f32) -> Element<'_, Message> {
+        let liked = video_id.is_some_and(|id| self.liked.contains(id));
+        button(icon(if liked { "like-filled" } else { "like" }, size, INK))
+            .on_press_maybe(video_id.map(|id| Message::ToggleLike(id.to_owned())))
+            .padding(6)
+            .style(theme::icon_button)
+            .into()
+    }
+
+    /// Phone-width player: a full-width seek rail on top, then the cover,
+    /// title and the three main transport buttons.
+    fn mini_player(&self, width: f32) -> Element<'_, Message> {
+        let track = self.playback_status.track.as_ref();
+        let max_position = self
+            .playback_status
+            .duration
+            .map(|duration| duration.as_secs_f32())
+            .unwrap_or(0.0);
+        let shown = self
+            .seek_preview
+            .unwrap_or(self.playback_status.position.as_secs_f32())
+            .clamp(0.0, max_position.max(0.0));
+        let rail = slider(0.0..=max_position.max(0.1), shown, Message::SeekChanged)
+            .on_release(Message::SeekReleased)
+            .step(0.1_f32)
+            .width(Length::Fill)
+            .height(theme::SLIDER_H)
+            .style(theme::seek_style);
+        let text_width = (width - 32.0 - 44.0 - 12.0 - 150.0).max(60.0);
+        let title = track.map_or_else(String::new, |t| t.title.clone());
+        let subtitle = track.map_or_else(String::new, |t| t.artist.clone());
+        let now = button(
+            row![
+                self.cover(
+                    track.and_then(|t| t.thumbnail_url.as_deref()),
+                    44.0,
+                    crate::artwork::THUMB_MAX
+                ),
+                column![
+                    text(fit(&title, text_width, 14.0)).size(14).font(MONO),
+                    text(fit(&subtitle, text_width, 12.0))
+                        .size(12)
+                        .font(MONO)
+                        .color(DIM),
+                ]
+                .spacing(4)
+                .width(Length::Fill),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .on_press_maybe(track.map(|_| Message::OpenNowPlaying))
+        .width(Length::Fill)
+        .padding(0)
+        .style(theme::bare_button);
+        column![
+            container(rail).padding([0, 8]),
+            container(
+                row![now, self.transport_controls(18.0, false)]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+            )
+            .height(Length::Fill)
+            .padding([0, 16])
+            .center_y(Length::Fill),
+        ]
+        .height(PLAYER_H)
+        .into()
+    }
+
+    fn player_bar(&self, width: f32) -> Element<'_, Message> {
+        if width < super::home::NARROW_W {
+            return self.mini_player(width);
+        }
+        // Below this width the bar drops shuffle, repeat and the volume rail.
+        let compact = width < 760.0;
+        let side = if compact {
+            (width * 0.36).clamp(120.0, 300.0)
+        } else {
+            (width * 0.28).clamp(150.0, 420.0)
+        };
+        let track = self.playback_status.track.as_ref();
+        let status = match self.playback_status.state {
+            PlaybackState::Resolving => Some(self.tr("Loading…").into_owned()),
+            PlaybackState::Buffering => Some(self.tr("Buffering…").into_owned()),
+            PlaybackState::Error => Some(
+                self.tr(self
+                    .playback_status
+                    .error
+                    .as_deref()
+                    .unwrap_or("Playback failed"))
+                    .into_owned(),
+            ),
+            _ => None,
+        };
+        let text_width = (side - 52.0 - 12.0 - 44.0 - 20.0).max(40.0);
+        let title = track.map_or_else(
+            || self.tr("Nothing playing").into_owned(),
+            |t| t.title.clone(),
+        );
+        let subtitle = status.unwrap_or_else(|| {
+            track.map_or_else(
+                || self.tr("Search to start").into_owned(),
+                |t| t.artist.clone(),
+            )
+        });
+        let now = button(
+            row![
+                self.cover(
+                    track.and_then(|t| t.thumbnail_url.as_deref()),
+                    52.0,
+                    crate::artwork::THUMB_MAX
+                ),
+                column![
+                    text(fit(&title, text_width, 14.0)).size(14).font(MONO),
+                    text(fit(&subtitle, text_width, 12.0))
+                        .size(12)
+                        .font(MONO)
+                        .color(DIM),
+                ]
+                .spacing(4),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .on_press_maybe(track.map(|_| Message::OpenNowPlaying))
+        .padding(0)
+        .style(theme::bare_button);
+        let left = row![
+            now,
+            self.like_button(track.map(|t| t.video_id.as_str()), 18.0)
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let center = column![
+            container(self.transport_controls(18.0, !compact)).center_x(Length::Fill),
+            self.seek_row(11.0),
+        ]
+        .spacing(2)
+        .width(Length::Fill);
+        let muted = self.preferences.muted;
+        let mut right = row![
+            button(icon(if muted { "volume-off" } else { "volume" }, 18.0, INK))
+                .on_press(Message::Preference(Preference::Muted(!muted)))
+                .padding(7)
+                .style(theme::icon_button),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        if !compact {
+            right = right.push(
+                slider(0.0..=1.0, self.preferences.volume, Message::SetVolume)
+                    .on_release(Message::PersistState)
+                    .step(0.01_f32)
+                    .width(VOLUME_W)
+                    .height(theme::SLIDER_H)
+                    .style(theme::seek_style),
+            );
+        }
+        let right_width = if compact { 44.0 } else { side };
+        container(
+            row![
+                container(left).width(side),
+                center,
+                container(right).width(right_width).align_right(right_width),
+            ]
+            .spacing(if compact { 12 } else { 24 })
+            .align_y(Alignment::Center),
+        )
+        .height(PLAYER_H)
+        .padding([0, 16])
+        .center_y(PLAYER_H)
+        .into()
+    }
+}
+
+const VOLUME_W: f32 = 104.0;
+
+/// Side margin of the page: narrower on phone-sized windows.
+pub(super) fn gutter_for(window_width: f32) -> f32 {
+    if window_width < 640.0 { 16.0 } else { GUTTER }
+}
+
+/// The "CRABYTUBE" wordmark: geometric block letters drawn as paths
+/// (`assets/crabytube-wordmark.svg`, viewBox 74.2 × 7).
+const WORDMARK_H: f32 = 11.0;
+const WORDMARK_ASPECT: f32 = 74.2 / 7.0;
+
+fn wordmark_handle() -> svg::Handle {
+    use std::sync::LazyLock;
+    static WORDMARK: LazyLock<svg::Handle> = LazyLock::new(|| {
+        svg::Handle::from_memory(include_bytes!("../../assets/crabytube-wordmark.svg").as_slice())
+    });
+    WORDMARK.clone()
+}
+
+/// Thickness of the invisible strips along the window edges that resize it.
+const GRIP: f32 = 6.0;
+
+/// Edge and corner strips that start an interactive resize. The window draws
+/// its own frame, so the compositor offers no resize border of its own. The
+/// middle stays empty, so everything else receives the pointer as usual.
+fn resize_grips<'a>() -> Element<'a, Message> {
+    use iced::mouse::Interaction;
+    use iced::window::Direction;
+    let grip = |direction: Direction, interaction: Interaction, width: Length, height: Length| {
+        mouse_area(Space::new().width(width).height(height))
+            .interaction(interaction)
+            .on_press(Message::StartResize(direction))
+    };
+    let corner = |direction, interaction| {
+        grip(
+            direction,
+            interaction,
+            Length::Fixed(GRIP * 2.0),
+            Length::Fixed(GRIP * 2.0),
+        )
+    };
+    column![
+        row![
+            corner(Direction::NorthWest, Interaction::ResizingDiagonallyDown),
+            grip(
+                Direction::North,
+                Interaction::ResizingVertically,
+                Length::Fill,
+                Length::Fixed(GRIP)
+            ),
+            corner(Direction::NorthEast, Interaction::ResizingDiagonallyUp),
+        ],
+        row![
+            grip(
+                Direction::West,
+                Interaction::ResizingHorizontally,
+                Length::Fixed(GRIP),
+                Length::Fill
+            ),
+            Space::new().width(Length::Fill).height(Length::Fill),
+            grip(
+                Direction::East,
+                Interaction::ResizingHorizontally,
+                Length::Fixed(GRIP),
+                Length::Fill
+            ),
+        ]
+        .height(Length::Fill),
+        row![
+            corner(Direction::SouthWest, Interaction::ResizingDiagonallyUp),
+            grip(
+                Direction::South,
+                Interaction::ResizingVertically,
+                Length::Fill,
+                Length::Fixed(GRIP)
+            ),
+            corner(Direction::SouthEast, Interaction::ResizingDiagonallyDown),
+        ],
+    ]
+    .into()
+}
+
+fn logo_handle() -> svg::Handle {
+    use std::sync::LazyLock;
+    static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
+        svg::Handle::from_memory(include_bytes!("../../assets/crabytube-logo.svg").as_slice())
+    });
+    LOGO.clone()
+}
+
+/// How long a newly arrived cover takes to fade in.
+pub(super) const COVER_FADE: std::time::Duration = std::time::Duration::from_millis(260);
+
+fn cover_box_faded<'a>(
+    handle: Option<image::Handle>,
+    size: f32,
+    opacity: f32,
+) -> Element<'a, Message> {
+    let line = theme::hairline();
+    let inner: Element<'a, Message> = match handle {
+        Some(handle) => image(handle)
+            .width(size - 2.0 * line)
+            .height(size - 2.0 * line)
+            .content_fit(iced::ContentFit::Cover)
+            .opacity(opacity)
+            .into(),
+        None => container(
+            text("◻")
+                .size((size / 4.0).clamp(10.0, 28.0))
+                .font(MONO)
+                .color(FADED),
+        )
+        .width(size - 2.0 * line)
+        .height(size - 2.0 * line)
+        .center_x(size - 2.0 * line)
+        .center_y(size - 2.0 * line)
+        .into(),
+    };
+    container(inner)
+        .width(size)
+        .height(size)
+        .padding(theme::hairline())
+        .style(theme::boxed)
+        .into()
+}
+
+/// Section heading followed by a 1 px rule that fills the remaining width.
+pub(super) fn section_heading<'a>(
+    title: String,
+    trailing: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let mut line = row![
+        text(title).size(16).font(MONO),
+        container(hrule(INK))
+            .width(Length::Fill)
+            .center_y(Length::Fixed(20.0)),
+    ]
+    .spacing(16)
+    .align_y(Alignment::Center);
+    if let Some(trailing) = trailing {
+        line = line.push(trailing);
+    }
+    line.into()
+}
+
+#[allow(dead_code)]
+pub(super) fn spacer<'a>(height: f32) -> Element<'a, Message> {
+    Space::new().height(height).into()
+}

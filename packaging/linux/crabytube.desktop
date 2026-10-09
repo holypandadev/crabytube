@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CrabyTube
+GenericName=Music Player
+Comment=Lightweight YouTube Music player
+Exec=crabytube
+Icon=crabytube
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;youtube;player;
+StartupWMClass=crabytube
