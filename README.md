@@ -31,7 +31,7 @@
     <td width="50%"><img src="docs/screenshots/search.webp" alt="Search results"></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/now-playing.webp" alt="Now Playing with synced lyrics"></td>
+    <td width="50%"><img src="docs/screenshots/now-playing.webp" alt="Now Playing with the Up Next queue"></td>
     <td width="50%"><img src="docs/screenshots/playlist.webp" alt="Playlist"></td>
   </tr>
 </table>
