@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// Bounds of the karaoke wait between two highlight changes.
+const KARAOKE_MIN_WAIT: Duration = Duration::from_millis(60);
+const KARAOKE_MAX_WAIT: Duration = Duration::from_millis(500);
+
 impl App {
     pub(super) fn update_playback_status(&mut self, status: PlaybackStatus) -> Task<Message> {
         self.apply_helper_memory_budget();
@@ -9,6 +13,7 @@ impl App {
         let previous_position = self.playback_status.position;
         let previous_track = self.playback_status.track.clone();
         self.playback_status = status;
+        self.playback_status_at = std::time::Instant::now();
         // A position that moves back within the same track is a seek or a restart, whatever started it.
         let same_track = previous_track.as_ref().map(|track| &track.video_id)
             == self
@@ -55,6 +60,17 @@ impl App {
         {
             tasks.push(task);
         }
+        // Synced lyrics wake the app at the next word, not on a fixed tick.
+        if self.karaoke_active()
+            && !self.karaoke_tick_pending
+            && let Some(wait) = self.karaoke_wait()
+        {
+            self.karaoke_tick_pending = true;
+            tasks.push(Task::perform(
+                async move { tokio::time::sleep(wait).await },
+                |()| Message::PlaybackTick,
+            ));
+        }
         if self.autoplay
             && self
                 .queue
@@ -68,6 +84,38 @@ impl App {
             tasks.push(self.load_radio());
         }
         Task::batch(tasks)
+    }
+
+    /// Synced lyrics are on screen and sung word by word while the track plays.
+    pub(super) fn karaoke_active(&self) -> bool {
+        self.page == Page::NowPlaying
+            && self.now_playing_tab == NowPlayingTab::Lyrics
+            && self.playback_status.state == PlaybackState::Playing
+            && !self.window_hidden_to_tray
+            && self
+                .lyrics
+                .as_ref()
+                .is_some_and(|lyrics| lyrics.lines.iter().any(|line| !line.words.is_empty()))
+    }
+
+    /// How long until the next word or line of the lyrics starts, counted from the
+    /// position the player has reached now. Capped, so the progress bar still moves.
+    pub(super) fn karaoke_wait(&self) -> Option<Duration> {
+        let lyrics = self.lyrics.as_ref()?;
+        let since_status = if self.playback_status.state == PlaybackState::Playing {
+            self.playback_status_at.elapsed().as_secs_f64()
+        } else {
+            0.0
+        };
+        let now = self.effective_lyrics_position() + since_status;
+        let until = lyrics
+            .next_boundary(self.lyric_active, now)
+            .map_or(KARAOKE_MAX_WAIT, |boundary| {
+                Duration::from_secs_f64((boundary - now).max(0.0))
+            })
+            .clamp(KARAOKE_MIN_WAIT, KARAOKE_MAX_WAIT);
+        // A few milliseconds past the boundary, so the wake-up finds the word started.
+        Some(until + Duration::from_millis(10))
     }
 
     /// Seeks the player. The lyrics view follows the new position, even when the user
@@ -771,6 +819,7 @@ impl App {
             }
             Message::PrewarmPlayback => self.playback.prewarm(),
             Message::PlaybackTick => {
+                self.karaoke_tick_pending = false;
                 return self.update_playback_status(self.playback.status());
             }
             Message::PlaybackStatusChanged(status) => {

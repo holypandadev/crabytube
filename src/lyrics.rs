@@ -54,6 +54,22 @@ impl Lyrics {
             .rposition(|line| line.start <= seconds && line.end.is_none_or(|end| seconds < end))
     }
 
+    /// The next moment after `seconds` at which the highlight changes: the start of
+    /// the next word of the active line, or of the next line. `None` when nothing is left.
+    pub fn next_boundary(&self, active: Option<usize>, seconds: f64) -> Option<f64> {
+        let next_word = active
+            .and_then(|index| self.lines.get(index))
+            .into_iter()
+            .flat_map(|line| line.words.iter().map(|word| word.start))
+            .filter(|start| *start > seconds);
+        let next_line = self
+            .lines
+            .iter()
+            .map(|line| line.start)
+            .filter(|start| *start > seconds);
+        next_word.chain(next_line).reduce(f64::min)
+    }
+
     pub fn is_instrumental_text(text: &str) -> bool {
         let lower = text.trim().to_lowercase();
         lower == "instrumental"
@@ -937,6 +953,40 @@ pub fn virtual_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_next_word_or_line_start_bounds_the_wait() {
+        let word = |start: f64| Word {
+            start,
+            end: start + 0.4,
+            text: "x".into(),
+        };
+        let line = |start: f64, words: Vec<f64>| Line {
+            start,
+            end: None,
+            text: "line".into(),
+            words: words.into_iter().map(word).collect(),
+            translation: None,
+            romanization: None,
+            background: None,
+        };
+        let lyrics = Lyrics {
+            source: "test".into(),
+            lines: vec![
+                line(10.0, vec![10.0, 10.5, 11.0]),
+                line(14.0, vec![14.0, 14.4]),
+            ],
+            plain: None,
+        };
+        // Inside a line: the next word of that line.
+        assert_eq!(lyrics.next_boundary(Some(0), 10.2), Some(10.5));
+        // After its last word: the next line.
+        assert_eq!(lyrics.next_boundary(Some(0), 11.2), Some(14.0));
+        // Last line, last word: nothing is left.
+        assert_eq!(lyrics.next_boundary(Some(1), 14.5), None);
+        // Before the first line, with no active line.
+        assert_eq!(lyrics.next_boundary(None, 5.0), Some(10.0));
+    }
+
     #[test]
     fn lrc_multiple_timestamps_and_offset() {
         let l = lrc(

@@ -56,6 +56,10 @@ struct App {
     lyrics_follow_paused: bool,
     /// Set by a seek: the next lyric update scrolls to the active line even if it did not change.
     lyrics_resync: bool,
+    /// When the playback status last arrived; the karaoke wait counts from it.
+    playback_status_at: std::time::Instant,
+    /// A karaoke wake-up is already on its way, so another one is not scheduled.
+    karaoke_tick_pending: bool,
     lyrics_auto_scroll_until: Option<std::time::Instant>,
     lyrics_scroll: AbsoluteOffset,
     lyrics_heights: Vec<f32>,
@@ -1640,6 +1644,8 @@ impl App {
             lyric_active: None,
             lyrics_follow_paused: false,
             lyrics_resync: false,
+            playback_status_at: std::time::Instant::now(),
+            karaoke_tick_pending: false,
             lyrics_auto_scroll_until: None,
             lyrics_scroll: AbsoluteOffset::default(),
             lyrics_heights: Vec::new(),
@@ -3029,6 +3035,60 @@ mod tests {
             ..PlaybackStatus::default()
         }));
         assert_eq!(app.favorites[0].artist, "Resolved Artist");
+    }
+
+    #[test]
+    fn synced_lyrics_wake_at_the_next_word_instead_of_a_fixed_tick() {
+        let word = |start: f64| crate::lyrics::Word {
+            start,
+            end: start + 0.4,
+            text: "word".into(),
+        };
+        let synced = crate::lyrics::Lyrics {
+            source: "fixture".into(),
+            lines: vec![crate::lyrics::Line {
+                start: 10.0,
+                end: None,
+                text: "word word".into(),
+                words: vec![word(10.0), word(10.5)],
+                translation: None,
+                romanization: None,
+                background: None,
+            }],
+            plain: None,
+        };
+        let mut app = App {
+            page: Page::NowPlaying,
+            now_playing_tab: super::NowPlayingTab::Lyrics,
+            lyrics: Some(synced),
+            ..App::default()
+        };
+        let status = PlaybackStatus {
+            track: Some(song("Track")),
+            position: Duration::from_secs_f64(10.2),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        };
+        drop(app.update_playback_status(status));
+        assert!(app.karaoke_active());
+        assert!(app.karaoke_tick_pending, "one wake-up is on its way");
+        // The next word starts 0.3 s after the position, plus the small margin.
+        let wait = app.karaoke_wait().unwrap();
+        assert!(
+            (Duration::from_millis(300)..=Duration::from_millis(330)).contains(&wait),
+            "wait was {wait:?}"
+        );
+        // The wake-up itself clears the pending flag.
+        drop(app.update(Message::PlaybackTick));
+        assert!(!app.karaoke_tick_pending);
+
+        // Lyrics without word timing keep the fixed tick.
+        app.lyrics = Some(crate::lyrics::Lyrics {
+            source: "plain".into(),
+            lines: Vec::new(),
+            plain: Some("no timing".into()),
+        });
+        assert!(!app.karaoke_active());
     }
 
     #[test]

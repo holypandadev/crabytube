@@ -11,7 +11,9 @@ impl App {
         .map(Message::PlaybackStatusChanged);
         // Progress is only drawn on screen. State changes, including the end of a track, still
         // arrive through `playback_status`, so the tick can stop while the window is in the tray.
+        // Synced lyrics schedule their own wake-ups at each word (see `karaoke_wait`).
         let playback = if !self.window_hidden_to_tray
+            && !self.karaoke_active()
             && matches!(
                 self.playback_status.state,
                 PlaybackState::Buffering | PlaybackState::Seeking | PlaybackState::Playing
