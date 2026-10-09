@@ -129,9 +129,7 @@ impl App {
                 text(fit(&track.title, text_width, 28.0))
                     .size(28)
                     .font(MONO),
-                text(fit(&track.artist, text_width, 18.0))
-                    .size(18)
-                    .font(MONO),
+                self.artist_link(&track.artist, text_width, 18.0, INK),
                 label(fit(&meta.join("  •  "), text_width, 12.0), 12.0).color(DIM),
             ]
             .spacing(4)

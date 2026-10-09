@@ -68,6 +68,26 @@ impl App {
                             AbsoluteOffset { x: 0.0, y: 700.0 },
                         ),
                     ]),
+                    9 => match diagnostic_collection(self) {
+                        Some(target) => self.update(Message::OpenCollection(target)),
+                        None => Task::none(),
+                    },
+                    10 => {
+                        // The first song of the results, with its ••• actions open.
+                        let song = self
+                            .catalog_results
+                            .iter()
+                            .find_map(|item| item.track.as_ref())
+                            .map(|track| track.video_id.clone());
+                        let navigation = self.update(Message::Navigate(Page::Search));
+                        match song {
+                            Some(video_id) => Task::batch([
+                                navigation,
+                                self.update(Message::ToggleRowMenu(video_id)),
+                            ]),
+                            None => navigation,
+                        }
+                    }
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -263,7 +283,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 
 /// `--screenshots <dir>`: page name and the wait before each capture.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 9] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 11] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -273,7 +293,27 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 9] = [
     ("now-playing", 2_500),
     ("lyrics", 1_000),
     ("settings-scrolled", 1_200),
+    ("collection", 3_000),
+    ("row-menu", 1_000),
 ];
+
+/// The collection the tour opens last: `CRABYTUBE_TOUR_COLLECTION=<browse id>`
+/// picks one, otherwise the first public collection on Home.
+#[cfg(feature = "diagnostics")]
+fn diagnostic_collection(app: &App) -> Option<crate::music::BrowseTarget> {
+    if let Ok(browse_id) = std::env::var("CRABYTUBE_TOUR_COLLECTION") {
+        return Some(crate::music::BrowseTarget {
+            browse_id,
+            params: None,
+            page_type: None,
+        });
+    }
+    app.home_shelves
+        .iter()
+        .flat_map(|shelf| shelf.items.iter())
+        .filter_map(|item| item.browse_target.clone())
+        .find(|target| target.is_public_collection())
+}
 
 /// `CRABYTUBE_VIEWPORT=WxH`: lay the app out as if the window had that size.
 #[cfg(feature = "diagnostics")]

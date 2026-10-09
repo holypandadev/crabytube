@@ -160,6 +160,10 @@ pub(super) enum Message {
     ScrollPreloadDue,
     /// Fires when a failed cover may be requested again; see `schedule_cover_retry`.
     ArtworkRetryDue,
+    /// Puts text on the clipboard and shows a short "Copied" notice.
+    CopyToClipboard(String),
+    /// Hides the "Copied" notice, unless a newer copy has replaced it (the value is that copy's number).
+    CopyNoticeExpired(u64),
     /// Fires once a resize settles; see the `Resized` handler.
     ResizeWorkDue(u64),
     /// Diagnostics-only: one step of the `--scroll-test` sweep.

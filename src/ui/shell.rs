@@ -82,6 +82,25 @@ impl App {
         }
     }
 
+    /// An artist name that searches for that artist when pressed. Plain text when there is no name.
+    pub(super) fn artist_link(
+        &self,
+        artist: &str,
+        width: f32,
+        size: f32,
+        color: Color,
+    ) -> Element<'_, Message> {
+        let shown = fit(artist, width, size);
+        if artist.trim().is_empty() {
+            return text(shown).size(size).font(MONO).color(color).into();
+        }
+        button(text(shown).size(size).font(MONO))
+            .on_press(Message::SearchFor(artist.to_owned()))
+            .padding(0)
+            .style(theme::text_link(color))
+            .into()
+    }
+
     /// Where the "← Back" bar leads: the page a collection was opened from, or
     /// the page Now Playing was opened from. `None` when there is nowhere to go.
     pub(super) fn back_target(&self) -> Option<Message> {
@@ -408,7 +427,9 @@ impl App {
         let text_width = (width - 32.0 - 44.0 - 12.0 - 150.0).max(60.0);
         let title = track.map_or_else(String::new, |t| t.title.clone());
         let subtitle = track.map_or_else(String::new, |t| t.artist.clone());
-        let now = button(
+        // A mouse area rather than a button: the artist name inside is a button of its own,
+        // and a click on it searches instead of opening Now Playing.
+        let now = mouse_area(
             row![
                 self.cover(
                     track.and_then(|t| t.thumbnail_url.as_deref()),
@@ -417,21 +438,20 @@ impl App {
                 ),
                 column![
                     text(fit(&title, text_width, 14.0)).size(14).font(MONO),
-                    text(fit(&subtitle, text_width, 12.0))
-                        .size(12)
-                        .font(MONO)
-                        .color(DIM),
+                    self.artist_link(&subtitle, text_width, 12.0, DIM),
                 ]
                 .spacing(4)
                 .width(Length::Fill),
             ]
             .spacing(12)
+            .width(Length::Fill)
             .align_y(Alignment::Center),
         )
-        .on_press_maybe(track.map(|_| Message::OpenNowPlaying))
-        .width(Length::Fill)
-        .padding(0)
-        .style(theme::bare_button);
+        .interaction(iced::mouse::Interaction::Pointer);
+        let now = match track {
+            Some(_) => now.on_press(Message::OpenNowPlaying),
+            None => now,
+        };
         column![
             container(rail).padding([0, 8]),
             container(

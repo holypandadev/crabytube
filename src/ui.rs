@@ -164,6 +164,9 @@ struct App {
     artwork_retry_pending: bool,
     /// Whether the player's cover has had its one retry.
     artwork_selected_retried: bool,
+    /// Set while the "Copied" notice shows; the value is the number of the copy that set it.
+    copy_notice: Option<u64>,
+    copy_notice_count: u64,
     artwork_cancel: Option<CancellationToken>,
     // Per-URL in-flight tokens so scroll reconciliation can keep useful
     // work and cancel only URLs that left the window of interest.
@@ -1273,6 +1276,23 @@ impl App {
                 let search = self.start_search(self.search_query.clone(), false);
                 return Task::batch([navigation, search]);
             }
+            Message::CopyToClipboard(text) => {
+                self.copy_notice_count = self.copy_notice_count.wrapping_add(1);
+                let count = self.copy_notice_count;
+                self.copy_notice = Some(count);
+                return Task::batch([
+                    iced::clipboard::write(text),
+                    Task::perform(
+                        async { tokio::time::sleep(Duration::from_millis(1500)).await },
+                        move |()| Message::CopyNoticeExpired(count),
+                    ),
+                ]);
+            }
+            Message::CopyNoticeExpired(count) => {
+                if self.copy_notice == Some(count) {
+                    self.copy_notice = None;
+                }
+            }
             Message::SearchFor(query) => {
                 self.invalidate_suggestions();
                 self.search_committed = !query.trim().is_empty();
@@ -1718,6 +1738,8 @@ impl App {
             artwork_failed: HashMap::new(),
             artwork_retry_pending: false,
             artwork_selected_retried: false,
+            copy_notice: None,
+            copy_notice_count: 0,
             artwork_cancel: None,
             artwork_batch_tokens: HashMap::new(),
             artwork_request_id: 0,
@@ -3310,6 +3332,21 @@ mod tests {
         let _ = app.update(Message::KeyPressed(escape));
         assert_eq!(app.page, Page::Search);
         assert_eq!(app.search_scroll.y, 480.0);
+    }
+
+    #[test]
+    fn copy_notice_hides_only_when_the_latest_copy_expires() {
+        let mut app = App::default();
+        drop(app.update(Message::CopyToClipboard("Title".into())));
+        let first = app.copy_notice_count;
+        drop(app.update(Message::CopyToClipboard("Artist".into())));
+        let latest = app.copy_notice_count;
+        assert!(app.copy_notice.is_some());
+        // The timer of the first copy must not hide the notice of the second.
+        drop(app.update(Message::CopyNoticeExpired(first)));
+        assert!(app.copy_notice.is_some());
+        drop(app.update(Message::CopyNoticeExpired(latest)));
+        assert!(app.copy_notice.is_none());
     }
 
     #[test]

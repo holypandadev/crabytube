@@ -651,7 +651,9 @@ impl App {
                 .padding([6, 12])
                 .style(theme::outline_button)
         };
-        let actions = row![
+        // A wrapping row: on a narrow window the actions flow onto a second line
+        // instead of squeezing each label.
+        let mut actions = row![
             action(
                 self.tr("Play next").into_owned(),
                 Message::PlayNext(track.clone())
@@ -670,15 +672,30 @@ impl App {
                 Message::LikeTrack(track.clone()),
             ),
         ]
-        .spacing(10);
-        let actions = match queue_index {
-            Some(index) => actions.push(action(
+        .spacing(10)
+        .align_y(Alignment::Center);
+        if let Some(index) = queue_index {
+            actions = actions.push(action(
                 self.tr("Remove from queue").into_owned(),
                 Message::RemoveFromQueue(index),
-            )),
-            None => actions,
-        };
-        container(actions).padding([4, 52]).into()
+            ));
+        }
+        actions = actions.push(action(
+            self.tr("Copy title").into_owned(),
+            Message::CopyToClipboard(track.title.clone()),
+        ));
+        if !track.artist.trim().is_empty() {
+            actions = actions.push(action(
+                self.tr("Copy artist").into_owned(),
+                Message::CopyToClipboard(track.artist.clone()),
+            ));
+        }
+        if self.copy_notice.is_some() {
+            actions = actions.push(label(self.tr("Copied").into_owned(), 12.0).color(DIM));
+        }
+        container(actions.wrap().vertical_spacing(8))
+            .padding([4, 52])
+            .into()
     }
 
     fn collection_grid<'a>(&'a self, items: &[&'a HomeItem], width: f32) -> Element<'a, Message> {

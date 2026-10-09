@@ -205,6 +205,22 @@ pub(super) fn row_button_current(_: &Theme, _: button::Status) -> button::Style 
 }
 
 /// Selected row or suggestion: inverted colours.
+/// A name that acts as a link: plain text that inverts while hovered or pressed.
+pub(super) fn text_link(color: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let active = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(Background::Color(if active {
+                INK
+            } else {
+                Color::TRANSPARENT
+            })),
+            text_color: if active { BLACK } else { color },
+            ..Default::default()
+        }
+    }
+}
+
 pub(super) fn inverted_button(_: &Theme, _: button::Status) -> button::Style {
     button::Style {
         background: Some(Background::Color(INK)),
