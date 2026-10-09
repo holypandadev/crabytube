@@ -75,6 +75,8 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Copy title" => "Copiar título",
         "Copy artist" => "Copiar artista",
         "Copied" => "Copiado",
+        "Live" => "Directos",
+        "Live streams are not supported yet" => "Los directos todavía no son compatibles",
         "See all  ›" => "Ver todo  ›",
         "Updating results…" => "Actualizando resultados…",
         "Searching…" => "Buscando…",

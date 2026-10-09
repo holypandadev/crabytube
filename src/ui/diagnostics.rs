@@ -35,7 +35,12 @@ impl App {
                         let typing = self.update(Message::SearchChanged("daft pu".into()));
                         Task::batch([navigation, typing])
                     }
-                    3 => self.update(Message::SearchFor("daft punk".into())),
+                    3 => {
+                        // CRABYTUBE_TOUR_SEARCH=<query> picks the search the tour shows.
+                        let query = std::env::var("CRABYTUBE_TOUR_SEARCH")
+                            .unwrap_or_else(|_| "daft punk".into());
+                        self.update(Message::SearchFor(query))
+                    }
                     4 => {
                         let navigation = self.update(Message::Navigate(Page::Home));
                         let step = self.update(Message::CarouselStep { forward: true });

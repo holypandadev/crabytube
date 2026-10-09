@@ -365,8 +365,24 @@ impl App {
         controls.spacing(14).align_y(Alignment::Center).into()
     }
 
-    /// Elapsed time, seek rail and total time.
+    /// Elapsed time, seek rail and total time. A live broadcast has no rail and no
+    /// total: it shows the elapsed time and a LIVE marker instead.
     pub(super) fn seek_row(&self, time_size: f32) -> Element<'_, Message> {
+        if self.playback_status.live {
+            return row![
+                label(
+                    format_duration(std::time::Duration::from_secs_f32(
+                        self.playback_status.position.as_secs_f32()
+                    )),
+                    time_size
+                )
+                .color(DIM),
+                Space::new().width(Length::Fill),
+                text("● LIVE").size(time_size).font(MONO_BOLD).color(INK),
+            ]
+            .align_y(Alignment::Center)
+            .into();
+        }
         let max_position = self
             .playback_status
             .duration
@@ -418,12 +434,21 @@ impl App {
             .seek_preview
             .unwrap_or(self.playback_status.position.as_secs_f32())
             .clamp(0.0, max_position.max(0.0));
-        let rail = slider(0.0..=max_position.max(0.1), shown, Message::SeekChanged)
-            .on_release(Message::SeekReleased)
-            .step(0.1_f32)
-            .width(Length::Fill)
-            .height(theme::SLIDER_H)
-            .style(theme::seek_style);
+        let rail: Element<'_, Message> = if self.playback_status.live {
+            // A live broadcast has no length to seek through.
+            Space::new()
+                .width(Length::Fill)
+                .height(theme::SLIDER_H)
+                .into()
+        } else {
+            slider(0.0..=max_position.max(0.1), shown, Message::SeekChanged)
+                .on_release(Message::SeekReleased)
+                .step(0.1_f32)
+                .width(Length::Fill)
+                .height(theme::SLIDER_H)
+                .style(theme::seek_style)
+                .into()
+        };
         let text_width = (width - 32.0 - 44.0 - 12.0 - 150.0).max(60.0);
         let title = track.map_or_else(String::new, |t| t.title.clone());
         let subtitle = track.map_or_else(String::new, |t| t.artist.clone());

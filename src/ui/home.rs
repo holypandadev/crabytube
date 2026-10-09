@@ -449,6 +449,25 @@ impl App {
                 .push(Space::new().height(8))
                 .push(self.top_result(top, width));
         }
+        let live = self.search_live();
+        if !live.is_empty() {
+            let queue: Arc<[Track]> = live.iter().filter_map(|item| item.track.clone()).collect();
+            content = content
+                .push(Space::new().height(22))
+                .push(label(self.tr("Live").into_owned(), 15.0))
+                .push(Space::new().height(6))
+                .push(hrule(INK));
+            for (index, item) in live.iter().enumerate() {
+                if let Some(track) = &item.track {
+                    content = content.push(self.song_row(
+                        track,
+                        Some("LIVE".to_owned()),
+                        Message::PlayContext(Arc::clone(&queue), index),
+                        width,
+                    ));
+                }
+            }
+        }
         let songs = self.search_songs();
         if !songs.is_empty() {
             let queue: Arc<[Track]> = songs.iter().filter_map(|item| item.track.clone()).collect();
@@ -504,6 +523,15 @@ impl App {
         .width(Length::Fill)
         .height(Length::Fill);
         self.with_suggestions(base.into(), search_width, search_x, 8.0 + SEARCH_H)
+    }
+
+    /// Live broadcasts the results page lists above "Songs".
+    pub(super) fn search_live(&self) -> Vec<&HomeItem> {
+        self.catalog_results
+            .iter()
+            .filter(|item| item.kind == HomeItemKind::Live && item.track.is_some())
+            .take(8)
+            .collect()
     }
 
     /// Song results the results page lists under "Songs".

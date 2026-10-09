@@ -169,7 +169,8 @@ impl App {
         let top = self.catalog_results.first().and_then(|item| {
             cover_request(item.thumbnail_url.as_deref(), crate::artwork::CARD_MID_MAX)
         });
-        let songs = self.search_songs().into_iter();
+        // Same order as the results page: live broadcasts, then songs, then the grids.
+        let songs = self.search_live().into_iter().chain(self.search_songs());
         let collections = [
             HomeItemKind::Album,
             HomeItemKind::Playlist,

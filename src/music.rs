@@ -31,6 +31,8 @@ pub struct Track {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum HomeItemKind {
     Song,
+    /// A live broadcast: a track that plays as a stream with no end.
+    Live,
     Album,
     Artist,
     Playlist,
@@ -42,6 +44,7 @@ impl HomeItemKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Song => "Song",
+            Self::Live => "Live",
             Self::Album => "Album",
             Self::Artist => "Artist",
             Self::Playlist => "Playlist",
@@ -1308,7 +1311,11 @@ fn parse_home_item(raw: &Value) -> Option<HomeItem> {
             _ => HomeItemKind::Unknown,
         }
     } else if track.is_some() {
-        HomeItemKind::Song
+        if has_live_badge(item) {
+            HomeItemKind::Live
+        } else {
+            HomeItemKind::Song
+        }
     } else {
         HomeItemKind::Unknown
     };
@@ -1323,6 +1330,17 @@ fn parse_home_item(raw: &Value) -> Option<HomeItem> {
         track,
         duration,
     })
+}
+
+/// Search rows of live broadcasts carry a `liveBadgeRenderer` among their badges.
+fn has_live_badge(item: &Value) -> bool {
+    item.get("badges")
+        .and_then(Value::as_array)
+        .is_some_and(|badges| {
+            badges
+                .iter()
+                .any(|badge| badge.get("liveBadgeRenderer").is_some())
+        })
 }
 
 fn home_item_thumbnail(item: &Value) -> Option<String> {
@@ -1494,6 +1512,19 @@ mod tests {
         );
         assert_eq!(items[3].track.as_ref().unwrap().video_id, "song");
     }
+    #[test]
+    fn search_rows_with_a_live_badge_are_live_items_and_others_stay_songs() {
+        let payload = json!({"contents":[
+          {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"live1"},"title":{"simpleText":"Radio"},"subtitle":{"simpleText":"Channel"},"badges":[{"liveBadgeRenderer":{"label":{"runs":[{"text":"Live"}]}}}]}},
+          {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"song1"},"title":{"simpleText":"Song"},"subtitle":{"simpleText":"Singer"}}}
+        ]});
+        let items = parse_catalog_results(&payload);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].kind, super::HomeItemKind::Live);
+        assert_eq!(items[0].track.as_ref().unwrap().video_id, "live1");
+        assert_eq!(items[1].kind, super::HomeItemKind::Song);
+    }
+
     #[test]
     fn radio_parser_uses_only_playable_playlist_panel_rows() {
         let payload = json!({"contents":{"playlistPanelRenderer":{"contents":[

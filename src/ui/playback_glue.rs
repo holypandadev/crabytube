@@ -73,6 +73,10 @@ impl App {
     /// Seeks the player. The lyrics view follows the new position, even when the user
     /// had scrolled it by hand before.
     pub(super) fn seek_playback(&mut self, target: Duration) {
+        // A live broadcast has no position to move to.
+        if self.playback_status.live {
+            return;
+        }
         self.playback.seek(target);
         self.resync_lyrics();
     }
