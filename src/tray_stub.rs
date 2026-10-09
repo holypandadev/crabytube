@@ -67,6 +67,8 @@ impl TrayRemote {
         self.commands.clone()
     }
 
+    // Same signature as the Linux tray: the future must not borrow `self`.
+    #[allow(clippy::manual_async_fn)]
     pub fn start_service(
         &self,
     ) -> impl std::future::Future<Output = Result<bool, String>> + Send + 'static {

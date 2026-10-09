@@ -77,6 +77,7 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
 }
 
 /// Notification text may carry a little markup. Escaping keeps titles such as "A & B" as written.
+#[cfg(any(target_os = "linux", test))]
 fn escape_markup(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
