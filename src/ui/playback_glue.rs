@@ -6,8 +6,20 @@ impl App {
     pub(super) fn update_playback_status(&mut self, status: PlaybackStatus) -> Task<Message> {
         self.apply_helper_memory_budget();
         let previous_state = self.playback_status.state;
+        let previous_position = self.playback_status.position;
         let previous_track = self.playback_status.track.clone();
         self.playback_status = status;
+        // A position that moves back within the same track is a seek or a restart, whatever started it.
+        let same_track = previous_track.as_ref().map(|track| &track.video_id)
+            == self
+                .playback_status
+                .track
+                .as_ref()
+                .map(|track| &track.video_id);
+        if same_track && self.playback_status.position + Duration::from_secs(1) < previous_position
+        {
+            self.resync_lyrics();
+        }
         self.release_previous_cover(previous_track.as_ref());
         let mut metadata_tasks = self.adopt_resolved_metadata(previous_track);
         metadata_tasks.extend(self.track_notice_task());
@@ -21,7 +33,8 @@ impl App {
         }
 
         // Follow first, so the branches below cannot skip the lyric scroll.
-        let mut tasks = vec![self.follow_lyrics_task(old_active)];
+        let resync = self.lyric_active.is_some() && std::mem::take(&mut self.lyrics_resync);
+        let mut tasks = vec![self.follow_lyrics_task(old_active, resync)];
         tasks.append(&mut metadata_tasks);
 
         // Search tracks may not have a duration until the existing playback
@@ -55,6 +68,19 @@ impl App {
             tasks.push(self.load_radio());
         }
         Task::batch(tasks)
+    }
+
+    /// Seeks the player. The lyrics view follows the new position, even when the user
+    /// had scrolled it by hand before.
+    pub(super) fn seek_playback(&mut self, target: Duration) {
+        self.playback.seek(target);
+        self.resync_lyrics();
+    }
+
+    /// Resumes lyrics following, and scrolls to the active line on the next status update.
+    pub(super) fn resync_lyrics(&mut self) {
+        self.lyrics_follow_paused = false;
+        self.lyrics_resync = true;
     }
 
     /// The resolver fills in title, artist, artwork and length for a track that was started
@@ -403,7 +429,7 @@ impl App {
                 if let Some(duration) = self.playback_status.duration {
                     target = target.min(duration);
                 }
-                self.playback.seek(target);
+                self.seek_playback(target);
                 Task::none()
             }
             RemoteCommand::SeekBy(offset) => {
@@ -412,8 +438,7 @@ impl App {
                 if let Some(duration) = self.playback_status.duration {
                     target = target.min(duration.as_micros());
                 }
-                self.playback
-                    .seek(Duration::from_micros(target.min(u64::MAX as u128) as u64));
+                self.seek_playback(Duration::from_micros(target.min(u64::MAX as u128) as u64));
                 Task::none()
             }
             RemoteCommand::SetVolume(volume) => {
@@ -576,8 +601,7 @@ impl App {
 
             Message::SeekTo(seconds) => {
                 let audio_seconds = seconds - self.current_lyrics_offset() as f64 / 1000.0;
-                self.playback
-                    .seek(Duration::from_secs_f64(audio_seconds.max(0.0)));
+                self.seek_playback(Duration::from_secs_f64(audio_seconds.max(0.0)));
             }
             Message::ToggleShuffle => {
                 self.shuffle = !self.shuffle;
@@ -636,14 +660,14 @@ impl App {
                 if let Some(prev) = self.prev_queue_index() {
                     // If more than 3s into the song, restart it instead of going back.
                     if self.playback_status.position.as_secs() > 3 && self.queue_index.is_some() {
-                        self.playback.seek(Duration::ZERO);
+                        self.seek_playback(Duration::ZERO);
                         self.seek_preview = None;
                     } else {
                         let track = self.queue[prev].clone();
                         return self.play_queued_track(track, prev);
                     }
                 } else if self.playback_status.track.is_some() {
-                    self.playback.seek(Duration::ZERO);
+                    self.seek_playback(Duration::ZERO);
                     self.seek_preview = None;
                 }
             }
@@ -707,8 +731,7 @@ impl App {
             Message::SeekChanged(position) => self.seek_preview = Some(position),
             Message::SeekReleased => {
                 if let Some(position) = self.seek_preview.take() {
-                    self.playback
-                        .seek(Duration::from_secs_f32(position.max(0.0)));
+                    self.seek_playback(Duration::from_secs_f32(position.max(0.0)));
                 }
             }
             Message::PrewarmPlayback => self.playback.prewarm(),

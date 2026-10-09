@@ -54,6 +54,8 @@ struct App {
     lyrics_cancel: Option<CancellationToken>,
     lyric_active: Option<usize>,
     lyrics_follow_paused: bool,
+    /// Set by a seek: the next lyric update scrolls to the active line even if it did not change.
+    lyrics_resync: bool,
     lyrics_auto_scroll_until: Option<std::time::Instant>,
     lyrics_scroll: AbsoluteOffset,
     lyrics_heights: Vec<f32>,
@@ -1382,7 +1384,7 @@ impl App {
                                     .duration
                                     .map_or(position, |duration| duration.as_secs_f64());
                                 if self.playback_status.track.is_some() {
-                                    self.playback.seek(Duration::from_secs_f64(
+                                    self.seek_playback(Duration::from_secs_f64(
                                         (position + step).clamp(0.0, duration.max(0.0)),
                                     ));
                                 }
@@ -1637,6 +1639,7 @@ impl App {
             lyrics_cancel: None,
             lyric_active: None,
             lyrics_follow_paused: false,
+            lyrics_resync: false,
             lyrics_auto_scroll_until: None,
             lyrics_scroll: AbsoluteOffset::default(),
             lyrics_heights: Vec::new(),
@@ -2066,8 +2069,8 @@ impl App {
     }
 
     /// Scrolls the lyrics view to the active line when the line changed.
-    fn follow_lyrics_task(&mut self, old_active: Option<usize>) -> Task<Message> {
-        if old_active != self.lyric_active
+    fn follow_lyrics_task(&mut self, old_active: Option<usize>, resync: bool) -> Task<Message> {
+        if (resync || old_active != self.lyric_active)
             && self.now_playing_tab == NowPlayingTab::Lyrics
             && self.preferences.lyrics_follow
             && !self.lyrics_follow_paused
@@ -3002,12 +3005,68 @@ mod tests {
         app.preferences.lyrics_follow = true;
 
         // Same line as before: nothing to scroll.
-        let _ = app.follow_lyrics_task(Some(3));
+        let _ = app.follow_lyrics_task(Some(3), false);
         assert!(app.lyrics_auto_scroll_until.is_none());
 
         // Line changed: follow sets the auto-scroll guard.
-        let _ = app.follow_lyrics_task(Some(2));
+        let _ = app.follow_lyrics_task(Some(2), false);
         assert!(app.lyrics_auto_scroll_until.is_some());
+    }
+
+    #[test]
+    fn every_seek_resumes_lyrics_following() {
+        let mut app = App {
+            now_playing_tab: super::NowPlayingTab::Lyrics,
+            ..App::default()
+        };
+        app.lyrics_follow_paused = true;
+        app.seek_playback(Duration::from_secs(12));
+        assert!(!app.lyrics_follow_paused);
+        assert!(app.lyrics_resync);
+    }
+
+    #[test]
+    fn a_backward_jump_brings_the_lyrics_back_and_resumes_following() {
+        let mut app = App {
+            now_playing_tab: super::NowPlayingTab::Lyrics,
+            ..App::default()
+        };
+        app.preferences.lyrics_follow = true;
+        let line = |start: f64| crate::lyrics::Line {
+            start,
+            end: None,
+            text: format!("line at {start}"),
+            words: Vec::new(),
+            translation: None,
+            romanization: None,
+            background: None,
+        };
+        app.lyrics = Some(crate::lyrics::Lyrics {
+            source: "fixture".into(),
+            lines: [0.0, 10.0, 20.0].into_iter().map(line).collect(),
+            plain: None,
+        });
+        let track = song("Track");
+        let at = |seconds: f64| PlaybackStatus {
+            track: Some(track.clone()),
+            position: Duration::from_secs_f64(seconds),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        };
+
+        drop(app.update_playback_status(at(25.0)));
+        assert_eq!(app.lyric_active, Some(2));
+        // The user scrolled the lyrics by hand, which paused following.
+        app.lyrics_follow_paused = true;
+        app.lyrics_auto_scroll_until = None;
+
+        drop(app.update_playback_status(at(12.0)));
+        assert_eq!(app.lyric_active, Some(1));
+        assert!(!app.lyrics_follow_paused, "a jump back resumes following");
+        assert!(
+            app.lyrics_auto_scroll_until.is_some(),
+            "the view scrolls to the line that is now sung"
+        );
     }
 
     #[test]
