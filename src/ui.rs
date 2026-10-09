@@ -3014,6 +3014,24 @@ mod tests {
     }
 
     #[test]
+    fn a_favorite_saved_without_its_artist_gets_it_when_the_track_resolves() {
+        let mut app = App::default();
+        let mut saved = song("Saved");
+        saved.video_id = "abc".into();
+        saved.artist = String::new();
+        app.favorites = vec![saved.clone()];
+        app.playback_status.track = Some(saved.clone());
+        let mut resolved = saved.clone();
+        resolved.artist = "Resolved Artist".into();
+        drop(app.update_playback_status(PlaybackStatus {
+            track: Some(resolved),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        }));
+        assert_eq!(app.favorites[0].artist, "Resolved Artist");
+    }
+
+    #[test]
     fn every_seek_resumes_lyrics_following() {
         let mut app = App {
             now_playing_tab: super::NowPlayingTab::Lyrics,

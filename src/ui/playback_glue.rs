@@ -89,6 +89,29 @@ impl App {
 
     /// The resolver fills in title, artist, artwork and length for a track that was started
     /// from its video ID alone. The queue, the artwork and the lyrics follow once they arrive.
+    /// Gives a favorite or queue entry without an artist the artist of its video.
+    fn fill_artist_of(&mut self, video_id: &str, artist: &str) {
+        let mut favorites_changed = false;
+        for favorite in self
+            .favorites
+            .iter_mut()
+            .filter(|track| track.video_id == video_id && track.artist.trim().is_empty())
+        {
+            favorite.artist = artist.to_owned();
+            favorites_changed = true;
+        }
+        for entry in self
+            .queue
+            .iter_mut()
+            .filter(|track| track.video_id == video_id && track.artist.trim().is_empty())
+        {
+            entry.artist = artist.to_owned();
+        }
+        if favorites_changed {
+            self.persist();
+        }
+    }
+
     pub(super) fn adopt_resolved_metadata(
         &mut self,
         previous: Option<Track>,
@@ -96,6 +119,14 @@ impl App {
         let (Some(previous), Some(current)) = (previous, self.playback_status.track.clone()) else {
             return Vec::new();
         };
+        // Search rows often arrive without an artist. Once the stream names it, the
+        // favorites and queue entries of that video get it too.
+        if previous.video_id == current.video_id
+            && previous.artist.trim().is_empty()
+            && !current.artist.trim().is_empty()
+        {
+            self.fill_artist_of(&current.video_id, &current.artist);
+        }
         if previous.video_id != current.video_id
             || !metadata_pending(&previous)
             || metadata_pending(&current)

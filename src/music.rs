@@ -946,18 +946,24 @@ fn parse_suggestions(payload: &Value) -> Vec<String> {
 }
 
 fn parse_catalog_results(payload: &Value) -> Vec<HomeItem> {
-    fn visit(v: &Value, out: &mut Vec<HomeItem>) {
+    fn visit(v: &Value, out: &mut Vec<HomeItem>, card_artist: Option<&str>) {
         if out.len() >= MAX_CATALOG_ITEMS {
             return;
         }
         if let Some(item) = parse_home_item(v) {
-            out.push(item);
+            out.push(credit_card_artist(item, card_artist));
             return;
         }
         match v {
             Value::Object(map) => {
-                for child in map.values() {
-                    visit(child, out);
+                for (key, child) in map {
+                    // A card whose subtitle reads "Artist" heads that artist's shelf of songs.
+                    let shelf_artist = if key == "musicCardShelfRenderer" {
+                        artist_card_name(child)
+                    } else {
+                        None
+                    };
+                    visit(child, out, shelf_artist.as_deref().or(card_artist));
                     if out.len() >= MAX_CATALOG_ITEMS {
                         return;
                     }
@@ -965,7 +971,7 @@ fn parse_catalog_results(payload: &Value) -> Vec<HomeItem> {
             }
             Value::Array(items) => {
                 for child in items {
-                    visit(child, out);
+                    visit(child, out, card_artist);
                     if out.len() >= MAX_CATALOG_ITEMS {
                         return;
                     }
@@ -976,7 +982,7 @@ fn parse_catalog_results(payload: &Value) -> Vec<HomeItem> {
     }
     let mut out = Vec::new();
     if let Some(contents) = payload.get("contents") {
-        visit(contents, &mut out);
+        visit(contents, &mut out, None);
     }
     let mut seen = std::collections::HashSet::new();
     out.retain(|i| {
@@ -988,6 +994,32 @@ fn parse_catalog_results(payload: &Value) -> Vec<HomeItem> {
     });
     out
 }
+/// The artist a "Artist" card names. The songs in its shelf are that artist's,
+/// and their rows leave the artist out of the byline.
+fn artist_card_name(card: &Value) -> Option<String> {
+    let subtitle = text_value(card.get("subtitle")?)?;
+    if !subtitle.trim_start().starts_with("Artist") {
+        return None;
+    }
+    text_value(card.get("title")?).filter(|name| !name.trim().is_empty())
+}
+
+/// Fills in the artist of a song row that has none, from the card it sits in.
+fn credit_card_artist(mut item: HomeItem, card_artist: Option<&str>) -> HomeItem {
+    let Some(artist) = card_artist else {
+        return item;
+    };
+    if let Some(track) = item.track.as_mut()
+        && track.artist.trim().is_empty()
+    {
+        track.artist = artist.to_owned();
+        if item.subtitle.trim().is_empty() {
+            item.subtitle = artist.to_owned();
+        }
+    }
+    item
+}
+
 fn parse_radio(payload: &Value) -> Vec<Track> {
     fn visit(v: &Value, out: &mut Vec<Track>) {
         if out.len() >= MAX_RADIO_TRACKS {
@@ -1512,6 +1544,41 @@ mod tests {
         );
         assert_eq!(items[3].track.as_ref().unwrap().video_id, "song");
     }
+    #[test]
+    fn song_rows_in_an_artist_card_take_the_artist_from_the_card() {
+        let payload = json!({"contents":[{"musicCardShelfRenderer":{
+          "title":{"runs":[{"text":"Artist Name"}]},
+          "subtitle":{"runs":[{"text":"Artist"},{"text":" • "},{"text":"1M monthly audience"}]},
+          "contents":[
+            {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"card1"},"flexColumns":[
+              {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"First"}]}}},
+              {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song"},{"text":" • "},{"text":"3:45"}]}}}
+            ]}}
+          ]}},
+          {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"plain1"},"title":{"simpleText":"Other"},"subtitle":{"simpleText":"Someone Else"}}}
+        ]});
+        let items = parse_catalog_results(&payload);
+        let card_song = items
+            .iter()
+            .find(|item| {
+                item.track
+                    .as_ref()
+                    .is_some_and(|track| track.video_id == "card1")
+            })
+            .unwrap();
+        assert_eq!(card_song.track.as_ref().unwrap().artist, "Artist Name");
+        assert_eq!(card_song.subtitle, "Artist Name");
+        let plain = items
+            .iter()
+            .find(|item| {
+                item.track
+                    .as_ref()
+                    .is_some_and(|track| track.video_id == "plain1")
+            })
+            .unwrap();
+        assert_eq!(plain.track.as_ref().unwrap().artist, "Someone Else");
+    }
+
     #[test]
     fn search_rows_with_a_live_badge_are_live_items_and_others_stay_songs() {
         let payload = json!({"contents":[
