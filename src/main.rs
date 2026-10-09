@@ -1,4 +1,4 @@
-use tracing::{debug, error};
+use tracing::error;
 use tracing_subscriber::EnvFilter;
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -111,7 +111,7 @@ fn main() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    debug!(
+    tracing::debug!(
         arena_max = allocator_settings[0],
         trim_threshold = allocator_settings[1],
         mmap_threshold = allocator_settings[2],
