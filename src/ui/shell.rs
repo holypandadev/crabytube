@@ -12,6 +12,9 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Size};
 
+/// Height of the "← Back" bar with the gap below it.
+const BACK_BAR_H: f32 = 44.0;
+
 /// Shortens `value` to fit `width` pixels at `size`. JetBrains Mono advances
 /// 0.6 em per glyph, so a character budget is exact for Latin text.
 pub(super) fn fit(value: &str, width: f32, size: f32) -> String {
@@ -71,10 +74,47 @@ impl App {
             Page::Search => self.search_page(area),
             Page::Library => self.favorites_page(area),
             Page::Settings => self.settings_page(area),
-            Page::NowPlaying => self.now_playing_page(area),
-            Page::CollectionDetail(_) => self.collection_content(area),
+            Page::NowPlaying => self.with_back_bar(area, |area| self.now_playing_page(area)),
+            Page::CollectionDetail(_) => {
+                self.with_back_bar(area, |area| self.collection_content(area))
+            }
             Page::Home => self.home_page(area),
         }
+    }
+
+    /// Where the "← Back" bar leads: the page a collection was opened from, or
+    /// the page Now Playing was opened from. `None` when there is nowhere to go.
+    pub(super) fn back_target(&self) -> Option<Message> {
+        match &self.page {
+            Page::CollectionDetail(_) => (!self.history.is_empty()).then_some(Message::Back),
+            Page::NowPlaying => self
+                .now_playing_return
+                .as_ref()
+                .map(|_| Message::CloseNowPlaying),
+            _ => None,
+        }
+    }
+
+    /// Lays a page out below the "← Back" bar when it was reached from another
+    /// page, and gives the page the height that is left.
+    fn with_back_bar<'a>(
+        &'a self,
+        area: Size,
+        page: impl FnOnce(Size) -> Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let Some(target) = self.back_target() else {
+            return page(area);
+        };
+        let back = button(label(self.tr("← Back").into_owned(), 13.0))
+            .on_press(target)
+            .padding([6, 14])
+            .style(theme::outline_button);
+        let rest = Size::new(area.width, (area.height - BACK_BAR_H).max(0.0));
+        column![back, page(rest)]
+            .spacing(8)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     pub(super) fn shell_view(&self) -> Element<'_, Message> {

@@ -1308,7 +1308,7 @@ impl App {
                             self.row_menu = None;
                         } else if matches!(self.page, Page::NowPlaying) {
                             return self.update(Message::CloseNowPlaying);
-                        } else if matches!(self.page, Page::Settings) {
+                        } else if matches!(self.page, Page::Settings | Page::CollectionDetail(_)) {
                             return self.update(Message::Back);
                         }
                         return Task::none();
@@ -3276,6 +3276,58 @@ mod tests {
         let _ = app.update(Message::Back);
         assert_eq!(app.page, Page::Home);
         assert!(app.history.is_empty());
+    }
+
+    #[test]
+    fn collection_back_bar_and_escape_return_to_the_results_with_their_scroll() {
+        use iced::keyboard::{Event as KeyEvent, Key, Modifiers, key::Named};
+        let target = crate::music::BrowseTarget {
+            browse_id: "MPREb_fixture".into(),
+            params: None,
+            page_type: None,
+        };
+        let mut app = App {
+            page: Page::Search,
+            search_scroll: AbsoluteOffset { x: 0.0, y: 480.0 },
+            ..App::default()
+        };
+        let _ = app.update(Message::Navigate(Page::CollectionDetail(target.clone())));
+        assert!(matches!(app.back_target(), Some(Message::Back)));
+        let _ = app.update(Message::Back);
+        assert_eq!(app.page, Page::Search);
+        assert_eq!(app.search_scroll.y, 480.0, "the results keep their scroll");
+
+        let _ = app.update(Message::Navigate(Page::CollectionDetail(target)));
+        let escape = KeyEvent::KeyPressed {
+            key: Key::Named(Named::Escape),
+            modified_key: Key::Named(Named::Escape),
+            physical_key: iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::Escape),
+            location: iced::keyboard::Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        };
+        let _ = app.update(Message::KeyPressed(escape));
+        assert_eq!(app.page, Page::Search);
+        assert_eq!(app.search_scroll.y, 480.0);
+    }
+
+    #[test]
+    fn now_playing_back_bar_returns_to_the_page_it_was_opened_from() {
+        let mut app = App {
+            page: Page::Search,
+            ..App::default()
+        };
+        app.playback_status.track = Some(song("Track"));
+        let _ = app.update(Message::OpenNowPlaying);
+        assert_eq!(app.page, Page::NowPlaying);
+        assert!(matches!(app.back_target(), Some(Message::CloseNowPlaying)));
+        let _ = app.update(Message::CloseNowPlaying);
+        assert_eq!(app.page, Page::Search);
+        assert!(
+            App::default().back_target().is_none(),
+            "Home has nowhere to go back to"
+        );
     }
 
     #[test]

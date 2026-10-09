@@ -71,6 +71,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Workout" => "Entrenamiento",
         "Party" => "Fiesta",
         "Listen your way" => "Escucha a tu manera",
+        "← Back" => "← Atrás",
         "See all  ›" => "Ver todo  ›",
         "Updating results…" => "Actualizando resultados…",
         "Searching…" => "Buscando…",
