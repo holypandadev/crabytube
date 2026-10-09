@@ -71,7 +71,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Workout" => "Entrenamiento",
         "Party" => "Fiesta",
         "Listen your way" => "Escucha a tu manera",
-        "← Back" => "← Atrás",
+        "Back" => "Atrás",
         "Copy title" => "Copiar título",
         "Copy artist" => "Copiar artista",
         "Copied" => "Copiado",
@@ -369,6 +369,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Discord Presence" => "Presencia en Discord",
         "Export" => "Exportar",
         "Favorite Songs" => "Canciones favoritas",
+        "Favorites" => "Favoritas",
         "Follow Current Line" => "Seguir la línea actual",
         "GPL-3.0-or-later. Not affiliated with Google or YouTube." => {
             "GPL-3.0 o posterior. Sin relación con Google ni YouTube."

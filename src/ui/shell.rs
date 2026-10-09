@@ -12,9 +12,6 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Size};
 
-/// Height of the "← Back" bar with the gap below it.
-const BACK_BAR_H: f32 = 44.0;
-
 /// Shortens `value` to fit `width` pixels at `size`. JetBrains Mono advances
 /// 0.6 em per glyph, so a character budget is exact for Latin text.
 pub(super) fn fit(value: &str, width: f32, size: f32) -> String {
@@ -74,10 +71,8 @@ impl App {
             Page::Search => self.search_page(area),
             Page::Library => self.favorites_page(area),
             Page::Settings => self.settings_page(area),
-            Page::NowPlaying => self.with_back_bar(area, |area| self.now_playing_page(area)),
-            Page::CollectionDetail(_) => {
-                self.with_back_bar(area, |area| self.collection_content(area))
-            }
+            Page::NowPlaying => self.now_playing_page(area),
+            Page::CollectionDetail(_) => self.collection_content(area),
             Page::Home => self.home_page(area),
         }
     }
@@ -101,7 +96,7 @@ impl App {
             .into()
     }
 
-    /// Where the "← Back" bar leads: the page a collection was opened from, or
+    /// Where the Back button in the navigation row leads: the page a collection was opened from, or
     /// the page Now Playing was opened from. `None` when there is nowhere to go.
     pub(super) fn back_target(&self) -> Option<Message> {
         match &self.page {
@@ -112,28 +107,6 @@ impl App {
                 .map(|_| Message::CloseNowPlaying),
             _ => None,
         }
-    }
-
-    /// Lays a page out below the "← Back" bar when it was reached from another
-    /// page, and gives the page the height that is left.
-    fn with_back_bar<'a>(
-        &'a self,
-        area: Size,
-        page: impl FnOnce(Size) -> Element<'a, Message>,
-    ) -> Element<'a, Message> {
-        let Some(target) = self.back_target() else {
-            return page(area);
-        };
-        let back = button(label(self.tr("← Back").into_owned(), 13.0))
-            .on_press(target)
-            .padding([6, 14])
-            .style(theme::outline_button);
-        let rest = Size::new(area.width, (area.height - BACK_BAR_H).max(0.0));
-        column![back, page(rest)]
-            .spacing(8)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
     }
 
     pub(super) fn shell_view(&self) -> Element<'_, Message> {
@@ -238,16 +211,33 @@ impl App {
     }
 
     fn top_nav(&self) -> Element<'_, Message> {
-        const TITLES: [&str; 3] = ["Home", "Favorite Songs", "Settings"];
+        let narrow = self.window_width < super::home::NARROW_W;
+        // Phone-width windows use the short name for the favorites tab.
+        let favorites = if narrow {
+            "Favorites"
+        } else {
+            "Favorite Songs"
+        };
+        let titles = ["Home", favorites, "Settings"];
         let active = self.active_tab();
-        let widest = TITLES
+        let widest = titles
             .iter()
             .map(|title| self.tr(title).chars().count())
             .max()
             .unwrap_or(8) as f32;
+        let gutter = gutter_for(self.window_width);
+        let back = self.back_target();
+        // The Back button sits at the left of this row and an equal space at
+        // the right keeps the tabs centred.
+        let back_width = if narrow { 40.0 } else { BACK_W };
+        let reserved = if back.is_some() {
+            2.0 * (back_width + 8.0)
+        } else {
+            0.0
+        };
         // JetBrains Mono advances 0.6 em per glyph. On narrow windows the
         // three tabs share the available width and the labels shrink to fit.
-        let room = ((self.window_width - 2.0 * gutter_for(self.window_width) - 4.0) / 3.0).floor();
+        let room = ((self.window_width - 2.0 * gutter - reserved - 4.0) / 3.0).floor();
         let tab_width = (widest * 14.0 * 0.6 + 56.0).ceil().min(room);
         let label_size = ((tab_width - 12.0) / (widest * 0.6))
             .clamp(10.0, 14.0)
@@ -271,7 +261,7 @@ impl App {
             row![
                 tab("Home", Page::Home, Tab::Home),
                 vrule(40.0, INK),
-                tab("Favorite Songs", Page::Library, Tab::Favorites),
+                tab(favorites, Page::Library, Tab::Favorites),
                 vrule(40.0, INK),
                 tab("Settings", Page::Settings, Tab::Settings),
             ]
@@ -279,12 +269,46 @@ impl App {
         )
         .padding(theme::hairline())
         .style(theme::boxed);
-        container(tabs)
-            .width(Length::Fill)
-            .height(NAV_H)
-            .center_x(Length::Fill)
-            .center_y(NAV_H)
-            .into()
+        let back: Element<'_, Message> = match back {
+            Some(target) => {
+                let content: Element<'_, Message> = if narrow {
+                    icon("chev-left", 18.0, INK)
+                } else {
+                    row![
+                        icon("chev-left", 16.0, INK),
+                        label(self.tr("Back").into_owned(), 14.0)
+                    ]
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .into()
+                };
+                button(
+                    container(content)
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(target)
+                .width(back_width)
+                .height(42)
+                .padding(0)
+                .style(theme::outline_button)
+                .into()
+            }
+            None => Space::new().into(),
+        };
+        container(
+            row![
+                container(back).width(Length::Fill),
+                tabs,
+                Space::new().width(Length::Fill),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(NAV_H)
+        .padding([0.0, gutter])
+        .center_y(NAV_H)
+        .into()
     }
 
     pub(super) fn is_playing(&self) -> bool {
@@ -599,6 +623,9 @@ impl App {
 }
 
 const VOLUME_W: f32 = 104.0;
+
+/// Width of the Back button in the navigation row.
+const BACK_W: f32 = 112.0;
 
 /// Side margin of the page: narrower on phone-sized windows.
 pub(super) fn gutter_for(window_width: f32) -> f32 {

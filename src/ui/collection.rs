@@ -200,9 +200,20 @@ impl App {
             title: data.title.clone(),
             track_count: data.tracks.len(),
         };
-        let text_width = width - 160.0 - 32.0;
-        let mut metadata =
-            column![text(fit(&data.title, text_width, 34.0)).size(34).font(MONO),].spacing(6);
+        // Phone-width windows stack the cover above the title and buttons.
+        let narrow = width < super::home::NARROW_W;
+        let (cover_size, title_size) = if narrow { (140.0, 26.0) } else { (160.0, 34.0) };
+        let text_width = if narrow {
+            width
+        } else {
+            width - cover_size - 32.0
+        };
+        let mut metadata = column![
+            text(fit(&data.title, text_width, title_size))
+                .size(title_size)
+                .font(MONO),
+        ]
+        .spacing(6);
         if let Some(subtitle) = data.subtitle.as_deref().or(data.owner.as_deref()) {
             metadata = metadata.push(label(fit(subtitle, text_width, 16.0), 16.0));
         }
@@ -241,16 +252,21 @@ impl App {
             ]
             .spacing(16),
         );
-        let header = row![
-            self.cover(
-                data.thumbnail_url.as_deref(),
-                160.0,
-                crate::artwork::CARD_MAX
-            ),
-            metadata.width(Length::Fill),
-        ]
-        .spacing(32)
-        .align_y(Alignment::End);
+        let cover = self.cover(
+            data.thumbnail_url.as_deref(),
+            cover_size,
+            crate::artwork::CARD_MAX,
+        );
+        let header: Element<'_, Message> = if narrow {
+            column![cover, metadata.width(Length::Fill)]
+                .spacing(20)
+                .into()
+        } else {
+            row![cover, metadata.width(Length::Fill)]
+                .spacing(32)
+                .align_y(Alignment::End)
+                .into()
+        };
 
         let duration_w = 96.0;
         let index_w = 48.0;
