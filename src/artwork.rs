@@ -374,6 +374,66 @@ fn artwork_request_url_for(url: &str, width: u32) -> String {
         &height[height_len..]
     )
 }
+/// The URLs to try for a cover, most preferred first.
+///
+/// The player asks for the largest still YouTube has for a video and steps
+/// down when a video lacks it. Other covers use the sized request, with the
+/// original URL as the fallback when the sized one fails.
+fn cover_candidates(url: &str, lane: Lane, max_dim: u32) -> Vec<String> {
+    if lane == Lane::Player
+        && let Some(stills) = video_still_candidates(url)
+    {
+        return stills;
+    }
+    let sized = artwork_request_url_for(url, max_dim.clamp(128, 800));
+    if sized == url {
+        vec![sized]
+    } else {
+        vec![sized, url.to_owned()]
+    }
+}
+
+/// Video stills for `https://i.ytimg.com/vi/<id>/<name>.jpg`, largest first.
+fn video_still_candidates(url: &str) -> Option<Vec<String>> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if parsed.host_str()? != "i.ytimg.com" {
+        return None;
+    }
+    let segments: Vec<&str> = parsed.path_segments()?.collect();
+    let ["vi", video_id, _] = segments.as_slice() else {
+        return None;
+    };
+    if video_id.is_empty() {
+        return None;
+    }
+    Some(
+        ["maxresdefault", "sddefault", "hqdefault"]
+            .into_iter()
+            .map(|name| format!("https://i.ytimg.com/vi/{video_id}/{name}.jpg"))
+            .collect(),
+    )
+}
+
+/// The response of the first candidate that answers with success.
+async fn first_available(
+    http: &reqwest::Client,
+    token: &CancellationToken,
+    candidates: &[String],
+) -> Option<reqwest::Response> {
+    for candidate in candidates {
+        let response = tokio::select! {
+            _ = token.cancelled() => return None,
+            result = http.get(candidate).timeout(Duration::from_secs(12)).send() => result,
+        };
+        if let Ok(response) = response
+            && response.status().is_success()
+        {
+            return Some(response);
+        }
+    }
+    None
+}
+
 pub async fn fetch(url: String, token: CancellationToken) -> Option<image::Handle> {
     fetch_sized(url, token, LARGE_MAX).await
 }
@@ -451,23 +511,8 @@ async fn fetch_in_lane(
         .and_then(|url| url.host_str().map(str::to_owned))
         .unwrap_or_else(|| "invalid-url".into());
     let http = client()?;
-    let request_url = artwork_request_url_for(&url, max_dim.clamp(128, 800));
-    let first_response = tokio::select! {
-        _ = token.cancelled() => return None,
-        result = http.get(&request_url).timeout(Duration::from_secs(12)).send() => result.ok()
-    };
-    let response = if request_url != url
-        && !first_response
-            .as_ref()
-            .is_some_and(|response| response.status().is_success())
-    {
-        tokio::select! {
-            _ = token.cancelled() => return None,
-            result = http.get(&url).timeout(Duration::from_secs(12)).send() => result.ok()?
-        }
-    } else {
-        first_response?
-    };
+    let candidates = cover_candidates(&url, lane, max_dim);
+    let response = first_available(http, &token, &candidates).await?;
     if !response.status().is_success()
         || response
             .content_length()
@@ -972,17 +1017,25 @@ mod tests {
                 std::thread::spawn(move || {
                     let mut stream = stream;
                     let mut request = [0u8; 4096];
-                    let _ = stream.read(&mut request);
+                    let read = stream.read(&mut request).unwrap_or(0);
+                    let missing = String::from_utf8_lossy(&request[..read]).contains("missing");
                     let now = open.fetch_add(1, Ordering::SeqCst) + 1;
                     peak.fetch_max(now, Ordering::SeqCst);
                     std::thread::sleep(delay);
                     open.fetch_sub(1, Ordering::SeqCst);
-                    let head = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        png.len()
-                    );
+                    let head = if missing {
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_owned()
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            png.len()
+                        )
+                    };
                     let _ = stream.write_all(head.as_bytes());
-                    let _ = stream.write_all(&png);
+                    if !missing {
+                        let _ = stream.write_all(&png);
+                    }
                 });
             }
         });
@@ -1020,6 +1073,57 @@ mod tests {
             peak >= 6,
             "only {peak} covers were downloading at once; a visible page needs more lanes"
         );
+    }
+
+    #[test]
+    fn player_cover_asks_for_the_largest_video_still_first() {
+        let url = "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg";
+        assert_eq!(
+            cover_candidates(url, Lane::Player, LARGE_MAX),
+            [
+                "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+                "https://i.ytimg.com/vi/dQw4w9WgXcQ/sddefault.jpg",
+                "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            ]
+        );
+        // Lists keep the small still; only the player pays for the large one.
+        assert_eq!(cover_candidates(url, Lane::List, THUMB_MAX), [url]);
+        // Other hosts and paths are requested as they are.
+        assert_eq!(
+            cover_candidates(
+                "https://i.ytimg.com/vi_webp/abc/x.webp",
+                Lane::Player,
+                LARGE_MAX
+            ),
+            ["https://i.ytimg.com/vi_webp/abc/x.webp"]
+        );
+        assert_eq!(
+            cover_candidates(
+                "https://example.com/vi/abc/hqdefault.jpg",
+                Lane::Player,
+                LARGE_MAX
+            ),
+            ["https://example.com/vi/abc/hqdefault.jpg"]
+        );
+    }
+
+    #[test]
+    fn a_missing_largest_still_falls_back_to_the_next_size() {
+        let (address, _) = slow_cover_server(Duration::ZERO);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let response = runtime.block_on(async {
+            let http = crate::network::shared().unwrap();
+            let candidates = [
+                format!("http://{address}/missing-maxres.jpg"),
+                format!("http://{address}/sd.jpg"),
+            ];
+            first_available(http, &CancellationToken::new(), &candidates).await
+        });
+        let response = response.expect("the smaller still answers");
+        assert!(response.url().path().ends_with("/sd.jpg"));
     }
 
     #[test]
