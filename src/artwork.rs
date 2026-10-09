@@ -261,14 +261,26 @@ fn cache_path(url: &str) -> std::path::PathBuf {
 /// fallback and are downsampled to the requested variant.
 fn variant_cache_path(url: &str, max_dim: u32) -> std::path::PathBuf {
     let dim = max_dim.clamp(64, LARGE_MAX);
+    artwork_cache_root().join(format!(
+        "{:x}.png",
+        Sha256::digest(format!("v5:{url}:{dim}").as_bytes())
+    ))
+}
+
+/// Directory of the persistent cover cache. Tests redirect it to a scratch
+/// directory so they never write into the user's cache.
+fn artwork_cache_root() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(root) = TEST_CACHE_ROOT.get() {
+        return root.clone();
+    }
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/artwork")
-        .join(format!(
-            "{:x}.png",
-            Sha256::digest(format!("v5:{url}:{dim}").as_bytes())
-        ))
 }
+
+#[cfg(test)]
+static TEST_CACHE_ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
 
 /// The large cover already saved on disk for this URL. Nothing is downloaded to find it.
 pub fn saved_cover_path(url: &str) -> Option<std::path::PathBuf> {
@@ -277,13 +289,10 @@ pub fn saved_cover_path(url: &str) -> Option<std::path::PathBuf> {
 }
 
 fn legacy_cache_path(url: &str) -> std::path::PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("crabytube/artwork")
-        .join(format!(
-            "{:x}.png",
-            Sha256::digest(format!("v4:{url}").as_bytes())
-        ))
+    artwork_cache_root().join(format!(
+        "{:x}.png",
+        Sha256::digest(format!("v4:{url}").as_bytes())
+    ))
 }
 
 /// Atomic PNG persist: write to a unique temp file in the same directory,
@@ -369,17 +378,50 @@ pub async fn fetch(url: String, token: CancellationToken) -> Option<image::Handl
     fetch_sized(url, token, LARGE_MAX).await
 }
 
+/// Parallel downloads for list covers. A screenful shares the HTTP/2
+/// connection pool, so it arrives in a few rounds instead of one by one.
+const LIST_DOWNLOAD_SLOTS: usize = 8;
+/// Downloads kept free for the cover of the track that plays, so a long list
+/// never delays it.
+const PLAYER_DOWNLOAD_SLOTS: usize = 2;
+static LIST_SLOTS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+static PLAYER_SLOTS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+
+/// Which download slots a cover fetch uses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lane {
+    List,
+    Player,
+}
+
 pub async fn fetch_sized(
     url: String,
     token: CancellationToken,
     max_dim: u32,
 ) -> Option<image::Handle> {
+    fetch_in_lane(url, token, max_dim, Lane::List).await
+}
+
+/// The cover of the track that plays, fetched in its own lane.
+pub async fn fetch_player(
+    url: String,
+    token: CancellationToken,
+    max_dim: u32,
+) -> Option<image::Handle> {
+    fetch_in_lane(url, token, max_dim, Lane::Player).await
+}
+
+async fn fetch_in_lane(
+    url: String,
+    token: CancellationToken,
+    max_dim: u32,
+    lane: Lane,
+) -> Option<image::Handle> {
     let max_dim = max_dim.clamp(64, LARGE_MAX);
-    static SLOTS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
-    let _permit = tokio::select! {_ = token.cancelled()=>return None,p=SLOTS.get_or_init(||tokio::sync::Semaphore::new(3)).acquire()=>p.ok()?};
     // Variant-specific file first, then legacy v4 master (downsampled).
     // Either hit avoids the network, so a second visit with an empty RAM
-    // cache but warm disk reuses thumbs without re-downloading.
+    // cache but warm disk reuses thumbs without re-downloading. Disk hits run
+    // before the download slots are taken, so they never queue behind them.
     let variant_path = variant_cache_path(&url, max_dim);
     let legacy_path = legacy_cache_path(&url);
     for candidate in [variant_path.clone(), legacy_path.clone()] {
@@ -397,6 +439,13 @@ pub async fn fetch_sized(
         // A corrupt entry is removed by cached_or_remove_sized; continue to
         // the next candidate / network instead of leaving the card blank.
     }
+    let slots = match lane {
+        Lane::List => LIST_SLOTS.get_or_init(|| tokio::sync::Semaphore::new(LIST_DOWNLOAD_SLOTS)),
+        Lane::Player => {
+            PLAYER_SLOTS.get_or_init(|| tokio::sync::Semaphore::new(PLAYER_DOWNLOAD_SLOTS))
+        }
+    };
+    let _permit = tokio::select! {_ = token.cancelled()=>return None,p=slots.acquire()=>p.ok()?};
     let host = reqwest::Url::parse(&url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
@@ -893,6 +942,84 @@ mod tests {
         let legacy = legacy_cache_path("https://example.com/cover");
         assert_ne!(legacy, small);
         assert_ne!(legacy, large);
+    }
+
+    use std::sync::Arc;
+
+    /// Serves one small PNG per connection after a short delay, and records the
+    /// highest number of requests it has open at once.
+    fn slow_cover_server(delay: Duration) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let mut png = std::io::Cursor::new(Vec::new());
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            8,
+            8,
+            ::image::Rgba([1, 2, 3, 255]),
+        ))
+        .write_to(&mut png, ::image::ImageFormat::Png)
+        .unwrap();
+        let png = Arc::new(png.into_inner());
+        let open = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let peak_seen = Arc::clone(&peak);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (open, peak, png) =
+                    (Arc::clone(&open), Arc::clone(&peak_seen), Arc::clone(&png));
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    let mut request = [0u8; 4096];
+                    let _ = stream.read(&mut request);
+                    let now = open.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(delay);
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        png.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(&png);
+                });
+            }
+        });
+        (address, peak)
+    }
+
+    #[test]
+    fn list_covers_download_in_parallel_up_to_the_slot_limit() {
+        TEST_CACHE_ROOT.get_or_init(|| {
+            std::env::temp_dir().join(format!(
+                "crabytube-artwork-test-root-{}",
+                std::process::id()
+            ))
+        });
+        let (address, peak) = slow_cover_server(Duration::from_millis(150));
+        let nonce = std::process::id();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .unwrap();
+        let covers = runtime.block_on(async {
+            futures_util::future::join_all((0..24).map(|index| {
+                let url = format!("http://{address}/list-{nonce}-{index}.png");
+                fetch_sized(url, CancellationToken::new(), THUMB_MAX)
+            }))
+            .await
+        });
+        assert!(
+            covers.iter().all(Option::is_some),
+            "every list cover arrives"
+        );
+        let peak = peak.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            peak >= 6,
+            "only {peak} covers were downloading at once; a visible page needs more lanes"
+        );
     }
 
     #[test]
