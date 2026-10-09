@@ -7,7 +7,7 @@ use iced::widget::{
     row, scrollable, text,
 };
 use iced::{Alignment, Element, Length, Size, Task};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::music::{BrowsePage, BrowseTarget, Collection};
@@ -151,7 +151,7 @@ impl App {
             let _ = self.collection.complete_cached(generation, cached);
             return Task::batch([
                 operation::scroll_to("collection-content", AbsoluteOffset::<f32>::default()),
-                self.preload_collection_artwork(0),
+                self.preload_current_page_artwork(),
             ]);
         }
         let service = Arc::clone(&self.music_service);
@@ -174,26 +174,6 @@ impl App {
     /// The header sits outside the scrollable, so rows start at the top.
     pub(super) fn collection_rows_offset(&self) -> f32 {
         0.0
-    }
-
-    pub(super) fn preload_collection_artwork(&mut self, row: usize) -> Task<Message> {
-        let Some(data) = &self.collection.data else {
-            return Task::none();
-        };
-        let start = (row / 6 * 6).saturating_sub(12);
-        // The hero is drawn at CARD_MAX and the rows at THUMB_MAX; preload each at its own size.
-        let hero: Vec<String> = data.thumbnail_url.iter().cloned().collect();
-        let rows: HashSet<_> = data
-            .tracks
-            .iter()
-            .skip(start)
-            .take(36)
-            .filter_map(|entry| entry.track.thumbnail_url.clone())
-            .collect();
-        Task::batch([
-            self.preload_artwork_urls_sized(hero, crate::artwork::CARD_MAX),
-            self.preload_artwork_urls_sized(rows.into_iter().collect(), crate::artwork::THUMB_MAX),
-        ])
     }
 
     pub(super) fn collection_content(&self, area: Size) -> Element<'_, Message> {

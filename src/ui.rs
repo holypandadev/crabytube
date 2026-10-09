@@ -158,13 +158,16 @@ struct App {
     #[cfg(feature = "diagnostics")]
     diagnostic_scroll_step: u32,
     artwork_requested: HashSet<(String, u32)>,
-    artwork_retried: HashSet<String>,
+    /// Covers whose download failed on this visit to a page; see `artwork_glue`.
+    artwork_failed: HashMap<(String, u32), artwork_glue::FailedCover>,
+    /// Whether a timer is already set to reconcile failed covers.
+    artwork_retry_pending: bool,
+    /// Whether the player's cover has had its one retry.
+    artwork_selected_retried: bool,
     artwork_cancel: Option<CancellationToken>,
     // Per-URL in-flight tokens so scroll reconciliation can keep useful
     // work and cancel only URLs that left the window of interest.
     artwork_batch_tokens: HashMap<(String, u32), (u64, CancellationToken)>,
-    // Last reconciled wanted set (viewport + overscan) for coalescing.
-    artwork_last_wanted: HashSet<(String, u32)>,
     artwork_request_id: u64,
     artwork_selected_request_id: u64,
     artwork_generation: u64,
@@ -939,7 +942,7 @@ impl App {
             }
             Message::ClearArtworkCache => {
                 self.artwork_cache.clear();
-                self.artwork_retried.clear();
+                self.artwork_failed.clear();
                 self.cancel_artwork_batch();
                 self.artwork_generation = self.artwork_generation.wrapping_add(1);
                 self.artwork = None;
@@ -1089,7 +1092,7 @@ impl App {
                     if let Some(data) = &self.collection.data {
                         tracing::info!(title = %data.title, tracks = data.tracks.len(), has_more = data.continuation.is_some(), "collection loaded");
                     }
-                    return self.preload_collection_artwork(0);
+                    return self.preload_current_page_artwork();
                 }
             }
             Message::CollectionMoreLoaded { generation, result } => {
@@ -1132,7 +1135,6 @@ impl App {
                         .map(|entry| entry.track.clone())
                         .collect::<Vec<_>>()
                         .into();
-                    let last = data.tracks.len().saturating_sub(25);
                     if let (Some(target), Some(shared)) =
                         (self.collection.target.clone(), self.collection.data.clone())
                     {
@@ -1141,15 +1143,14 @@ impl App {
                         self.collection_cache.push_front((target, shared));
                         self.collection_cache.truncate(MAX_CACHED_COLLECTIONS);
                     }
-                    return self.preload_collection_artwork(last);
+                    return self.preload_current_page_artwork();
                 }
             }
             Message::CollectionScrolled(y) => {
                 self.collection_scroll = y;
                 let rows_top = self.collection_rows_offset();
                 let pitch = layout::COLLECTION_ROW_PITCH;
-                let row = ((y - rows_top).max(0.0) / pitch) as usize;
-                let artwork = self.preload_collection_artwork(row);
+                let artwork = self.scroll_preload_task();
                 let more = if self.collection.data.as_ref().is_some_and(|data| {
                     data.continuation.is_some()
                         && y > (rows_top + data.tracks.len() as f32 * pitch
@@ -1162,7 +1163,10 @@ impl App {
                 };
                 return Task::batch([artwork, more]);
             }
-            Message::ScrollPreloadDue | Message::ArtworkLoaded { .. } | Message::FadeFrame(..) => {
+            Message::ScrollPreloadDue
+            | Message::ArtworkRetryDue
+            | Message::ArtworkLoaded { .. }
+            | Message::FadeFrame(..) => {
                 return self.update_artwork(message);
             }
             Message::HomeScrolled(offset) => {
@@ -1711,10 +1715,11 @@ impl App {
             #[cfg(feature = "diagnostics")]
             diagnostic_scroll_step: 0,
             artwork_requested: HashSet::new(),
-            artwork_retried: HashSet::new(),
+            artwork_failed: HashMap::new(),
+            artwork_retry_pending: false,
+            artwork_selected_retried: false,
             artwork_cancel: None,
             artwork_batch_tokens: HashMap::new(),
-            artwork_last_wanted: HashSet::new(),
             artwork_request_id: 0,
             artwork_selected_request_id: 0,
             artwork_generation: 0,
@@ -1913,14 +1918,12 @@ impl App {
         if helper != self.artwork_low_memory {
             self.artwork_low_memory = helper;
             if helper {
-                let (mut keep, _) = self.current_page_artwork_urls();
-                keep.extend(
-                    self.playback_status
-                        .track
-                        .as_ref()
-                        .and_then(|track| track.thumbnail_url.clone()),
-                );
-                let keep: HashSet<String> = keep.into_iter().collect();
+                let mut keep: HashSet<String> = self
+                    .current_page_artwork()
+                    .into_iter()
+                    .map(|(url, _)| url)
+                    .collect();
+                keep.extend(self.playing_cover_url().map(str::to_owned));
                 self.artwork_cache.retain_urls(|url| keep.contains(url));
             }
         }
@@ -2546,6 +2549,15 @@ async fn fetch_artwork(
     crate::artwork::fetch_sized(url, cancellation, max_dim).await
 }
 
+/// The cover of the track that plays, which has its own download lane.
+async fn fetch_player_artwork(
+    url: String,
+    cancellation: CancellationToken,
+    max_dim: u32,
+) -> Option<image::Handle> {
+    crate::artwork::fetch_player(url, cancellation, max_dim).await
+}
+
 /// The saved window size, so the window opens at it instead of being resized
 /// after mapping (Wayland compositors may ignore a later resize request).
 fn initial_window_size() -> iced::Size {
@@ -3072,13 +3084,10 @@ mod tests {
             .insert(keep_key.clone(), (keep_id, keep_token.clone()));
         app.artwork_batch_tokens
             .insert(stale_key.clone(), (stale_id, stale_token.clone()));
-        app.artwork_last_wanted
-            .extend([keep_key.clone(), stale_key.clone()]);
-
-        let task = app.preload_artwork_urls_sized(
-            vec!["keep".into(), "new".into()],
-            crate::artwork::THUMB_MAX,
-        );
+        let task = app.reconcile_artwork(vec![
+            ("keep".into(), crate::artwork::THUMB_MAX),
+            ("new".into(), crate::artwork::THUMB_MAX),
+        ]);
 
         assert!(!keep_token.is_cancelled());
         assert!(stale_token.is_cancelled());
@@ -3125,7 +3134,7 @@ mod tests {
         for index in 0..crate::artwork::MAX_ARTWORK_ENTRIES {
             app.cache_artwork_handle(format!("art-{index}"), crate::artwork::CARD_MAX, cover());
         }
-        drop(app.preload_artwork_urls_sized(vec!["art-0".into()], crate::artwork::CARD_MAX));
+        drop(app.reconcile_artwork(vec![("art-0".into(), crate::artwork::CARD_MAX)]));
         app.cache_artwork_handle(
             format!("art-{}", crate::artwork::MAX_ARTWORK_ENTRIES),
             crate::artwork::CARD_MAX,
@@ -3179,7 +3188,7 @@ mod tests {
         assert!(!app.artwork_cache.contains_key("large-0"));
         assert!(app.artwork_cache.contains_key("large-10"));
         // Re-touch keeps the visible cover.
-        drop(app.preload_artwork_urls_sized(vec!["large-10".into()], crate::artwork::LARGE_MAX));
+        drop(app.reconcile_artwork(vec![("large-10".into(), crate::artwork::LARGE_MAX)]));
         app.cache_artwork_handle(
             "large-11".into(),
             crate::artwork::LARGE_MAX,

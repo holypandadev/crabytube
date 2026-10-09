@@ -158,6 +158,8 @@ pub(super) enum Message {
     PrewarmPlayback,
     /// Fires once the scroll throttle window ends; see `scroll_preload_task`.
     ScrollPreloadDue,
+    /// Fires when a failed cover may be requested again; see `schedule_cover_retry`.
+    ArtworkRetryDue,
     /// Fires once a resize settles; see the `Resized` handler.
     ResizeWorkDue(u64),
     /// Diagnostics-only: one step of the `--scroll-test` sweep.

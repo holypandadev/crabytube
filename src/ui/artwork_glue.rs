@@ -1,6 +1,39 @@
 //! Artwork requests, the artwork cache and the cover fades.
 
 use super::*;
+use std::ops::Range;
+
+/// A cover a page draws: its URL and the variant it is drawn at.
+type CoverRequest = (String, u32);
+
+/// Rows requested above and below the rows on screen, so a small scroll
+/// finds its covers already on the way.
+const COVER_MARGIN_ROWS: usize = 2;
+/// Pause before a cover that failed to download is asked for again.
+const COVER_RETRY_COOLDOWN: Duration = Duration::from_secs(4);
+/// Attempts per cover on one visit to a page. A cover that keeps failing
+/// waits for the next visit instead of being requested forever.
+const MAX_COVER_ATTEMPTS: u8 = 3;
+
+/// A cover whose download failed.
+#[derive(Clone, Copy)]
+pub(super) struct FailedCover {
+    /// Earliest moment the cover may be requested again.
+    pub(super) retry_at: std::time::Instant,
+    pub(super) attempts: u8,
+}
+
+fn cover_request(url: Option<&str>, variant: u32) -> Option<CoverRequest> {
+    url.map(|url| (url.to_owned(), variant))
+}
+
+/// Indices of `window`, with the rows in `visible` first so the ones on screen
+/// are downloaded before the margin around them.
+fn rows_by_urgency(window: Range<usize>, visible: Range<usize>) -> impl Iterator<Item = usize> {
+    visible
+        .clone()
+        .chain(window.filter(move |index| !visible.contains(index)))
+}
 
 impl App {
     pub(super) fn load_artwork(&mut self, url: Option<String>) -> Task<Message> {
@@ -9,23 +42,23 @@ impl App {
         }
         let request_id = self.next_artwork_request_id();
         self.artwork_selected_request_id = request_id;
+        self.artwork_selected_retried = false;
         self.artwork = None;
         let Some(url) = url else {
             return Task::none();
         };
-        if let Some(cached) = self
-            .artwork_cache
-            .get_exact(&url, crate::artwork::LARGE_MAX)
-        {
+        let max_dim = crate::artwork::LARGE_MAX;
+        if let Some(cached) = self.artwork_cache.get_exact(&url, max_dim) {
             self.artwork = Some(cached.clone());
             return Task::none();
         }
+        // Until the large cover arrives, the best smaller one already in memory stands in.
+        self.artwork = self.artwork_cache.get_for(&url, max_dim).cloned();
         let cancellation = CancellationToken::new();
         self.artwork_cancel = Some(cancellation.clone());
         let request_url = url.clone();
-        let max_dim = crate::artwork::LARGE_MAX;
         Task::perform(
-            async move { fetch_artwork(request_url, cancellation, max_dim).await },
+            async move { fetch_player_artwork(request_url, cancellation, max_dim).await },
             move |handle| Message::ArtworkLoaded {
                 url,
                 max_dim,
@@ -38,32 +71,25 @@ impl App {
     }
 
     pub(super) fn preload_current_page_artwork(&mut self) -> Task<Message> {
-        let (urls, max_dim) = self.current_page_artwork_urls();
-        self.preload_artwork_urls_sized(urls, max_dim)
+        let requests = self.current_page_artwork();
+        self.reconcile_artwork(requests)
     }
 
-    /// Artwork the current page shows, and the variant it draws it at.
-    pub(super) fn current_page_artwork_urls(&self) -> (Vec<String>, u32) {
+    /// The covers the current page draws, most urgent first, each with the
+    /// variant it is drawn at. Lists use the windows their views render, so the
+    /// covers requested are the ones on screen.
+    pub(super) fn current_page_artwork(&self) -> Vec<CoverRequest> {
         match &self.page {
             Page::Home => {
                 let layout = home::HomeLayout::new(self.area, self.home_picks.items.len());
-                (
-                    self.home_picks
-                        .items
-                        .iter()
-                        .filter_map(|item| item.thumbnail_url.clone())
-                        .collect(),
-                    crate::artwork::variant_for_pixels(layout.card * self.pixel_scale()),
-                )
-            }
-            Page::Search => (
-                self.catalog_results
+                let variant = crate::artwork::variant_for_pixels(layout.card * self.pixel_scale());
+                self.home_picks
+                    .items
                     .iter()
-                    .take(40)
-                    .filter_map(|item| item.thumbnail_url.clone())
-                    .collect(),
-                crate::artwork::CARD_MID_MAX,
-            ),
+                    .filter_map(|item| cover_request(item.thumbnail_url.as_deref(), variant))
+                    .collect()
+            }
+            Page::Search => self.search_artwork(),
             Page::Library => {
                 let pitch = favorites::favorites_row_pitch(self.preferences.ui_density);
                 let range = layout::virtual_range(
@@ -73,48 +99,96 @@ impl App {
                     pitch,
                     8,
                 );
-                (
-                    self.favorites
-                        .iter()
-                        .skip(range.start)
-                        .take(range.len())
-                        .filter_map(|track| track.thumbnail_url.clone())
-                        .collect(),
-                    crate::artwork::THUMB_MAX,
-                )
+                self.favorites
+                    .iter()
+                    .skip(range.start)
+                    .take(range.len())
+                    .filter_map(|track| {
+                        cover_request(track.thumbnail_url.as_deref(), crate::artwork::THUMB_MAX)
+                    })
+                    .collect()
             }
             Page::NowPlaying => {
-                let start = ((self.queue_scroll.y.max(0.0) / 81.0) as usize).saturating_sub(4);
-                (
-                    self.queue
-                        .iter()
-                        .skip(start)
-                        .take(16)
-                        .filter_map(|track| track.thumbnail_url.clone())
-                        .collect(),
-                    crate::artwork::THUMB_MAX,
-                )
+                let pitch = now_playing::QUEUE_ROW_PITCH;
+                let height = self.page_height();
+                let visible =
+                    layout::virtual_range(self.queue.len(), self.queue_scroll.y, height, pitch, 0);
+                let window = layout::virtual_range(
+                    self.queue.len(),
+                    self.queue_scroll.y,
+                    height,
+                    pitch,
+                    COVER_MARGIN_ROWS,
+                );
+                rows_by_urgency(window, visible)
+                    .filter_map(|index| {
+                        cover_request(
+                            self.queue[index].thumbnail_url.as_deref(),
+                            crate::artwork::THUMB_MAX,
+                        )
+                    })
+                    .collect()
             }
             Page::CollectionDetail(_) => {
-                let start = (self.collection_scroll / layout::COLLECTION_ROW_PITCH) as usize;
-                let rows = self
-                    .collection
-                    .data
-                    .as_ref()
-                    .map(|data| {
-                        data.tracks
-                            .iter()
-                            .skip(start.saturating_sub(4))
-                            .take(24)
-                            .filter_map(|entry| entry.track.thumbnail_url.clone())
-                            .chain(data.thumbnail_url.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                (rows, crate::artwork::THUMB_MAX)
+                let Some(data) = self.collection.data.as_ref() else {
+                    return Vec::new();
+                };
+                let pitch = layout::COLLECTION_ROW_PITCH;
+                let visible = layout::virtual_range(
+                    data.tracks.len(),
+                    self.collection_scroll,
+                    self.area.height,
+                    pitch,
+                    0,
+                );
+                let window = layout::virtual_range(
+                    data.tracks.len(),
+                    self.collection_scroll,
+                    self.area.height,
+                    pitch,
+                    COVER_MARGIN_ROWS,
+                );
+                // The header is drawn at the card size and comes first.
+                data.thumbnail_url
+                    .iter()
+                    .map(|url| (url.clone(), crate::artwork::CARD_MAX))
+                    .chain(rows_by_urgency(window, visible).filter_map(|index| {
+                        cover_request(
+                            data.tracks[index].track.thumbnail_url.as_deref(),
+                            crate::artwork::THUMB_MAX,
+                        )
+                    }))
+                    .collect()
             }
-            _ => (Vec::new(), crate::artwork::CARD_MAX),
+            _ => Vec::new(),
         }
+    }
+
+    /// The covers of the results page, in the order the page draws them.
+    fn search_artwork(&self) -> Vec<CoverRequest> {
+        let top = self.catalog_results.first().and_then(|item| {
+            cover_request(item.thumbnail_url.as_deref(), crate::artwork::CARD_MID_MAX)
+        });
+        let songs = self.search_songs().into_iter();
+        let collections = [
+            HomeItemKind::Album,
+            HomeItemKind::Playlist,
+            HomeItemKind::Artist,
+        ]
+        .into_iter()
+        .flat_map(|kind| self.search_collections(kind));
+        top.into_iter()
+            .chain(songs.chain(collections).filter_map(|item| {
+                cover_request(item.thumbnail_url.as_deref(), crate::artwork::THUMB_MAX)
+            }))
+            .collect()
+    }
+
+    pub(super) fn playing_cover_url(&self) -> Option<&str> {
+        self.playback_status
+            .track
+            .as_ref()
+            .and_then(|track| track.thumbnail_url.as_deref())
     }
 
     /// Chooses the largest variant that still lets the whole visible set
@@ -148,12 +222,13 @@ impl App {
         candidate
     }
 
+    /// Leaving a page cancels its downloads and gives failed covers a fresh start on the next one.
     pub(super) fn cancel_artwork_batch(&mut self) {
         for (_, (_, token)) in self.artwork_batch_tokens.drain() {
             token.cancel();
         }
         self.artwork_requested.clear();
-        self.artwork_last_wanted.clear();
+        self.artwork_failed.clear();
     }
 
     pub(super) fn next_artwork_request_id(&mut self) -> u64 {
@@ -161,40 +236,35 @@ impl App {
         self.artwork_request_id
     }
 
-    pub(super) fn preload_artwork_urls_sized(
-        &mut self,
-        urls: Vec<String>,
-        max_dim: u32,
-    ) -> Task<Message> {
-        // Reconcile by (URL, variant). Keep in-flight work that is
-        // still wanted, cancel only what left the window, and never bump the
-        // generation on scroll (generation changes only on navigation/clear).
-        // The byte budget bounds resident pixels via LRU; the queue itself is
-        // capped by entry count (visible-first order) so visible covers are
-        // never permanently dropped by `take(capacity)`.
+    /// Brings the covers in flight in line with `requests`. Work for covers
+    /// that left the window is cancelled, and missing covers are fetched in
+    /// the order given. The window is reconciled on every call, so a cover
+    /// that failed or was evicted is asked for again.
+    pub(super) fn reconcile_artwork(&mut self, requests: Vec<CoverRequest>) -> Task<Message> {
         let mut seen = HashSet::new();
-        let ordered: Vec<String> = urls
+        let requests: Vec<CoverRequest> = requests
             .into_iter()
-            .filter(|url| seen.insert(url.clone()))
+            .filter(|request| seen.insert(request.clone()))
             .take(crate::artwork::MAX_ARTWORK_ENTRIES)
             .collect();
-        // Adapt variant so the whole window fits the byte budget when possible.
-        let effective_dim = Self::effective_variant_for_count(max_dim, ordered.len().max(1));
-        let wanted: HashSet<(String, u32)> = ordered
-            .iter()
-            .cloned()
-            .map(|url| (url, effective_dim))
-            .collect();
-        // Coalesce: identical window, nothing new to do.
-        if wanted == self.artwork_last_wanted {
-            // Still touch to keep MRU order.
-            for (url, dim) in &wanted {
-                self.artwork_cache.touch(url, *dim);
-            }
-            return Task::none();
+        // Each variant group adapts to the decoded-byte budget as a whole.
+        let mut group_sizes: HashMap<u32, usize> = HashMap::new();
+        for (_, variant) in &requests {
+            *group_sizes.entry(*variant).or_default() += 1;
         }
-        // Cancel only work that left the window of interest.
-        let stale: Vec<(String, u32)> = self
+        let mut seen = HashSet::new();
+        let wanted_in_order: Vec<CoverRequest> = requests
+            .iter()
+            .map(|(url, variant)| {
+                let effective = Self::effective_variant_for_count(*variant, group_sizes[variant]);
+                (url.clone(), effective)
+            })
+            .filter(|request| seen.insert(request.clone()))
+            .collect();
+        let wanted: HashSet<CoverRequest> = wanted_in_order.iter().cloned().collect();
+
+        // Cancel only work that left the window.
+        let stale: Vec<CoverRequest> = self
             .artwork_requested
             .iter()
             .filter(|key| !wanted.contains(*key))
@@ -206,30 +276,27 @@ impl App {
             }
             self.artwork_requested.remove(&key);
         }
-        self.artwork_last_wanted = wanted.clone();
-        // Keep Now Playing resident when possible.
-        if let Some(url) = self
-            .playback_status
-            .track
-            .as_ref()
-            .and_then(|t| t.thumbnail_url.clone())
-        {
+        if let Some(url) = self.playing_cover_url().map(str::to_owned) {
             self.artwork_cache.touch(&url, crate::artwork::LARGE_MAX);
         }
-        for (url, dim) in &wanted {
-            self.artwork_cache.touch(url, *dim);
+        for (url, variant) in &wanted_in_order {
+            self.artwork_cache.touch(url, *variant);
         }
-        let generation = self.artwork_generation;
-        let to_fetch: Vec<String> = ordered
+
+        let now = std::time::Instant::now();
+        let to_fetch: Vec<CoverRequest> = wanted_in_order
             .into_iter()
-            .filter(|url| {
-                !self.artwork_cache.contains_variant(url, effective_dim)
-                    && !self
-                        .artwork_requested
-                        .contains(&(url.clone(), effective_dim))
+            .filter(|(url, variant)| {
+                let key = (url.clone(), *variant);
+                !self.artwork_cache.contains_variant(url, *variant)
+                    && !self.artwork_requested.contains(&key)
+                    && self.artwork_failed.get(&key).is_none_or(|failed| {
+                        failed.attempts < MAX_COVER_ATTEMPTS && now >= failed.retry_at
+                    })
             })
             .collect();
-        self.fetch_artwork_batch(to_fetch, effective_dim, generation)
+        let generation = self.artwork_generation;
+        self.fetch_artwork_batch(to_fetch, generation)
     }
 
     pub(super) fn cache_artwork_handle(
@@ -241,37 +308,29 @@ impl App {
         self.artwork_cache.insert(url, max_dim, handle);
     }
 
+    /// Starts one download per cover that is not already in flight. Each one
+    /// has its own token, so it can be cancelled when it leaves the window.
     pub(super) fn fetch_artwork_batch(
         &mut self,
-        urls: Vec<String>,
-        max_dim: u32,
+        requests: Vec<CoverRequest>,
         generation: u64,
     ) -> Task<Message> {
-        if urls.is_empty() {
-            return Task::none();
-        }
-        // One token per (URL, variant) so leaving URLs can be cancelled
-        // without aborting still-useful work. Each fetch is an independent
-        // Task; Task::batch keeps them alive even across scroll events.
-        let mut tasks = Vec::with_capacity(urls.len());
-        for url in urls {
-            let token = CancellationToken::new();
+        let mut tasks = Vec::with_capacity(requests.len());
+        for (url, max_dim) in requests {
             let key = (url.clone(), max_dim);
-            // Skip if already in flight (reconciliation guarantees this, but
-            // keep the guard for direct callers).
             if self.artwork_requested.contains(&key) {
                 continue;
             }
+            let token = CancellationToken::new();
             let request_id = self.next_artwork_request_id();
             self.artwork_batch_tokens
                 .insert(key.clone(), (request_id, token.clone()));
             self.artwork_requested.insert(key);
-            let fetch_url = url.clone();
-            let message_url = url;
+            let message_url = url.clone();
             tasks.push(Task::perform(
-                async move { fetch_artwork(fetch_url, token, max_dim).await },
+                async move { fetch_artwork(url, token, max_dim).await },
                 move |handle| Message::ArtworkLoaded {
-                    url: message_url.clone(),
+                    url: message_url,
                     max_dim,
                     generation,
                     request_id,
@@ -286,15 +345,13 @@ impl App {
     /// Drops cached covers that `page` will not show (keeping the playing track's).
     pub(super) fn release_offscreen_artwork_for(&mut self, page: &Page) {
         let current = std::mem::replace(&mut self.page, page.clone());
-        let (mut keep, _) = self.current_page_artwork_urls();
+        let mut keep: HashSet<String> = self
+            .current_page_artwork()
+            .into_iter()
+            .map(|(url, _)| url)
+            .collect();
         self.page = current;
-        keep.extend(
-            self.playback_status
-                .track
-                .as_ref()
-                .and_then(|track| track.thumbnail_url.clone()),
-        );
-        let keep: HashSet<String> = keep.into_iter().collect();
+        keep.extend(self.playing_cover_url().map(str::to_owned));
         self.artwork_cache.retain_urls(|url| keep.contains(url));
     }
 
@@ -313,6 +370,75 @@ impl App {
         )
     }
 
+    /// Wakes the page when the earliest failed cover may be asked for again.
+    fn schedule_cover_retry(&mut self) -> Task<Message> {
+        if self.artwork_retry_pending {
+            return Task::none();
+        }
+        let now = std::time::Instant::now();
+        let next = self
+            .artwork_failed
+            .values()
+            .filter(|failed| failed.attempts < MAX_COVER_ATTEMPTS && failed.retry_at > now)
+            .map(|failed| failed.retry_at)
+            .min();
+        let Some(next) = next else {
+            return Task::none();
+        };
+        self.artwork_retry_pending = true;
+        let delay = next.saturating_duration_since(now);
+        Task::perform(async move { tokio::time::sleep(delay).await }, |()| {
+            Message::ArtworkRetryDue
+        })
+    }
+
+    /// Records a list cover that did not download and schedules another try.
+    fn cover_failed(&mut self, key: CoverRequest) -> Task<Message> {
+        let now = std::time::Instant::now();
+        let failed = self.artwork_failed.entry(key).or_insert(FailedCover {
+            retry_at: now,
+            attempts: 0,
+        });
+        failed.attempts = failed.attempts.saturating_add(1);
+        failed.retry_at = now + COVER_RETRY_COOLDOWN;
+        self.schedule_cover_retry()
+    }
+
+    /// The player's cover gets one more attempt, shortly after the first failure.
+    fn retry_selected_artwork(
+        &mut self,
+        url: String,
+        max_dim: u32,
+        generation: u64,
+    ) -> Task<Message> {
+        if std::mem::replace(&mut self.artwork_selected_retried, true) {
+            return Task::none();
+        }
+        let cancellation = CancellationToken::new();
+        let request_id = self.next_artwork_request_id();
+        self.artwork_selected_request_id = request_id;
+        self.artwork_cancel = Some(cancellation.clone());
+        let fetch_url = url.clone();
+        Task::perform(
+            async move {
+                tokio::select! {
+                    _ = cancellation.cancelled() => None,
+                    _ = tokio::time::sleep(Duration::from_millis(700)) => {
+                        fetch_player_artwork(fetch_url, cancellation, max_dim).await
+                    }
+                }
+            },
+            move |handle| Message::ArtworkLoaded {
+                url,
+                max_dim,
+                generation,
+                request_id,
+                handle,
+                selected: true,
+            },
+        )
+    }
+
     /// The artwork messages of `update_inner`, which routes them here.
     pub(super) fn update_artwork(&mut self, message: Message) -> Task<Message> {
         match message {
@@ -322,6 +448,11 @@ impl App {
                     return Task::none();
                 }
                 return self.preload_current_page_artwork();
+            }
+            Message::ArtworkRetryDue => {
+                self.artwork_retry_pending = false;
+                let reload = self.preload_current_page_artwork();
+                return Task::batch([reload, self.schedule_cover_retry()]);
             }
             Message::ArtworkLoaded {
                 url,
@@ -336,6 +467,7 @@ impl App {
                     if request_id != self.artwork_selected_request_id {
                         return Task::none();
                     }
+                    self.artwork_cancel = None;
                 } else {
                     let current_request = self
                         .artwork_batch_tokens
@@ -347,57 +479,23 @@ impl App {
                     self.artwork_requested.remove(&key);
                     self.artwork_batch_tokens.remove(&key);
                 }
-                if selected {
-                    self.artwork_cancel = None;
-                }
-                if handle.is_none() && self.artwork_retried.insert(url.clone()) {
-                    let retry_url = url.clone();
-                    let retry_cancellation = CancellationToken::new();
-                    let retry_request_id = self.next_artwork_request_id();
-                    if selected {
-                        self.artwork_selected_request_id = retry_request_id;
-                        self.artwork_cancel = Some(retry_cancellation.clone());
+                let Some(handle) = handle else {
+                    return if selected {
+                        self.retry_selected_artwork(url, max_dim, generation)
                     } else {
-                        self.artwork_batch_tokens
-                            .insert(key.clone(), (retry_request_id, retry_cancellation.clone()));
-                        self.artwork_requested.insert(key);
-                    }
-                    return Task::perform(
-                        async move {
-                            tokio::select! {
-                                _ = retry_cancellation.cancelled() => None,
-                                _ = tokio::time::sleep(Duration::from_millis(700)) => {
-                                    fetch_artwork(retry_url.clone(), retry_cancellation, max_dim)
-                                        .await
-                                }
-                            }
-                        },
-                        move |handle| Message::ArtworkLoaded {
-                            url,
-                            max_dim,
-                            generation,
-                            request_id: retry_request_id,
-                            handle,
-                            selected,
-                        },
-                    );
+                        self.cover_failed(key)
+                    };
+                };
+                self.artwork_failed.remove(&key);
+                if !self.preferences.reduced_motion {
+                    self.fade_until = Some(std::time::Instant::now() + shell::COVER_FADE);
                 }
-                if let Some(handle) = handle {
-                    self.artwork_retried.remove(&url);
-                    if !self.preferences.reduced_motion {
-                        self.fade_until = Some(std::time::Instant::now() + shell::COVER_FADE);
-                    }
-                    self.cache_artwork_handle(url.clone(), max_dim, handle.clone());
-                    if self
-                        .playback_status
-                        .track
-                        .as_ref()
-                        .and_then(|track| track.thumbnail_url.as_ref())
-                        == Some(&url)
-                    {
-                        self.artwork = Some(handle);
-                    }
+                // Only the player's own request replaces the cover on screen. A list
+                // cover of the same track is smaller and must not overwrite it.
+                if selected && self.playing_cover_url() == Some(url.as_str()) {
+                    self.artwork = Some(handle.clone());
                 }
+                self.cache_artwork_handle(url, max_dim, handle);
             }
             Message::FadeFrame(now) => {
                 if self.fade_until.is_some_and(|until| now >= until) {
@@ -407,5 +505,182 @@ impl App {
             _ => unreachable!("update_inner routes only this group here"),
         }
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::music::{BrowseTarget, Collection, CollectionTrack, Track};
+    use iced::widget::image;
+
+    fn track(id: &str) -> Track {
+        Track {
+            duration_secs: None,
+            video_id: id.into(),
+            title: format!("Title {id}"),
+            artist: "Artist".into(),
+            album: None,
+            thumbnail_url: Some(format!("row-{id}")),
+        }
+    }
+
+    /// A playlist with a header cover and `rows` tracks, each with its own cover.
+    fn playlist(rows: usize) -> Arc<Collection> {
+        Arc::new(Collection {
+            title: "Long playlist".into(),
+            subtitle: None,
+            description: None,
+            owner: None,
+            thumbnail_url: Some("hero".into()),
+            summary: None,
+            tracks: (0..rows)
+                .map(|index| CollectionTrack {
+                    track: track(&index.to_string()),
+                    duration: None,
+                    references: Vec::new(),
+                })
+                .collect(),
+            continuation: None,
+            unavailable_tracks: 0,
+            related: Vec::new(),
+        })
+    }
+
+    fn playlist_app(rows: usize) -> App {
+        let mut app = App {
+            page: Page::CollectionDetail(BrowseTarget {
+                browse_id: "VLlong".into(),
+                params: None,
+                page_type: None,
+            }),
+            area: iced::Size::new(1270.0, 720.0),
+            ..App::default()
+        };
+        app.collection.data = Some(playlist(rows));
+        app
+    }
+
+    fn cover() -> image::Handle {
+        image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255])
+    }
+
+    #[test]
+    fn playlist_header_cover_is_requested_on_scroll() {
+        let mut app = playlist_app(200);
+        drop(app.update(Message::CollectionScrolled(0.0)));
+        drop(app.update(Message::ScrollPreloadDue));
+        // The header is drawn at the card size, so its key carries that variant.
+        assert!(
+            app.artwork_requested
+                .contains(&("hero".into(), crate::artwork::CARD_MAX)),
+            "the header cover must stay requested while the rows are reconciled"
+        );
+    }
+
+    #[test]
+    fn scrolling_a_playlist_keeps_in_flight_row_covers() {
+        let mut app = playlist_app(200);
+        drop(app.update(Message::CollectionScrolled(0.0)));
+        drop(app.update(Message::ScrollPreloadDue));
+        let key = ("row-0".to_owned(), crate::artwork::THUMB_MAX);
+        let (_, first_token) = app
+            .artwork_batch_tokens
+            .get(&key)
+            .cloned()
+            .expect("the first visible row is requested");
+        // A second scroll event at the same place must not restart the download.
+        drop(app.update(Message::CollectionScrolled(0.0)));
+        drop(app.update(Message::ScrollPreloadDue));
+        assert!(!first_token.is_cancelled());
+    }
+
+    #[test]
+    fn queue_covers_follow_the_rows_the_list_renders() {
+        let app = App {
+            page: Page::NowPlaying,
+            area: iced::Size::new(1270.0, 1440.0),
+            queue: (0..200).map(|index| track(&index.to_string())).collect(),
+            queue_scroll: AbsoluteOffset {
+                x: 0.0,
+                y: 81.0 * 60.0,
+            },
+            ..App::default()
+        };
+        let urls: Vec<String> = app
+            .current_page_artwork()
+            .into_iter()
+            .map(|(url, _)| url)
+            .collect();
+        // Rows that fit on screen at this scroll position and height, without overscan.
+        let visible = crate::ui::layout::virtual_range(
+            app.queue.len(),
+            app.queue_scroll.y,
+            app.area.height - 24.0,
+            81.0,
+            0,
+        );
+        assert!(!visible.is_empty());
+        for index in visible {
+            assert!(
+                urls.contains(&format!("row-{index}")),
+                "row {index} is on screen but has no cover request"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_cover_is_asked_for_again_after_its_cooldown_then_waits_for_the_next_visit() {
+        let mut app = App::default();
+        let key = ("flaky".to_owned(), crate::artwork::THUMB_MAX);
+        let requests = vec![key.clone()];
+        for attempt in 1..=3 {
+            drop(app.reconcile_artwork(requests.clone()));
+            assert!(
+                app.artwork_requested.contains(&key),
+                "attempt {attempt} is requested"
+            );
+            let (request_id, _) = app.artwork_batch_tokens[&key].clone();
+            drop(app.update(Message::ArtworkLoaded {
+                url: "flaky".into(),
+                max_dim: crate::artwork::THUMB_MAX,
+                generation: app.artwork_generation,
+                request_id,
+                handle: None,
+                selected: false,
+            }));
+            // Nothing is in flight, and the cooldown keeps the cover out of the next reconcile.
+            assert!(!app.artwork_requested.contains(&key));
+            drop(app.reconcile_artwork(requests.clone()));
+            assert!(
+                !app.artwork_requested.contains(&key),
+                "cooldown still running"
+            );
+            // Pretend the cooldown has passed.
+            if let Some(failed) = app.artwork_failed.get_mut(&key) {
+                failed.retry_at = std::time::Instant::now();
+            }
+        }
+        drop(app.reconcile_artwork(requests));
+        assert!(
+            !app.artwork_requested.contains(&key),
+            "after the last attempt the cover waits for the next visit"
+        );
+    }
+
+    #[test]
+    fn player_cover_shows_a_cached_variant_while_the_large_one_loads() {
+        let mut app = App::default();
+        app.cache_artwork_handle(
+            "track".into(),
+            crate::artwork::THUMB_MAX,
+            image::Handle::from_rgba(128, 128, vec![0; 128 * 128 * 4]),
+        );
+        drop(app.load_artwork(Some("track".into())));
+        assert!(
+            app.artwork.is_some(),
+            "the player shows the best cached cover at once"
+        );
+        let _ = cover();
     }
 }

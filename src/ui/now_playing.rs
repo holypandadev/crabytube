@@ -8,7 +8,7 @@ use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Color, Element, Length, Size};
 
 /// Row pitch of the Up Next list: 64 px cover, 8 px padding above and below, 1 px rule.
-const QUEUE_ROW_PITCH: f32 = 81.0;
+pub(super) const QUEUE_ROW_PITCH: f32 = 81.0;
 const QUEUE_COVER: f32 = 64.0;
 const PANEL_PADDING: f32 = 16.0;
 const COLUMN_GAP: f32 = 40.0;
@@ -35,7 +35,7 @@ impl App {
     }
 
     /// Height of the lists, from the measured page area.
-    fn page_height(&self) -> f32 {
+    pub(super) fn page_height(&self) -> f32 {
         (self.area.height - 24.0).max(240.0)
     }
 

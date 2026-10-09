@@ -449,12 +449,7 @@ impl App {
                 .push(Space::new().height(8))
                 .push(self.top_result(top, width));
         }
-        let songs: Vec<&HomeItem> = self
-            .catalog_results
-            .iter()
-            .filter(|item| item.kind == HomeItemKind::Song && item.track.is_some())
-            .take(8)
-            .collect();
+        let songs = self.search_songs();
         if !songs.is_empty() {
             let queue: Arc<[Track]> = songs.iter().filter_map(|item| item.track.clone()).collect();
             content = content
@@ -482,19 +477,7 @@ impl App {
             (HomeItemKind::Playlist, "Playlists"),
             (HomeItemKind::Artist, "Artists"),
         ] {
-            let items: Vec<&HomeItem> = self
-                .catalog_results
-                .iter()
-                .filter(|item| {
-                    (item.kind == kind
-                        || (kind == HomeItemKind::Playlist && item.kind == HomeItemKind::Mix))
-                        && item
-                            .browse_target
-                            .as_ref()
-                            .is_some_and(|target| target.is_public_collection())
-                })
-                .take(6)
-                .collect();
+            let items = self.search_collections(kind);
             if items.is_empty() {
                 continue;
             }
@@ -521,6 +504,31 @@ impl App {
         .width(Length::Fill)
         .height(Length::Fill);
         self.with_suggestions(base.into(), search_width, search_x, 8.0 + SEARCH_H)
+    }
+
+    /// Song results the results page lists under "Songs".
+    pub(super) fn search_songs(&self) -> Vec<&HomeItem> {
+        self.catalog_results
+            .iter()
+            .filter(|item| item.kind == HomeItemKind::Song && item.track.is_some())
+            .take(8)
+            .collect()
+    }
+
+    /// Collection results of one kind that the results page shows in its grid.
+    pub(super) fn search_collections(&self, kind: HomeItemKind) -> Vec<&HomeItem> {
+        self.catalog_results
+            .iter()
+            .filter(|item| {
+                (item.kind == kind
+                    || (kind == HomeItemKind::Playlist && item.kind == HomeItemKind::Mix))
+                    && item
+                        .browse_target
+                        .as_ref()
+                        .is_some_and(|target| target.is_public_collection())
+            })
+            .take(6)
+            .collect()
     }
 
     fn top_result(&self, item: &HomeItem, width: f32) -> Element<'_, Message> {
