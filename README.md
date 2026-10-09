@@ -1,108 +1,40 @@
-# CrabyTube
+<p align="center">
+  <img src="assets/crabytube-logo.svg" width="128" alt="CrabyTube logo">
+</p>
 
-CrabyTube is a lightweight native desktop player for YouTube Music, written in Rust with
-the Iced GUI toolkit. It plays music without a browser, Electron or a Google
-account, and is built to keep memory and CPU use low.
+<h1 align="center">CrabyTube</h1>
+
+<p align="center">
+  A lightweight, native YouTube Music player written in Rust.<br>
+  No browser. No account. Just music.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/BUILT_WITH-RUST-ffffff?style=flat-square&labelColor=000000&logo=rust&logoColor=white" alt="Built with Rust">
+  <img src="https://img.shields.io/badge/PLATFORMS-LINUX_·_MACOS_·_WINDOWS-ffffff?style=flat-square&labelColor=000000" alt="Linux, macOS and Windows">
+  <img src="https://img.shields.io/badge/LICENSE-GPL--3.0-ffffff?style=flat-square&labelColor=000000" alt="License GPL-3.0">
+</p>
 
 ## Features
 
-- **Home** with public YouTube Music shelves. A small snapshot is kept so the next launch can show
-  it immediately while it refreshes.
-- **Search** with suggestions and filters for songs, albums, artists and playlists, with incremental
-  loading of more results.
-- **Album, artist and playlist pages**, including long playlists loaded page by page.
-- **Playback** of AAC audio streams: play/pause, seek, volume and mute, repeat, shuffle, radio
-  ("autoplay") and a choice of audio output device. The next track is prepared while the current one
-  plays, so track changes are quick.
-- **Now Playing** with the Up Next queue and synced lyrics (line- or word-timed when available, with
-  translations), from LRCLIB and Better Lyrics.
-- **Favorite songs** and a restorable queue, stored locally.
-- **Settings** for appearance, playback, audio, lyrics, integrations and storage, with per-cache
-  usage and clearing, and backup/import of local data.
-- Interface in English and Spanish.
-- **Linux desktop integration:** MPRIS media controls, a system tray icon with optional
-  close-to-tray, optional track notifications and launch on startup.
-- Optional **Discord Rich Presence** through the local Discord client.
+| `01` **LIGHTWEIGHT** | `02` **NATIVE** | `03` **NO ACCOUNT** |
+| :--- | :--- | :--- |
+| Under 100 MB of RAM while playing and a few dozen at rest. Idle CPU stays near zero. | Pure Rust and Iced. No browser, no Electron. Opens fast, and the next track is ready before the current one ends. | Plays YouTube Music anonymously. No sign-in, no cookies, no telemetry. Your data stays on your device. |
+| `04` **SYNCED LYRICS** | `05` **BRUTALIST DESIGN** | `06` **FITS YOUR DESKTOP** |
+| Line-by-line and word-by-word karaoke, with translations, from several sources at once. | Pure black, monospaced type and one-pixel outlines. The layout scales from a phone-sized window to 4K. | Media keys and MPRIS, tray icon, track notifications and Discord Rich Presence. English and Spanish. |
 
-Keyboard: `Space` play/pause, `←`/`→` seek, `Ctrl+K` search, `Esc` back.
+## Screenshots
 
-## Requirements
-
-- Rust 1.97 or newer (stable) and a C compiler.
-- Linux: the development packages for ALSA, Wayland, X11 and xkbcommon, plus `pkg-config`.
-  On Debian/Ubuntu:
-
-  ```sh
-  sudo apt install libasound2-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-shape0-dev \
-    libxcb-xfixes0-dev libxcursor-dev libxi-dev libxkbcommon-dev libxkbcommon-x11-dev \
-    libxrandr-dev libvulkan-dev pkg-config
-  ```
-
-- Network access during the first build: the `v8` crate (used by `botguard-helper`) downloads a
-  prebuilt V8 static library.
-
-## Build and run
-
-```sh
-cargo build --release
-cargo run --release
-```
-
-The workspace builds three executables, all of them default members:
-
-- `crabytube`, the application;
-- `botguard-helper`, which solves YouTube's BotGuard challenge and returns the proof-of-origin
-  tokens that audio streams require;
-- `js-challenge-helper`, which runs the YouTube player's signature and `n` transforms.
-
-The helpers are short-lived processes started by the application. They must sit in the same
-directory as the `crabytube` executable (`target/release/` after a build); the application never
-looks for them in `PATH`. When you copy or package CrabyTube, copy all three executables together.
-
-### Linux desktop integration
-
-```sh
-scripts/install-linux.sh                    # uses target/release/crabytube
-scripts/install-linux.sh path/to/crabytube  # or another binary
-scripts/install-linux.sh --uninstall
-```
-
-The script installs a launcher entry and the application icons for the current user under
-`$XDG_DATA_HOME` (default `~/.local/share`). Wayland compositors take a window's icon from the
-matching `.desktop` file, so install it to get the icon in docks and task switchers.
-
-### Windows
-
-The application icon is embedded in the executable at build time. Keep `botguard-helper.exe` and
-`js-challenge-helper.exe` next to `crabytube.exe`.
-
-### macOS
-
-An application bundle can be built with `cargo-bundle`:
-
-```sh
-cargo install cargo-bundle
-cargo bundle --release
-```
-
-Then copy `target/release/botguard-helper` and `target/release/js-challenge-helper` into
-`CrabyTube.app/Contents/MacOS/`, next to the main executable.
-
-The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
-on Linux.
-
-## Local data
-
-CrabyTube stores everything on your device:
-
-| What | Linux | macOS | Windows |
-| --- | --- | --- | --- |
-| Settings, favorites, queue, search history (`state.json`) | `~/.config/crabytube/` | `~/Library/Application Support/crabytube/` | `%APPDATA%\crabytube\` |
-| Caches: artwork, lyrics, Home snapshot, player script, BotGuard snapshot and tokens, streaming buffer | `~/.cache/crabytube/` | `~/Library/Caches/crabytube/` | `%LOCALAPPDATA%\crabytube\` |
-
-On Linux, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are honoured, and "Launch on startup" writes
-`~/.config/autostart/crabytube.desktop`. The caches are size-limited and can be inspected and cleared from
-Settings → Storage.
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/home.webp" alt="Home"></td>
+    <td width="50%"><img src="docs/screenshots/search.webp" alt="Search results"></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/now-playing.webp" alt="Now Playing with synced lyrics"></td>
+    <td width="50%"><img src="docs/screenshots/playlist.webp" alt="Playlist"></td>
+  </tr>
+</table>
 
 ## Privacy
 
@@ -127,8 +59,6 @@ no download feature; audio is only buffered temporarily while it plays.
 
 ## License
 
-CrabyTube is licensed under the GNU General Public License, version 3 or (at your option) any later
-version. See [LICENSE](LICENSE).
-
-Third-party code, assets and services are listed in [docs/licenses.md](docs/licenses.md). An
-overview of the code is in [docs/architecture.md](docs/architecture.md).
+CrabyTube is free software under the [GNU General Public License v3.0 or later](LICENSE).
+Third-party code, assets and services are listed in [docs/licenses.md](docs/licenses.md).
+Building from source is described in [docs/building.md](docs/building.md).

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="90 -49 584 584" role="img" aria-labelledby="title desc">
-  <title id="title">CrabyTube — Cangrejo ecualizador</title>
-  <desc id="desc">Cangrejo naranja simétrico con cinco barras de audio recortadas en su caparazón.</desc>
+  <title id="title">CrabyTube</title>
+  <desc id="desc">An orange crab with five audio bars cut into its shell.</desc>
   <path fill="#FE5901" fill-rule="evenodd" d="
       M292.76,36.72
       C283.85,37.42 275.92,38.75 268.48,40.56
