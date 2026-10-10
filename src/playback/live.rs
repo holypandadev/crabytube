@@ -21,6 +21,13 @@ const EDGE_POLL_WAIT: Duration = Duration::from_millis(1000);
 const MAX_FAILED_POLLS: u32 = 5;
 /// Without a new fragment for this long, the broadcast has stalled: fragments come every few seconds.
 const EDGE_STALL_LIMIT: Duration = Duration::from_secs(60);
+/// Fragments that playback may fall behind the head before it jumps to the head. Playback normally
+/// stays within a fragment or two of it. A longer lag comes from a stall or a pause, and old audio
+/// played at real-time speed would keep the lag instead of closing it.
+const MAX_LAG_FRAGMENTS: u64 = 6;
+/// Response headers with the fragment's sequence number and with the head's sequence number.
+const SEQUENCE_HEADER: &str = "x-sequence-num";
+const HEAD_SEQUENCE_HEADER: &str = "x-head-seqnum";
 
 /// Whether the live edge has stayed on the same fragment for too long.
 fn edge_stalled(since: Instant, now: Instant) -> bool {
@@ -212,6 +219,64 @@ fn number_moofs(media: &mut [u8], next: &mut u32) {
     }
 }
 
+/// The sequence number to request next. Before any answer the live edge is asked, which is the
+/// newest fragment. Playback that has fallen more than `MAX_LAG_FRAGMENTS` behind the head jumps
+/// to the head.
+fn request_for(next: Option<u64>, head: Option<u64>) -> Option<u64> {
+    let next = next?;
+    match head {
+        Some(head) if head.saturating_sub(next) > MAX_LAG_FRAGMENTS => Some(head),
+        _ => Some(next),
+    }
+}
+
+/// What an answer means for the request it answers.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// The fragment that was asked for.
+    Accept,
+    /// A later fragment than the one asked for. The fragments in between are gone; playback goes on from this one.
+    Gap,
+    /// An earlier fragment than the one asked for. It is not queued again.
+    Behind,
+}
+
+fn verdict(requested: u64, sequence: u64) -> Verdict {
+    match sequence.cmp(&requested) {
+        std::cmp::Ordering::Equal => Verdict::Accept,
+        std::cmp::Ordering::Greater => Verdict::Gap,
+        std::cmp::Ordering::Less => Verdict::Behind,
+    }
+}
+
+/// The fragment URL with an `sq` parameter for `sequence`. The other parameters keep their text:
+/// the signature covers their values, so they are not decoded and encoded again.
+fn sequenced_url(url: &reqwest::Url, sequence: u64) -> Option<reqwest::Url> {
+    let (path, query) = url.as_str().split_once('?').unwrap_or((url.as_str(), ""));
+    let sequence = format!("sq={sequence}");
+    let parameters = query
+        .split('&')
+        .filter(|pair| !pair.is_empty() && pair.split('=').next() != Some("sq"))
+        .chain(std::iter::once(sequence.as_str()))
+        .collect::<Vec<_>>()
+        .join("&");
+    reqwest::Url::parse(&format!("{path}?{parameters}")).ok()
+}
+
+/// A numeric header that the broadcast server sends with its answers.
+fn header_number(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
+    headers.get(name)?.to_str().ok()?.parse().ok()
+}
+
+/// Tells the listener that the broadcast has stopped moving. The fetch ends after this.
+fn report_stalled(fetch_error: &Arc<Mutex<Option<String>>>) {
+    warn!("live edge stopped moving");
+    crate::playback::engine::record_fetch_error(
+        fetch_error,
+        "the live broadcast stopped moving".into(),
+    );
+}
+
 /// Starts fetching the broadcast's fragments. The reader it returns plays them as they arrive.
 pub(super) fn open_broadcast(
     client: reqwest::Client,
@@ -244,9 +309,15 @@ async fn fetch_fragments(
     sender: Sender<Vec<u8>>,
     fetch_error: Arc<Mutex<Option<String>>>,
 ) {
+    // The start time of the last fragment queued without a sequence number.
     let mut last_start = None;
     let mut sent_init = false;
-    let mut next_sequence = 1;
+    // The sequence number to fetch next. None until the first answer, and for a server that sends
+    // no sequence numbers, where the live edge is polled as before.
+    let mut next_sequence: Option<u64> = None;
+    let mut head = None;
+    // The number the decoder sees on each moof. It counts up over the whole broadcast.
+    let mut next_moof = 1;
     let mut failed_polls = 0;
     // When the last new fragment was queued, or the fetch began.
     let mut last_progress = Instant::now();
@@ -257,12 +328,29 @@ async fn fetch_fragments(
             _ = tokio::time::sleep(wait) => {}
         }
         wait = EDGE_POLL_WAIT;
-        let polled = poll_once(&client, &url, &headers, &cancellation).await;
-        let fragment = match polled {
+        let requested = request_for(next_sequence, head);
+        if let (Some(next), Some(target)) = (next_sequence, requested)
+            && target != next
+        {
+            warn!(
+                behind = target - next,
+                "live playback fell behind; jumping to the live edge"
+            );
+        }
+        let answer = match poll_once(&client, &url, &headers, &cancellation, requested).await {
             Poll::Cancelled => return,
-            Poll::Fragment(fragment) => {
+            Poll::Fragment(answer) => {
                 failed_polls = 0;
-                fragment
+                answer
+            }
+            Poll::Pending(answer_head) => {
+                // The fragment is not produced yet. A broadcast that stays there too long has stalled.
+                head = answer_head.or(head);
+                if edge_stalled(last_progress, Instant::now()) {
+                    report_stalled(&fetch_error);
+                    return;
+                }
+                continue;
             }
             Poll::Failed(message) => {
                 failed_polls += 1;
@@ -274,26 +362,46 @@ async fn fetch_fragments(
                 continue;
             }
         };
+        head = answer.head.or(head);
+        let fragment = answer.fragment;
         if !sent_init && fragment.init.is_empty() {
             // The reader needs the track description before any media. Poll again.
             continue;
         }
-        if last_start.is_some_and(|last| fragment.start <= last) {
-            // The same fragment as the last poll: the edge has not moved. A broadcast that stays
-            // there too long has stalled, and the listener is told rather than left in silence.
-            if edge_stalled(last_progress, Instant::now()) {
-                warn!("live edge stopped moving");
-                crate::playback::engine::record_fetch_error(
-                    &fetch_error,
-                    "the live broadcast stopped moving".into(),
-                );
-                return;
+        match (requested, answer.sequence) {
+            (Some(requested), Some(sequence)) => match verdict(requested, sequence) {
+                Verdict::Accept => {}
+                Verdict::Gap => warn!(requested, sequence, "live fragments were skipped"),
+                Verdict::Behind => {
+                    if edge_stalled(last_progress, Instant::now()) {
+                        report_stalled(&fetch_error);
+                        return;
+                    }
+                    continue;
+                }
+            },
+            _ => {
+                // Without sequence numbers the live edge is polled, and a repeated fragment is dropped.
+                if answer.sequence.is_none() {
+                    next_sequence = None;
+                }
+                if last_start.is_some_and(|last| fragment.start <= last) {
+                    // The same fragment as the last poll: the edge has not moved. A broadcast that stays
+                    // there too long has stalled, and the listener is told rather than left in silence.
+                    if edge_stalled(last_progress, Instant::now()) {
+                        report_stalled(&fetch_error);
+                        return;
+                    }
+                    continue;
+                }
             }
-            continue;
         }
         last_start = Some(fragment.start);
+        if let Some(sequence) = answer.sequence {
+            next_sequence = Some(sequence + 1);
+        }
         let mut media = fragment.media;
-        number_moofs(&mut media, &mut next_sequence);
+        number_moofs(&mut media, &mut next_moof);
         let mut payload = if sent_init {
             media
         } else {
@@ -318,14 +426,27 @@ async fn fetch_fragments(
             }
         }
         last_progress = Instant::now();
-        info!(start = fragment.start, "live fragment queued");
+        info!(
+            start = fragment.start,
+            sequence = answer.sequence.unwrap_or_default(),
+            "live fragment queued"
+        );
     }
 }
 
 enum Poll {
-    Fragment(Fragment),
+    Fragment(Answer),
+    /// The fragment that was asked for is not produced yet. The answer still reports the head.
+    Pending(Option<u64>),
     Failed(String),
     Cancelled,
+}
+
+/// A fragment with the sequence numbers its answer carried.
+struct Answer {
+    fragment: Fragment,
+    sequence: Option<u64>,
+    head: Option<u64>,
 }
 
 /// What a refused poll reports. A 403 carries the message the engine answers with a new resolution.
@@ -342,25 +463,44 @@ async fn poll_once(
     url: &reqwest::Url,
     headers: &reqwest::header::HeaderMap,
     cancellation: &CancellationToken,
+    requested: Option<u64>,
 ) -> Poll {
+    let target = match requested {
+        Some(sequence) => match sequenced_url(url, sequence) {
+            Some(target) => target,
+            None => return Poll::Failed("live poll URL could not be built".into()),
+        },
+        None => url.clone(),
+    };
     let response = tokio::select! {
         _ = cancellation.cancelled() => return Poll::Cancelled,
-        response = client.get(url.clone()).headers(headers.clone()).header(reqwest::header::RANGE, "bytes=0-").send() => response,
+        response = client.get(target).headers(headers.clone()).header(reqwest::header::RANGE, "bytes=0-").send() => response,
     };
     let response = match response {
         Ok(response) => response,
         // The error text of a request carries the media URL, which is signed and must not reach logs.
         Err(error) => return Poll::Failed(format!("live poll failed: {}", error.without_url())),
     };
-    if !response.status().is_success() {
-        return Poll::Failed(refusal_message(response.status()));
+    let status = response.status();
+    let sequence = header_number(response.headers(), SEQUENCE_HEADER);
+    let head = header_number(response.headers(), HEAD_SEQUENCE_HEADER);
+    if status == reqwest::StatusCode::NO_CONTENT {
+        // A sequence number past the head is answered with no content until the fragment exists.
+        return Poll::Pending(head);
+    }
+    if !status.is_success() {
+        return Poll::Failed(refusal_message(status));
     }
     let body = tokio::select! {
         _ = cancellation.cancelled() => return Poll::Cancelled,
         body = response.bytes() => body,
     };
     match body.ok().and_then(|bytes| parse_fragment(&bytes)) {
-        Some(fragment) => Poll::Fragment(fragment),
+        Some(fragment) => Poll::Fragment(Answer {
+            fragment,
+            sequence,
+            head,
+        }),
         None => Poll::Failed("live poll returned no fragment".into()),
     }
 }
@@ -496,5 +636,69 @@ mod tests {
             position: 0,
         };
         assert!(reader.seek(SeekFrom::Start(0)).is_err());
+    }
+
+    #[test]
+    fn playback_asks_the_live_edge_first_and_then_the_next_sequence() {
+        assert_eq!(request_for(None, Some(9)), None);
+        assert_eq!(request_for(Some(10), Some(10)), Some(10));
+        assert_eq!(request_for(Some(10), None), Some(10));
+    }
+
+    #[test]
+    fn playback_jumps_to_the_head_only_beyond_the_lag_limit() {
+        let next = 10;
+        assert_eq!(
+            request_for(Some(next), Some(next + MAX_LAG_FRAGMENTS)),
+            Some(next)
+        );
+        assert_eq!(
+            request_for(Some(next), Some(next + MAX_LAG_FRAGMENTS + 1)),
+            Some(next + MAX_LAG_FRAGMENTS + 1)
+        );
+    }
+
+    #[test]
+    fn an_answer_is_accepted_for_the_fragment_asked_for_and_judged_otherwise() {
+        assert_eq!(verdict(10, 10), Verdict::Accept);
+        assert_eq!(verdict(10, 13), Verdict::Gap);
+        assert_eq!(verdict(10, 9), Verdict::Behind);
+    }
+
+    #[test]
+    fn the_sequence_parameter_replaces_an_earlier_one_and_keeps_the_other_text() {
+        let url = reqwest::Url::parse(
+            "https://media.example.test/videoplayback?itag=140&sig=a%2Bb&live=1",
+        )
+        .unwrap();
+        assert_eq!(
+            sequenced_url(&url, 7).unwrap().as_str(),
+            "https://media.example.test/videoplayback?itag=140&sig=a%2Bb&live=1&sq=7"
+        );
+        let earlier =
+            reqwest::Url::parse("https://media.example.test/videoplayback?sq=3&itag=140").unwrap();
+        assert_eq!(
+            sequenced_url(&earlier, 7).unwrap().as_str(),
+            "https://media.example.test/videoplayback?itag=140&sq=7"
+        );
+        let bare = reqwest::Url::parse("https://media.example.test/videoplayback").unwrap();
+        assert_eq!(
+            sequenced_url(&bare, 7).unwrap().as_str(),
+            "https://media.example.test/videoplayback?sq=7"
+        );
+    }
+
+    #[test]
+    fn the_sequence_headers_are_read_as_numbers() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(SEQUENCE_HEADER, HeaderValue::from_static("171627"));
+        headers.insert(
+            HEAD_SEQUENCE_HEADER,
+            HeaderValue::from_static("not a number"),
+        );
+        assert_eq!(header_number(&headers, SEQUENCE_HEADER), Some(171_627));
+        assert_eq!(header_number(&headers, HEAD_SEQUENCE_HEADER), None);
+        assert_eq!(header_number(&headers, "x-missing"), None);
     }
 }
