@@ -66,14 +66,18 @@ impl App {
 
     /// The page for the area it actually gets, so layout never depends on a
     /// possibly stale window size.
+    /// `area` is the whole page layer, including the band under the floating tabs. Pages whose
+    /// content scrolls start their scroll content below the tabs and let it pass underneath;
+    /// the others are laid out in the area below the tabs.
     fn page_view(&self, area: Size) -> Element<'_, Message> {
+        let below = below_nav(area);
         match &self.page {
-            Page::Search => self.search_page(area),
-            Page::Library => self.favorites_page(area),
-            Page::Settings => self.settings_page(area),
-            Page::NowPlaying => self.now_playing_page(area),
-            Page::CollectionDetail(_) => self.collection_content(area),
-            Page::Home => self.home_page(area),
+            Page::Search => self.search_page(area, NAV_H),
+            Page::Settings => self.settings_page(area, NAV_H),
+            Page::Library => under_tabs(self.favorites_page(below)),
+            Page::NowPlaying => under_tabs(self.now_playing_page(below)),
+            Page::CollectionDetail(_) => under_tabs(self.collection_content(below)),
+            Page::Home => under_tabs(self.home_page(below)),
         }
     }
 
@@ -112,17 +116,22 @@ impl App {
     pub(super) fn shell_view(&self) -> Element<'_, Message> {
         // The sensor reports the measured area to `update`, which sizes
         // artwork requests, carousel steps and virtual lists from it.
+        // The reported area is the part below the floating tabs.
         let page = sensor(responsive(move |area| self.page_view(area)))
-            .on_show(Message::AreaMeasured)
-            .on_resize(Message::AreaMeasured);
-        let mut body = column![
-            self.title_bar(),
-            self.top_nav(),
+            .on_show(|size| Message::AreaMeasured(below_nav(size)))
+            .on_resize(|size| Message::AreaMeasured(below_nav(size)));
+        // The tabs float over the page: only their own boxes are opaque, so scrolled content
+        // stays visible around them instead of being cut by a full-width band.
+        let content = iced::widget::stack![
             container(page)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding([0.0, gutter_for(self.window_width)]),
-        ];
+            self.top_nav(),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
+        let mut body = column![self.title_bar(), content];
         // The player bar appears once something is loaded.
         if !matches!(self.page, Page::NowPlaying) && self.playback_status.track.is_some() {
             body = body.push(hrule(INK)).push(
@@ -626,6 +635,16 @@ const VOLUME_W: f32 = 104.0;
 
 /// Width of the Back button in the navigation row.
 const BACK_W: f32 = 112.0;
+
+/// A page laid out below the floating tab row.
+fn under_tabs<'a>(page: Element<'a, Message>) -> Element<'a, Message> {
+    column![Space::new().height(NAV_H), page].into()
+}
+
+/// The page area below the floating tab row.
+fn below_nav(area: Size) -> Size {
+    Size::new(area.width, (area.height - NAV_H).max(0.0))
+}
 
 /// Side margin of the page: narrower on phone-sized windows.
 pub(super) fn gutter_for(window_width: f32) -> f32 {

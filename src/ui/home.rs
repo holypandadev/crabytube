@@ -583,15 +583,18 @@ impl App {
         .into()
     }
 
-    pub(super) fn search_page(&self, area: Size) -> Element<'_, Message> {
+    /// `area` includes the band under the floating tabs, which are `top` high; the field sits
+    /// below them and the results scroll under both.
+    pub(super) fn search_page(&self, area: Size, top: f32) -> Element<'_, Message> {
         if !self.search_committed && self.catalog_results.is_empty() {
-            return self.home_page(area);
+            let below = Size::new(area.width, (area.height - top).max(0.0));
+            return column![Space::new().height(top), self.home_page(below)].into();
         }
         let width = area.width.max(280.0);
         let search_width = area.width.min(SEARCH_MAX_W);
         let search_x = ((area.width - search_width) / 2.0).max(0.0);
         let query = self.search_query.trim();
-        let mut content = column![Space::new().height(SEARCH_HEADER)].spacing(0);
+        let mut content = column![Space::new().height(top + SEARCH_HEADER)].spacing(0);
         let count = self.catalog_results.len();
         content = content
             .push(text(self.tr("Search Results")).size(22).font(MONO))
@@ -700,7 +703,7 @@ impl App {
         let field = container(self.search_field(search_width, false))
             .width(Length::Fill)
             .padding(iced::Padding {
-                top: SEARCH_TOP,
+                top: top + SEARCH_TOP,
                 ..iced::Padding::ZERO
             })
             .center_x(Length::Fill);
@@ -708,7 +711,7 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
-        self.with_suggestions(base, search_width, search_x, SEARCH_TOP + SEARCH_H)
+        self.with_suggestions(base, search_width, search_x, top + SEARCH_TOP + SEARCH_H)
     }
 
     /// Live broadcasts the results page lists above "Songs".
