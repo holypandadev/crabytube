@@ -117,6 +117,8 @@ struct App {
     now_playing_return: Option<Page>,
     search_query: String,
     search_committed: bool,
+    /// The query behind the results on screen. Typing does not change it until a search starts.
+    committed_query: String,
     catalog_results: Vec<HomeItem>,
     catalog_continuation: Option<crate::music::Continuation>,
     catalog_more_loading: bool,
@@ -1775,6 +1777,7 @@ impl App {
             now_playing_return: None,
             search_query: String::new(),
             search_committed: false,
+            committed_query: String::new(),
             catalog_results: Vec::new(),
             catalog_continuation: None,
             catalog_more_loading: false,
@@ -2319,6 +2322,7 @@ impl App {
             self.search_scroll = AbsoluteOffset::default();
         }
         self.search_query = query.clone();
+        self.committed_query = query.clone();
         self.search_request_id = self.search_request_id.wrapping_add(1);
         self.search_error = None;
         self.catalog_continuation = None;
@@ -4510,6 +4514,21 @@ mod tests {
         let _ = app.update(Message::DismissSuggestions);
         assert_eq!(app.suggest_request_id, before);
         assert!(!app.show_suggestions);
+    }
+
+    #[test]
+    fn typing_leaves_the_committed_query_of_the_results_on_screen_alone() {
+        let mut app = App {
+            page: Page::Search,
+            ..App::default()
+        };
+        let _ = app.update(Message::SearchFor("daft punk".into()));
+        assert_eq!(app.committed_query, "daft punk");
+        let _ = app.update(Message::SearchChanged("radio".into()));
+        assert_eq!(app.search_query, "radio");
+        assert_eq!(app.committed_query, "daft punk");
+        let _ = app.update(Message::SearchSubmitted);
+        assert_eq!(app.committed_query, "radio");
     }
 
     #[test]

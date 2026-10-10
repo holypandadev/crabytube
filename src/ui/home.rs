@@ -598,7 +598,7 @@ impl App {
         let width = area.width.max(280.0);
         let search_width = area.width.min(SEARCH_MAX_W);
         let search_x = ((area.width - search_width) / 2.0).max(0.0);
-        let query = self.search_query.trim();
+        let query = self.committed_query.trim();
         let mut content = column![Space::new().height(top + SEARCH_HEADER)].spacing(0);
         let count = self.catalog_results.len();
         content = content
