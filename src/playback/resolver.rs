@@ -339,6 +339,8 @@ pub struct AudioStreamDiagnostics {
 pub enum StreamError {
     #[error("temporary network failure: {0}")]
     Network(String),
+    #[error("the application is missing a file it needs: {0}")]
+    Installation(String),
     #[error("YouTube client configuration failed: {0}")]
     Config(String),
     #[error("YouTube cannot play this track: {0}")]
@@ -371,9 +373,12 @@ impl StreamError {
     pub fn user_message(&self) -> String {
         match self {
             Self::Network(_) => "A temporary network problem interrupted playback. Try again.",
+            Self::Installation(_) => {
+                "CrabyTube is missing a file it needs. Reinstall it to restore playback."
+            }
             Self::Config(_) => "YouTube configuration could not be loaded. Try again shortly.",
             Self::PlayerUnavailable(_) => "This track is unavailable for playback.",
-            Self::LiveUnsupported => "Live streams are not supported yet",
+            Self::LiveUnsupported => "This live broadcast can't be played right now.",
             Self::AuthenticationRequired(_) => {
                 "YouTube requires sign-in for this track; it can't be played without an account."
             }
@@ -1100,6 +1105,9 @@ impl StreamResolver for YouTubeStreamResolver {
                 {
                     Ok(tokens) => Ok(Some(tokens)),
                     Err(PoTokenError::Cancelled) => Err(StreamError::Cancelled),
+                    Err(PoTokenError::HelperMissing(message)) => {
+                        Err(StreamError::Installation(message))
+                    }
                     Err(error) => {
                         // Tokens the player stops accepting usually mean its data changed: fetch it again.
                         *self.runtime.lock().await = None;
@@ -1790,7 +1798,7 @@ async fn run_js_helper_once(
         Command::new(path)
     } else {
         // Never fall back to $PATH: a helper found there would run with our input.
-        return Err(StreamError::Decoder(format!(
+        return Err(StreamError::Installation(format!(
             "{name} is not installed next to the application executable"
         )));
     };
@@ -2208,6 +2216,17 @@ fn quality_allows(quality: AudioQuality, bitrate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_missing_file_asks_for_a_reinstall_and_a_refused_broadcast_is_not_called_unsupported() {
+        let missing = StreamError::Installation("js-challenge-helper is not installed".into());
+        assert!(missing.user_message().contains("Reinstall"));
+        assert!(
+            !StreamError::LiveUnsupported
+                .user_message()
+                .contains("not supported")
+        );
+    }
+
     #[tokio::test]
     async fn a_player_comes_back_with_the_fingerprint_of_its_own_text() {
         let (text, fingerprint) = super::with_fingerprint("player".to_owned()).await;

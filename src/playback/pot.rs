@@ -88,6 +88,9 @@ pub enum PoTokenError {
     MissingVisitorData,
     #[error("BotGuard helper could not be started: {0}")]
     Helper(String),
+    /// The helper is not in the installation at all.
+    #[error("{0}")]
+    HelperMissing(String),
     #[error("BotGuard helper returned an invalid response: {0}")]
     Protocol(String),
     #[error("operation cancelled")]
@@ -592,7 +595,7 @@ fn helper_command() -> Result<Command, PoTokenError> {
         return Ok(Command::new(path));
     }
     // Never fall back to $PATH: a helper found there would receive our request.
-    Err(PoTokenError::Helper(format!(
+    Err(PoTokenError::HelperMissing(format!(
         "{name} is not installed next to the application executable"
     )))
 }
