@@ -75,17 +75,22 @@ fn top_level_boxes(data: &[u8]) -> Vec<Mp4Box<'_>> {
             data[offset + 3],
         ]) as usize;
         let (size, header) = match size {
-            // A 64-bit size follows the type.
+            // A 64-bit size follows the type. A size beyond this platform's range is out of bounds.
             1 if offset + 16 <= data.len() => {
                 let mut large = [0; 8];
                 large.copy_from_slice(&data[offset + 8..offset + 16]);
-                (u64::from_be_bytes(large) as usize, 16)
+                (
+                    usize::try_from(u64::from_be_bytes(large)).unwrap_or(usize::MAX),
+                    16,
+                )
             }
             // A zero size runs to the end of the buffer.
             0 => (data.len() - offset, 8),
             size => (size, 8),
         };
-        if size < header || offset + size > data.len() {
+        // `offset` is below `data.len()`, so the remaining length is computed without underflow.
+        // Adding the size to the offset instead could overflow on a hostile size.
+        if size < header || size > data.len() - offset {
             break;
         }
         let mut kind = [0; 4];
@@ -176,7 +181,7 @@ fn number_moofs(media: &mut [u8], next: &mut u32) {
     let mut offset = 0;
     while offset + 8 <= media.len() {
         let size = be32(&media[offset..]);
-        if size < 8 || offset + size > media.len() {
+        if size < 8 || size > media.len() - offset {
             break;
         }
         if &media[offset + 4..offset + 8] == b"moof" {
@@ -184,7 +189,7 @@ fn number_moofs(media: &mut [u8], next: &mut u32) {
             let mut child = offset + 8;
             while child + 8 <= end {
                 let child_size = be32(&media[child..]);
-                if child_size < 8 || child + child_size > end {
+                if child_size < 8 || child_size > end - child {
                     break;
                 }
                 // mfhd: a full box, so the sequence number follows its 4-byte version and flags.
@@ -419,6 +424,20 @@ mod tests {
         reader.read_to_end(&mut out).unwrap();
         assert_eq!(out, b"firstsecond");
         assert_eq!(reader.read(&mut [0; 4]).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_box_claiming_more_bytes_than_the_response_holds_is_ignored() {
+        // A 64-bit size of u64::MAX: adding it to the offset would overflow.
+        let mut data = vec![0, 0, 0, 1];
+        data.extend_from_slice(b"moof");
+        data.extend_from_slice(&u64::MAX.to_be_bytes());
+        assert!(top_level_boxes(&data).is_empty());
+        // Parsing stops at the broken box, so a valid box after it is not read.
+        let mut mixed = data.clone();
+        mixed.extend(boxed(b"mdat", b"audio"));
+        assert!(top_level_boxes(&mixed).is_empty());
+        assert_eq!(top_level_boxes(&boxed(b"mdat", b"audio")).len(), 1);
     }
 
     #[test]
