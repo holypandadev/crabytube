@@ -1,6 +1,7 @@
 //! Settings: outlined boxes in two columns, each box going to the shorter column.
 //! Only controls that change real behaviour are listed; every change saves immediately.
 
+use super::messages::Confirmation;
 use super::shell::fit;
 use super::theme::{self, ALERT, DIM, FADED, INK, MONO, RULE, hrule, icon, label, toggle};
 use super::{App, Message, Preference};
@@ -84,7 +85,7 @@ impl App {
                 .spacing(12)
                 .align_y(Alignment::Center)
             )
-            .on_press(Message::ResetSettings)
+            .on_press(Message::AskResetSettings)
             .padding([12, 24])
             .style(theme::outline_button),
         ]
@@ -123,10 +124,16 @@ impl App {
                 .spacing(GRID_GAP)
                 .into()
         };
+        let reset_confirmation: Element<'_, Message> =
+            match self.confirmation.as_ref().map(|pending| &pending.kind) {
+                Some(Confirmation::Reset) => self.reset_confirmation(),
+                _ => Space::new().height(0).into(),
+            };
         scrollable(
             column![
                 Space::new().height(top + 8.0),
                 header,
+                reset_confirmation,
                 Space::new().height(28),
                 grid,
                 Space::new().height(32),
@@ -169,6 +176,103 @@ impl App {
     }
 
     /// One setting: label (and optional hint) on the left, control on the right.
+    /// Cancel and confirm for an inline confirmation. Cancel leaves the setting as it was.
+    fn confirm_buttons(&self, confirm: &'static str, message: Message) -> Element<'_, Message> {
+        row![
+            button(label(self.tr("Cancel").into_owned(), 12.0))
+                .on_press(Message::CancelConfirmation)
+                .padding([6, 12])
+                .style(theme::outline_button),
+            button(label(self.tr(confirm).into_owned(), 12.0))
+                .on_press(message)
+                .padding([6, 12])
+                .style(theme::outline_button),
+        ]
+        .spacing(8)
+        .into()
+    }
+
+    /// The Reset confirmation, shown under the header while it waits for its second press.
+    fn reset_confirmation(&self) -> Element<'_, Message> {
+        column![
+            label(self.tr("Reset settings?").into_owned(), 15.0),
+            text(self.tr("Language, window size and lyrics offsets stay."))
+                .size(11)
+                .font(MONO)
+                .color(DIM),
+            row![
+                Space::new().width(Length::Fill),
+                self.confirm_buttons("Confirm", Message::ResetSettings),
+            ]
+            .align_y(Alignment::Center),
+        ]
+        .spacing(8)
+        .padding([14, 0])
+        .into()
+    }
+
+    /// What an import brings, counted from the backup that was read.
+    fn import_summary(&self, snapshot: &crate::preferences::Snapshot) -> String {
+        self.tr_static("Brings {} favorites and {} queued songs, plus its settings.")
+            .replacen("{}", &snapshot.favorites.len().to_string(), 1)
+            .replacen("{}", &snapshot.queue.len().to_string(), 1)
+    }
+
+    /// The search history row. Clearing it, or turning it off, also clears "Jump back in" when that
+    /// shelf has anything, so the row says so and asks first.
+    fn history_setting(&self, width: f32) -> Element<'_, Message> {
+        let searches = self.search_history.len();
+        let shelf = !self.recent.is_empty();
+        match self.confirmation.as_ref().map(|pending| &pending.kind) {
+            Some(Confirmation::ClearHistory) => self.setting(
+                "Search History",
+                Some(self.tr_static("Clear history and Jump back in?").into()),
+                self.confirm_buttons("Confirm", Message::ClearHistory),
+                width,
+            ),
+            Some(Confirmation::TurnOffHistory) => self.setting(
+                "Search History",
+                Some(
+                    self.tr_static("Turn off history and remove Jump back in?")
+                        .into(),
+                ),
+                self.confirm_buttons("Confirm", Message::ConfirmTurnOffHistory),
+                width,
+            ),
+            _ => {
+                let hint = if shelf {
+                    self.tr_static(
+                        "{} saved searches. Clearing or turning this off also removes 'Jump back in'.",
+                    )
+                } else {
+                    self.tr_static("{} saved searches.")
+                }
+                .replacen("{}", &searches.to_string(), 1);
+                let remember = self.preferences.remember_history;
+                self.setting(
+                    "Search History",
+                    Some(hint),
+                    row![
+                        button(label(self.tr("Clear").into_owned(), 12.0))
+                            .on_press_maybe(
+                                (searches > 0 || shelf).then_some(Message::AskClearHistory)
+                            )
+                            .padding([5, 10])
+                            .style(theme::outline_button),
+                        toggle(
+                            remember,
+                            Message::Preference(Preference::History(!remember))
+                        ),
+                    ]
+                    .spacing(12)
+                    .align_y(Alignment::Center)
+                    .into(),
+                    width,
+                )
+            }
+        }
+    }
+
     fn setting<'a>(
         &self,
         title: &'static str,
@@ -409,27 +513,7 @@ impl App {
                 ),
                 width,
             ),
-            self.setting(
-                "Search History",
-                Some(format!("{} saved searches.", self.search_history.len())),
-                row![
-                    button(label(self.tr("Clear").into_owned(), 12.0))
-                        .on_press_maybe(
-                            (!self.search_history.is_empty() || !self.recent.is_empty())
-                                .then_some(Message::ClearHistory)
-                        )
-                        .padding([5, 10])
-                        .style(theme::outline_button),
-                    toggle(
-                        p.remember_history,
-                        Message::Preference(Preference::History(!p.remember_history))
-                    ),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center)
-                .into(),
-                width,
-            ),
+            self.history_setting(width),
         ];
         if cfg!(target_os = "linux") {
             rows.push(self.setting(
@@ -614,17 +698,25 @@ impl App {
                 .into(),
                 width,
             ),
-            self.setting(
-                "Local Data",
-                Some("Favorites, queue and settings as JSON in Documents.".into()),
-                row![
-                    action("Export", Message::ExportLocalData),
-                    action("Import", Message::ImportLocalData),
-                ]
-                .spacing(6)
-                .into(),
-                width,
-            ),
+            match self.confirmation.as_ref().map(|pending| &pending.kind) {
+                Some(Confirmation::Import(snapshot)) => self.setting(
+                    "Replace your data with this backup?",
+                    Some(self.import_summary(snapshot.as_ref())),
+                    self.confirm_buttons("Confirm import", Message::ConfirmImport),
+                    width,
+                ),
+                _ => self.setting(
+                    "Local Data",
+                    Some("Favorites, queue and settings as JSON in Documents.".into()),
+                    row![
+                        action("Export", Message::ExportLocalData),
+                        action("Import", Message::ImportLocalData),
+                    ]
+                    .spacing(6)
+                    .into(),
+                    width,
+                ),
+            },
             self.setting(
                 "Diagnostics",
                 Some("Sanitized report without tokens or URLs.".into()),

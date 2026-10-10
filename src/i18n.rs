@@ -251,6 +251,26 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Quick Picks" => "Selección rápida",
         "Reduce Motion" => "Reducir movimiento",
         "Reset" => "Restablecer",
+        "Reset settings?" => "¿Restablecer los ajustes?",
+        "Language, window size and lyrics offsets stay." => {
+            "Se conservan el idioma, el tamaño de la ventana y los desfases de la letra."
+        }
+        "Cancel" => "Cancelar",
+        "Confirm" => "Confirmar",
+        "Confirm import" => "Confirmar importación",
+        "Replace your data with this backup?" => "¿Reemplazar tus datos con esta copia?",
+        "Brings {} favorites and {} queued songs, plus its settings." => {
+            "Trae {} favoritos y {} canciones en la cola, además de sus ajustes."
+        }
+        "Clear history and Jump back in?" => "¿Borrar el historial y también «Seguir escuchando»?",
+        "Turn off history and remove Jump back in?" => {
+            "¿Desactivar el historial y quitar también «Seguir escuchando»?"
+        }
+        "{} saved searches." => "{} búsquedas guardadas.",
+        "{} saved searches. Clearing or turning this off also removes 'Jump back in'." => {
+            "{} búsquedas guardadas. Borrarlas o desactivar el historial quita también «Seguir escuchando»."
+        }
+        "Importing local data…" => "Importando datos locales…",
         "Restore Queue on Launch" => "Restaurar la cola al abrir",
         "Return to current line" => "Volver a la línea actual",
         "Search artist, album, tracks" => "Busca artistas, álbumes, canciones",

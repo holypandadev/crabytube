@@ -79,6 +79,8 @@ pub(super) enum Message {
     SeekTo(f64),
     Preference(Preference),
     ClearHistory,
+    /// The first press on the history Clear button. It asks first when "Jump back in" goes too.
+    AskClearHistory,
     Navigate(Page),
     OpenCollection(BrowseTarget),
     OpenNowPlaying,
@@ -262,7 +264,17 @@ pub(super) enum Message {
     AddToQueue(Track),
     /// Likes or unlikes a track that may not be in the queue or results.
     LikeTrack(Track),
+    /// The first press on Reset. The reset itself waits for the confirmation.
+    AskResetSettings,
+    /// Resets the preferences. This is also the second press on the Reset confirmation.
     ResetSettings,
+    /// The second press on an import confirmation: applies the backup that was read.
+    ConfirmImport,
+    /// The second press on the confirmation for turning the history off.
+    ConfirmTurnOffHistory,
+    CancelConfirmation,
+    /// A confirmation's timer ended. The value numbers the confirmation that started the timer.
+    ConfirmationExpired(u64),
 }
 
 /// A row whose ••• menu is open: its list and its position in that list. A queue can hold the same
@@ -271,4 +283,24 @@ pub(super) enum Message {
 pub(super) struct RowMenu {
     pub(super) list: &'static str,
     pub(super) index: usize,
+}
+
+/// A destructive change that waits for a second press. It clears itself after a few seconds, when
+/// the user presses something else, or when Settings is left.
+#[derive(Clone, Debug)]
+pub(super) struct PendingConfirmation {
+    pub(super) kind: Confirmation,
+    /// Numbers the confirmation, so the timer of an older one cannot clear a newer one.
+    pub(super) count: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum Confirmation {
+    Reset,
+    /// The backup, already read and parsed. Nothing is applied until the second press.
+    Import(Box<crate::preferences::Snapshot>),
+    /// Clears the search history and "Jump back in".
+    ClearHistory,
+    /// Turns the history off, which also clears "Jump back in".
+    TurnOffHistory,
 }

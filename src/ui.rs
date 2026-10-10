@@ -42,7 +42,9 @@ pub use diagnostics::{
     enable_diagnostic_soak, set_diagnostic_autoplay,
 };
 use iced::widget::operation::{self, AbsoluteOffset};
-use messages::{Message, NowPlayingTab, Page, Preference, RowMenu};
+use messages::{
+    Confirmation, Message, NowPlayingTab, Page, PendingConfirmation, Preference, RowMenu,
+};
 
 #[allow(dead_code)]
 struct App {
@@ -186,6 +188,9 @@ struct App {
     /// Set while the "Copied" notice shows; the value is the number of the copy that set it.
     copy_notice: Option<u64>,
     copy_notice_count: u64,
+    /// A destructive settings change that waits for a second press. It is dropped by any other press.
+    confirmation: Option<PendingConfirmation>,
+    confirmation_count: u64,
     artwork_cancel: Option<CancellationToken>,
     // Per-URL in-flight tokens so scroll reconciliation can keep useful
     // work and cancel only URLs that left the window of interest.
@@ -235,6 +240,70 @@ fn cache_cleared_notice(kind: crate::storage::CacheKind, cleared: &Result<u64, S
 /// Progress and the lyric highlight refresh this often while playing. Word-timed lyrics use the
 /// same tick: at 100 ms the Now Playing view alone costs about 9 % of a core.
 const PLAYBACK_TICK: Duration = Duration::from_millis(250);
+
+/// Messages the app sends itself: timers, loads, scrolling, frames and window state. They leave a
+/// pending confirmation in place. Every other message counts as a press.
+fn keeps_confirmation(message: &Message) -> bool {
+    match message {
+        Message::ConfirmImport
+        | Message::ConfirmTurnOffHistory
+        | Message::ResetSettings
+        | Message::ClearHistory
+        | Message::ConfirmationExpired(_)
+        | Message::PlaybackTick
+        | Message::PlaybackStatusChanged(_)
+        | Message::MprisCommand(_)
+        | Message::TrayCommand(_)
+        | Message::TrayServiceStarted(_)
+        | Message::ClockTick
+        | Message::StatusReading(_)
+        | Message::Resized { .. }
+        | Message::ResizeWorkDue(_)
+        | Message::DisplayScaleChanged(_)
+        | Message::WindowFocusChanged(_)
+        | Message::WindowMinimizedChecked(_)
+        | Message::AreaMeasured(_)
+        | Message::ArtworkLoaded { .. }
+        | Message::ArtworkRetryDue
+        | Message::ScrollPreloadDue
+        | Message::CarouselFrame(_)
+        | Message::FadeFrame(_)
+        | Message::LyricsLoaded { .. }
+        | Message::LyricsProgress { .. }
+        | Message::CollectionLoaded { .. }
+        | Message::CollectionMoreLoaded { .. }
+        | Message::CatalogCompleted { .. }
+        | Message::CatalogMoreCompleted { .. }
+        | Message::RadioLoaded { .. }
+        | Message::SuggestionsCompleted { .. }
+        | Message::HomeLoaded { .. }
+        | Message::HomeMoreLoaded { .. }
+        | Message::StorageUsageLoaded { .. }
+        | Message::StorageCleared { .. }
+        | Message::DiagnosticsExported { .. }
+        | Message::LocalDataExported { .. }
+        | Message::LocalDataImported { .. }
+        | Message::OutputDevicesLoaded(_)
+        | Message::TrackNotificationSent(_)
+        | Message::PersistState
+        | Message::VolumeSaveDue(_)
+        | Message::PrewarmPlayback
+        | Message::CopyNoticeExpired(_)
+        | Message::LyricsScrolled(_)
+        | Message::HomeScrolled(_)
+        | Message::SearchScrolled(_)
+        | Message::LibraryScrolled(_)
+        | Message::QueueScrolled(_)
+        | Message::CollectionScrolled(_)
+        | Message::CarouselScrolled(_) => true,
+        #[cfg(feature = "diagnostics")]
+        Message::DiagnosticFrame(_)
+        | Message::DiagnosticShot(_)
+        | Message::DiagnosticCapture(_)
+        | Message::DiagnosticCaptured(..) => true,
+        _ => false,
+    }
+}
 
 fn should_close_to_tray(preference_enabled: bool, tray_available: bool) -> bool {
     preference_enabled && tray_available
@@ -479,6 +548,11 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // Any press other than the confirmation's own buttons drops a pending confirmation, which
+        // includes leaving Settings. Timers, loads, scrolling and window events do not count.
+        if self.confirmation.is_some() && !keeps_confirmation(&message) {
+            self.confirmation = None;
+        }
         #[cfg(feature = "diagnostics")]
         let (name, started) = (timing::message_name(&message), std::time::Instant::now());
         let queue_before = self.queue_generation;
@@ -728,11 +802,10 @@ impl App {
                 match change {
                     Preference::RestoreQueue(v) => self.preferences.remember_queue = v,
                     Preference::History(v) => {
-                        self.preferences.remember_history = v;
-                        if !v {
-                            Arc::make_mut(&mut self.search_history).clear();
-                            Arc::make_mut(&mut self.recent).clear();
+                        if !v && !self.recent.is_empty() {
+                            return self.ask_confirmation(Confirmation::TurnOffHistory);
                         }
+                        self.set_history(v);
                     }
                     Preference::ShuffleAll(v) => self.preferences.shuffle_all = v,
                     Preference::ReducedMotion(v) => self.preferences.reduced_motion = v,
@@ -842,10 +915,42 @@ impl App {
                     self.persist();
                 }
             }
+            Message::AskClearHistory => {
+                if self.recent.is_empty() {
+                    self.clear_history();
+                } else {
+                    return self.ask_confirmation(Confirmation::ClearHistory);
+                }
+            }
             Message::ClearHistory => {
-                Arc::make_mut(&mut self.search_history).clear();
-                Arc::make_mut(&mut self.recent).clear();
+                self.confirmation = None;
+                self.clear_history();
+            }
+            Message::ConfirmTurnOffHistory => {
+                self.confirmation = None;
+                self.set_history(false);
                 self.persist();
+            }
+            Message::AskResetSettings => return self.ask_confirmation(Confirmation::Reset),
+            Message::CancelConfirmation => self.confirmation = None,
+            Message::ConfirmationExpired(count) => {
+                if self
+                    .confirmation
+                    .as_ref()
+                    .is_some_and(|pending| pending.count == count)
+                {
+                    self.confirmation = None;
+                }
+            }
+            Message::ConfirmImport => {
+                if let Some(PendingConfirmation {
+                    kind: Confirmation::Import(snapshot),
+                    ..
+                }) = self.confirmation.take()
+                {
+                    self.storage_notice = Some("Local-data backup imported.".into());
+                    return self.apply_snapshot(*snapshot);
+                }
             }
 
             Message::Navigate(page) => {
@@ -1047,8 +1152,8 @@ impl App {
             Message::LocalDataImported { result } => match result {
                 Ok(snapshot) => {
                     self.storage_loading = false;
-                    self.storage_notice = Some("Local-data backup imported.".into());
-                    return self.apply_snapshot(snapshot);
+                    self.storage_notice = None;
+                    return self.ask_confirmation(Confirmation::Import(Box::new(snapshot)));
                 }
                 Err(error) => {
                     self.storage_loading = false;
@@ -1700,6 +1805,7 @@ impl App {
                 self.persist();
             }
             Message::ResetSettings => {
+                self.confirmation = None;
                 let current = std::mem::take(&mut self.preferences);
                 let mut defaults = Self::reset_preferences(&current);
                 if current.startup && crate::preferences::set_startup(false).is_err() {
@@ -1845,6 +1951,8 @@ impl App {
             artwork_selected_retried: false,
             copy_notice: None,
             copy_notice_count: 0,
+            confirmation: None,
+            confirmation_count: 0,
             artwork_cancel: None,
             artwork_batch_tokens: HashMap::new(),
             artwork_request_id: 0,
@@ -2001,6 +2109,32 @@ impl App {
             favorites: Arc::clone(&self.favorites),
             recent: Arc::clone(&self.recent),
         }
+    }
+
+    /// Turns the search history on or off. Turning it off also clears "Jump back in".
+    fn set_history(&mut self, on: bool) {
+        self.preferences.remember_history = on;
+        if !on {
+            Arc::make_mut(&mut self.search_history).clear();
+            Arc::make_mut(&mut self.recent).clear();
+        }
+    }
+
+    fn clear_history(&mut self) {
+        Arc::make_mut(&mut self.search_history).clear();
+        Arc::make_mut(&mut self.recent).clear();
+        self.persist();
+    }
+
+    /// Shows a destructive change for a second press. It clears itself after five seconds.
+    fn ask_confirmation(&mut self, kind: Confirmation) -> Task<Message> {
+        self.confirmation_count = self.confirmation_count.wrapping_add(1);
+        let count = self.confirmation_count;
+        self.confirmation = Some(PendingConfirmation { kind, count });
+        Task::perform(
+            async { tokio::time::sleep(Duration::from_secs(5)).await },
+            move |()| Message::ConfirmationExpired(count),
+        )
     }
 
     /// Copies the preference values into the state that uses them: the playback toggles, the volume
@@ -4332,6 +4466,125 @@ mod tests {
         assert_eq!(reset.ui_language, crate::preferences::UiLanguage::Spanish);
         assert_eq!(reset.window_width, current.window_width);
         assert!(!reset.shuffle);
+    }
+
+    #[test]
+    fn reset_waits_for_a_second_press() {
+        let mut app = App {
+            preferences: Preferences {
+                shuffle: true,
+                ..Preferences::default()
+            },
+            shuffle: true,
+            ..App::default()
+        };
+        drop(app.update(Message::AskResetSettings));
+        assert!(matches!(
+            app.confirmation.as_ref().map(|pending| &pending.kind),
+            Some(Confirmation::Reset)
+        ));
+        assert!(app.preferences.shuffle, "the first press changes nothing");
+        drop(app.update(Message::ResetSettings));
+        assert!(app.confirmation.is_none());
+        assert!(!app.preferences.shuffle);
+    }
+
+    #[test]
+    fn a_press_elsewhere_drops_the_confirmation_but_background_messages_do_not() {
+        let mut app = App::default();
+        drop(app.update(Message::AskResetSettings));
+        drop(app.update(Message::WindowFocusChanged(true)));
+        drop(app.update(Message::ClockTick));
+        assert!(
+            app.confirmation.is_some(),
+            "timers and window events keep it"
+        );
+        drop(app.update(Message::Preference(Preference::ShuffleAll(false))));
+        assert!(app.confirmation.is_none(), "another press drops it");
+    }
+
+    #[test]
+    fn only_the_timer_of_the_latest_confirmation_clears_it() {
+        let mut app = App::default();
+        drop(app.update(Message::AskResetSettings));
+        let first = app.confirmation.as_ref().map_or(0, |pending| pending.count);
+        drop(app.update(Message::AskResetSettings));
+        let second = app.confirmation.as_ref().map_or(0, |pending| pending.count);
+        assert_ne!(first, second);
+        drop(app.update(Message::ConfirmationExpired(first)));
+        assert!(app.confirmation.is_some());
+        drop(app.update(Message::ConfirmationExpired(second)));
+        assert!(app.confirmation.is_none());
+    }
+
+    #[test]
+    fn an_import_applies_nothing_until_it_is_confirmed() {
+        let mut app = App::default();
+        let snapshot = Snapshot {
+            favorites: Arc::new(vec![fixture_track("f1"), fixture_track("f2")]),
+            queue: Arc::new(vec![fixture_track("q1")]),
+            ..Snapshot::default()
+        };
+        drop(app.update(Message::LocalDataImported {
+            result: Ok(snapshot),
+        }));
+        assert!(matches!(
+            app.confirmation.as_ref().map(|pending| &pending.kind),
+            Some(Confirmation::Import(_))
+        ));
+        assert!(app.favorites.is_empty() && app.queue.is_empty());
+        drop(app.update(Message::ConfirmImport));
+        assert!(app.confirmation.is_none());
+        assert_eq!(app.favorites.len(), 2);
+        assert_eq!(app.queue.len(), 1);
+    }
+
+    #[test]
+    fn turning_history_off_asks_first_when_jump_back_in_would_go() {
+        let mut app = App {
+            recent: Arc::new(vec![crate::preferences::RecentPlay::Track(fixture_track(
+                "r",
+            ))]),
+            ..App::default()
+        };
+        drop(app.update(Message::Preference(Preference::History(false))));
+        assert!(
+            app.preferences.remember_history,
+            "nothing changes before the second press"
+        );
+        assert!(matches!(
+            app.confirmation.as_ref().map(|pending| &pending.kind),
+            Some(Confirmation::TurnOffHistory)
+        ));
+        drop(app.update(Message::ConfirmTurnOffHistory));
+        assert!(!app.preferences.remember_history);
+        assert!(app.recent.is_empty());
+    }
+
+    #[test]
+    fn clearing_history_asks_only_when_jump_back_in_would_go() {
+        let mut app = App {
+            search_history: Arc::new(vec!["search".into()]),
+            ..App::default()
+        };
+        drop(app.update(Message::AskClearHistory));
+        assert!(app.confirmation.is_none());
+        assert!(app.search_history.is_empty());
+
+        let mut app = App {
+            recent: Arc::new(vec![crate::preferences::RecentPlay::Track(fixture_track(
+                "r",
+            ))]),
+            ..App::default()
+        };
+        drop(app.update(Message::AskClearHistory));
+        assert!(matches!(
+            app.confirmation.as_ref().map(|pending| &pending.kind),
+            Some(Confirmation::ClearHistory)
+        ));
+        assert_eq!(app.recent.len(), 1);
+        drop(app.update(Message::ClearHistory));
+        assert!(app.recent.is_empty());
     }
 
     #[test]
