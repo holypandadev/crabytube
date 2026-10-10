@@ -30,12 +30,8 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "BotGuard" => "BotGuard",
         "Appearance" => "Apariencia",
         "Playback" => "Reproducción",
-        "System" => "Sistema",
-        "Discord" => "Discord",
         "Lyrics" => "Letras",
         "Storage" => "Almacenamiento",
-        "Help" => "Ayuda",
-        "All" => "Todo",
         "Songs" => "Canciones",
         "Albums" => "Álbumes",
         "Artists" => "Artistas",
@@ -49,17 +45,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Settings" => "Ajustes",
         "CrabyTube" => "CrabyTube",
         "Home" => "Inicio",
-        "Library" => "Biblioteca",
-        "Queue" => "Cola",
-        "Search" => "Buscar",
         "Ctrl+K" => "Ctrl+K",
-        "Top result" => "Mejor resultado",
-        "TOP RESULT" => "MEJOR RESULTADO",
-        "SONGS" => "CANCIONES",
-        "YOUTUBE MUSIC" => "YOUTUBE MUSIC",
-        "Relax" => "Relajación",
-        "Night" => "Noche",
-        "Party" => "Fiesta",
         "Back" => "Atrás",
         "1 song" => "1 canción",
         "GOOD MORNING." => "BUENOS DÍAS.",
@@ -98,13 +84,9 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Copy artist" => "Copiar artista",
         "Copied" => "Copiado",
         "Live" => "Directos",
-        "Live streams are not supported yet" => "Los directos todavía no son compatibles",
         "Searching…" => "Buscando…",
         "Retry loading more" => "Reintentar carga",
-        "Recent searches" => "Búsquedas recientes",
         "Clear" => "Borrar",
-        "Try again" => "Intentar de nuevo",
-        "Home could not load" => "No se pudo cargar Inicio",
         "Autoplay" => "Reproducción automática",
         "Playing" => "Reproduciendo",
         "Paused" => "En pausa",
@@ -113,37 +95,26 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Nothing playing" => "No se está reproduciendo nada",
         "Buffering…" => "Cargando…",
         "Playback failed" => "Falló la reproducción",
-        "Ready" => "Listo",
         "Retry" => "Reintentar",
         "Could not refresh Home: {}" => "No se pudo actualizar Inicio: {}",
         "This collection type is not supported yet." => {
             "Este tipo de colección todavía no es compatible."
         }
         "Updating…" => "Actualizando…",
-        "PLAYLIST" => "LISTA DE REPRODUCCIÓN",
-        "PLAYLISTS" => "LISTAS DE REPRODUCCIÓN",
-        "MIXES" => "MEZCLAS",
-        "ALBUMS" => "ÁLBUMES",
-        "ARTISTS" => "ARTISTAS",
-        "MUSIC" => "MÚSICA",
         "ARTIST" => "ARTISTA",
         "ALBUM" => "ÁLBUM",
-        "SONG" => "CANCIÓN",
-        "MIX" => "MEZCLA",
         "Loading more songs…" => "Cargando más canciones…",
         "TITLE" => "TÍTULO",
         "DURATION" => "DURACIÓN",
         "Audio output" => "Salida de audio",
         "Volume" => "Volumen",
         "System default" => "Predeterminado del sistema",
-        "Reduce motion" => "Reducir movimiento",
         "Compact" => "Compacta",
         "Comfortable" => "Espaciosa",
         "Sans serif" => "Palo seco",
         "Serif" => "Serif",
         "Monospace" => "Monoespaciada",
         "Integrations" => "Integraciones",
-        "System media controls" => "Controles multimedia del sistema",
         "System tray is starting." => "Iniciando la bandeja del sistema.",
         "System tray is active." => "La bandeja del sistema está activa.",
         "Waiting for a compatible system tray host." => {
@@ -188,8 +159,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
             "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
         }
         "Lyrics only" => "Solo letras",
-        "See all" => "Ver todo",
-        "Refresh" => "Actualizar",
         "Scale With Window" => "Escalar con la ventana",
         "Keeps the layout's proportions on large windows." => {
             "Mantiene las proporciones en ventanas grandes."
@@ -249,7 +218,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Playback Helpers" => "Ayudantes de reproducción",
         "Player" => "Reproductor",
         "Play next" => "Reproducir a continuación",
-        "Quick Picks" => "Selección rápida",
         "Reduce Motion" => "Reducir movimiento",
         "Reset" => "Restablecer",
         "Reset settings?" => "¿Restablecer los ajustes?",
@@ -633,13 +601,13 @@ mod tests {
 
     #[test]
     fn english_is_an_identity_translation_and_spanish_has_a_fallback() {
-        assert_eq!(translate(UiLanguage::English, "Search"), "Search");
-        assert_eq!(translate(UiLanguage::Spanish, "Search"), "Buscar");
+        assert_eq!(translate(UiLanguage::English, "Settings"), "Settings");
+        assert_eq!(translate(UiLanguage::Spanish, "Settings"), "Ajustes");
         assert_eq!(
-            translate(UiLanguage::Spanish, "Reduce motion"),
+            translate(UiLanguage::Spanish, "Reduce Motion"),
             "Reducir movimiento"
         );
-        assert_eq!(translate(UiLanguage::Spanish, "Queue"), "Cola");
+        assert_eq!(translate(UiLanguage::Spanish, "Up Next"), "A continuación");
         assert_eq!(
             translate(UiLanguage::Spanish, "42 results"),
             "42 resultados"
