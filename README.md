@@ -28,7 +28,7 @@
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/home.webp" alt="Home"></td>
-    <td width="50%"><img src="docs/screenshots/search.webp" alt="Search results"></td>
+    <td width="50%"><img src="docs/screenshots/search.webp" alt="Search results with live broadcasts"></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/now-playing.webp" alt="Now Playing with the Up Next queue"></td>
