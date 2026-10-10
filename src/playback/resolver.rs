@@ -1115,13 +1115,11 @@ impl StreamResolver for YouTubeStreamResolver {
                     }
                 }
             };
-            // The player request carries no PO token, so it runs while the tokens are minted.
+            // The player request carries no PO token, so it runs while the tokens are minted. The first
+            // failure ends the wait, so a slow mint does not hold back a network error.
             let (tokens, payload) = tokio::select! {
                 _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                joined = async { tokio::join!(tokens_future, self.post_player(&runtime, &visitor_data, track)) } => {
-                    let (tokens, payload) = joined;
-                    (tokens?, payload?)
-                }
+                joined = async { tokio::try_join!(tokens_future, self.post_player(&runtime, &visitor_data, track)) } => joined?,
             };
             // Tokens restored from the saved cache are the only ones a 403 can blame on stale state.
             let tokens_reused = tokens.as_ref().is_some_and(|tokens| tokens.reused);
