@@ -76,7 +76,7 @@ fn greeting_for(part: DayPart) -> &'static str {
 /// "21:14 — THURSDAY 09 OCT", with the weekday and month already translated.
 fn clock_line(clock: LocalClock, weekday: &str, month: &str) -> String {
     format!(
-        "{:02}:{:02} — {} {:02} {}",
+        "{:02}:{:02} · {} {:02} {}",
         clock.hour, clock.minute, weekday, clock.day, month
     )
 }
@@ -230,7 +230,7 @@ impl App {
                 .collect();
             grid = grid.push(row(cells).spacing(JUMP_COLUMN_GAP));
         }
-        let heading = section_heading(self.tr_static("JUMP BACK IN").to_owned(), None);
+        let heading = section_heading(self.tr_static("Jump back in").to_owned(), None);
         container(
             column![heading, Space::new().height(JUMP_HEADING_GAP), grid]
                 .width(layout.search_width),
@@ -245,7 +245,7 @@ impl App {
         let (url, title, detail, meta, action) = match play {
             RecentPlay::Track(track) => (
                 track.thumbnail_url.as_deref(),
-                track.title.clone(),
+                super::shell::display_title(&track.title).to_owned(),
                 track.artist.clone(),
                 track
                     .duration_secs
@@ -440,7 +440,7 @@ mod tests {
         };
         assert_eq!(
             clock_line(clock, "THURSDAY", "OCT"),
-            "21:04 — THURSDAY 09 OCT"
+            "21:04 · THURSDAY 09 OCT"
         );
     }
 

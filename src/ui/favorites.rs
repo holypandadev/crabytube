@@ -1,6 +1,6 @@
 //! Favorite Songs: a strict table of the locally saved tracks.
 
-use super::shell::fit;
+use super::shell::{display_title, fit};
 use super::theme::{
     self, DIM, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_TITLE, hrule, icon,
     label,
@@ -34,7 +34,7 @@ impl App {
             button(
                 row![
                     icon("play", 16.0, INK),
-                    label(self.tr("Play All").into_owned(), TEXT_BODY)
+                    label(self.tr("Play all").into_owned(), TEXT_BODY)
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
@@ -57,7 +57,7 @@ impl App {
         .spacing(16);
         let narrow = width < 700.0;
         let titles = column![
-            text(self.tr("Favorite Songs"))
+            text(self.tr("Favorite songs"))
                 .size(if narrow { TEXT_TITLE } else { TEXT_DISPLAY })
                 .font(MONO),
             label(self.tr_string(format!("{count} saved tracks")), TEXT_BODY),
@@ -182,13 +182,21 @@ impl App {
                     ),
                     if show_duration {
                         Element::from(label(
-                            fit(&track.title, title_w - cover - 16.0, TEXT_BODY),
+                            fit(
+                                display_title(&track.title),
+                                title_w - cover - 16.0,
+                                TEXT_BODY,
+                            ),
                             TEXT_BODY,
                         ))
                     } else {
                         column![
                             label(
-                                fit(&track.title, title_w - cover - 16.0, TEXT_BODY),
+                                fit(
+                                    display_title(&track.title),
+                                    title_w - cover - 16.0,
+                                    TEXT_BODY
+                                ),
                                 TEXT_BODY
                             ),
                             label(

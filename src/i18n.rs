@@ -52,7 +52,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "GOOD AFTERNOON." => "BUENAS TARDES.",
         "GOOD EVENING." => "BUENAS NOCHES.",
         "STILL UP?" => "BUENAS NOCHES.",
-        "JUMP BACK IN" => "SEGUIR ESCUCHANDO",
+        "Jump back in" => "Seguir escuchando",
         "FAVORITES" => "FAVORITOS",
         "Queue limited to {} entries; the selected track stays first." => {
             "La cola se limita a {} elementos; la pista elegida sigue primera."
@@ -159,11 +159,11 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
             "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
         }
         "Lyrics only" => "Solo letras",
-        "Scale With Window" => "Escalar con la ventana",
+        "Scale with window" => "Escalar con la ventana",
         "Keeps the layout's proportions on large windows." => {
             "Mantiene las proporciones en ventanas grandes."
         }
-        "Track Notifications" => "Notificaciones de pista",
+        "Track notifications" => "Notificaciones de pista",
         "Shows a notification when a track starts while the window is in the background." => {
             "Muestra una notificación cuando empieza una pista con la ventana en segundo plano."
         }
@@ -172,39 +172,39 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Add to queue" => "Añadir a la cola",
         "Remove from queue" => "Quitar de la cola",
         "Clear up next" => "Vaciar a continuación",
-        "Artwork Cache" => "Caché de carátulas",
+        "Artwork cache" => "Caché de carátulas",
         "Audio" => "Audio",
         "Changes save automatically" => "Los cambios se guardan solos",
-        "Choose a song from Home or Favorite Songs." => {
+        "Choose a song from Home or Favorite songs." => {
             "Elige una canción en Inicio o en Favoritas."
         }
-        "Close to Tray" => "Cerrar a la bandeja",
-        "Compact Mode" => "Modo compacto",
+        "Close to tray" => "Cerrar a la bandeja",
+        "Compact mode" => "Modo compacto",
         "[ COULD NOT LOAD ]" => "[ NO SE PUDO CARGAR ]",
         "CRABYTUBE" => "CRABYTUBE",
         "Customize your experience" => "Personaliza tu experiencia",
         "Default" => "Predeterminado",
         "Diagnostics" => "Diagnóstico",
-        "Discord Presence" => "Presencia en Discord",
+        "Discord presence" => "Presencia en Discord",
         "Export" => "Exportar",
-        "Favorite Songs" => "Canciones favoritas",
+        "Favorite songs" => "Canciones favoritas",
         "Favorites" => "Favoritas",
-        "Follow Current Line" => "Seguir la línea actual",
+        "Follow current line" => "Seguir la línea actual",
         "GPL-3.0-or-later. Not affiliated with Google or YouTube." => {
             "GPL-3.0 o posterior. Sin relación con Google ni YouTube."
         }
-        "GPU Acceleration" => "Aceleración por GPU",
+        "GPU acceleration" => "Aceleración por GPU",
         "[ HOME COULD NOT LOAD ]" => "[ NO SE PUDO CARGAR INICIO ]",
         "Import" => "Importar",
-        "Launch on Startup" => "Abrir al iniciar sesión",
+        "Launch on startup" => "Abrir al iniciar sesión",
         "Loading…" => "Cargando…",
         "[ LOADING ]" => "[ CARGANDO ]",
         "[ LOADING LYRICS ]" => "[ CARGANDO LETRAS ]",
         "[ LOADING RADIO ]" => "[ CARGANDO RADIO ]",
         "[ LOADING YOUTUBE MUSIC ]" => "[ CARGANDO YOUTUBE MUSIC ]",
-        "Local Data" => "Datos locales",
-        "Lyrics Cache" => "Caché de letras",
-        "Media Controls (MPRIS)" => "Controles multimedia (MPRIS)",
+        "Local data" => "Datos locales",
+        "Lyrics cache" => "Caché de letras",
+        "Media controls (MPRIS)" => "Controles multimedia (MPRIS)",
         "No lyrics for this song." => "No hay letra para esta canción.",
         "Not synced" => "Sin sincronizar",
         "Press play to load the lyrics." => "Pulsa reproducir para cargar la letra.",
@@ -212,13 +212,13 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
             "Esta colección no tiene canciones reproducibles."
         }
         "[ NOTHING PLAYING ]" => "[ NADA EN REPRODUCCIÓN ]",
-        "Output Device" => "Dispositivo de salida",
+        "Output device" => "Dispositivo de salida",
         "Play" => "Reproducir",
-        "Play All" => "Reproducir todo",
-        "Playback Helpers" => "Ayudantes de reproducción",
+        "Play all" => "Reproducir todo",
+        "Playback helpers" => "Ayudantes de reproducción",
         "Player" => "Reproductor",
         "Play next" => "Reproducir a continuación",
-        "Reduce Motion" => "Reducir movimiento",
+        "Reduce motion" => "Reducir movimiento",
         "Reset" => "Restablecer",
         "Reset settings?" => "¿Restablecer los ajustes?",
         "Language, window size and lyrics offsets stay." => {
@@ -240,33 +240,33 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
             "{} búsquedas guardadas. Borrarlas o desactivar el historial quita también «Seguir escuchando»."
         }
         "Importing local data…" => "Importando datos locales…",
-        "Restore Queue on Launch" => "Restaurar la cola al abrir",
+        "Restore queue on launch" => "Restaurar la cola al abrir",
         "Return to current line" => "Volver a la línea actual",
         "Search artist, album, tracks" => "Busca artistas, álbumes, canciones",
         "[ SEARCH FAILED ]" => "[ FALLÓ LA BÚSQUEDA ]",
-        "Search History" => "Historial de búsqueda",
-        "Search Results" => "Resultados",
-        "Search Suggestions" => "Sugerencias de búsqueda",
+        "Search history" => "Historial de búsqueda",
+        "Search results" => "Resultados",
+        "Search suggestions" => "Sugerencias de búsqueda",
         "Search to start" => "Busca para empezar",
         "Search to start listening." => "Busca algo para empezar a escuchar.",
-        "Show Lyrics by Default" => "Mostrar letras por defecto",
-        "Show Translation" => "Mostrar traducción",
+        "Show lyrics by default" => "Mostrar letras por defecto",
+        "Show translation" => "Mostrar traducción",
         "Shuffle" => "Aleatorio",
-        "Shuffle Whole Queue" => "Mezclar toda la cola",
+        "Shuffle whole queue" => "Mezclar toda la cola",
         "Space play/pause · ←/→ seek · Ctrl+K search · Esc back" => {
             "Espacio reproducir/pausar · ←/→ avanzar · Ctrl+K buscar · Esc volver"
         }
         "Tap the heart on any song to save it here." => {
             "Pulsa el corazón de una canción para guardarla aquí."
         }
-        "Text Size" => "Tamaño del texto",
+        "Text size" => "Tamaño del texto",
         "The queue is empty." => "La cola está vacía.",
-        "Timing Offset" => "Desfase de tiempo",
-        "Top Result" => "Resultado principal",
-        "Up Next" => "A continuación",
+        "Timing offset" => "Desfase de tiempo",
+        "Top result" => "Resultado principal",
+        "Up next" => "A continuación",
         "Remove favorite" => "Quitar de favoritas",
         "Add to favorites" => "Añadir a favoritas",
-        "Smaller rows in Up Next, results, collections and Favorites." => {
+        "Smaller rows in Up next, results, collections and Favorites." => {
             "Filas más pequeñas en A continuación, resultados, colecciones y favoritas."
         }
         "Smoother on large windows; uses much more memory. Applies after restart." => {
@@ -567,12 +567,12 @@ mod tests {
         assert_eq!(translate(UiLanguage::Spanish, "THURSDAY"), "JUEVES");
         assert_eq!(translate(UiLanguage::Spanish, "OCT"), "OCT");
         assert_eq!(
-            translate(UiLanguage::Spanish, "JUMP BACK IN"),
-            "SEGUIR ESCUCHANDO"
+            translate(UiLanguage::Spanish, "Jump back in"),
+            "Seguir escuchando"
         );
         assert_eq!(
-            translate(UiLanguage::English, "JUMP BACK IN"),
-            "JUMP BACK IN"
+            translate(UiLanguage::English, "Jump back in"),
+            "Jump back in"
         );
         assert_eq!(
             translate(UiLanguage::Spanish, "STILL UP?"),
@@ -604,10 +604,10 @@ mod tests {
         assert_eq!(translate(UiLanguage::English, "Settings"), "Settings");
         assert_eq!(translate(UiLanguage::Spanish, "Settings"), "Ajustes");
         assert_eq!(
-            translate(UiLanguage::Spanish, "Reduce Motion"),
+            translate(UiLanguage::Spanish, "Reduce motion"),
             "Reducir movimiento"
         );
-        assert_eq!(translate(UiLanguage::Spanish, "Up Next"), "A continuación");
+        assert_eq!(translate(UiLanguage::Spanish, "Up next"), "A continuación");
         assert_eq!(
             translate(UiLanguage::Spanish, "42 results"),
             "42 resultados"

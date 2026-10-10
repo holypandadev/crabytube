@@ -1,4 +1,4 @@
-use super::shell::fit;
+use super::shell::{display_title, fit, meta_text};
 use super::theme::{
     self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_TITLE, hrule, icon, label,
 };
@@ -239,7 +239,10 @@ impl App {
         ]
         .spacing(6);
         if let Some(subtitle) = data.subtitle.as_deref().or(data.owner.as_deref()) {
-            metadata = metadata.push(label(fit(subtitle, text_width, TEXT_BODY), TEXT_BODY));
+            metadata = metadata.push(label(
+                fit(&meta_text(subtitle), text_width, TEXT_BODY),
+                TEXT_BODY,
+            ));
         }
         if let Some(summary) = &data.summary {
             metadata = metadata
@@ -374,7 +377,10 @@ impl App {
                     crate::artwork::THUMB_MAX
                 ),
                 column![
-                    label(fit(&track.title, title_w, TEXT_BODY), TEXT_BODY),
+                    label(
+                        fit(display_title(&track.title), title_w, TEXT_BODY),
+                        TEXT_BODY
+                    ),
                     label(fit(&track.artist, title_w, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
                 ]
                 .spacing(4)

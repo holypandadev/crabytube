@@ -38,6 +38,49 @@ pub(super) fn fit(value: &str, width: f32, size: f32) -> String {
     out
 }
 
+/// Catalog metadata separates its fields with "•"; the interface writes " · " between them. Only
+/// the shown text changes: parsing reads the original.
+pub(super) fn meta_text(value: &str) -> String {
+    value.replace(" • ", " · ").replace('•', "·")
+}
+
+/// Tags that uploads add to a title and that say nothing about the song.
+const TITLE_TAGS: [&str; 7] = [
+    "official audio",
+    "official video",
+    "official music video",
+    "official lyric video",
+    "lyric video",
+    "lyrics",
+    "audio",
+];
+
+/// The title as shown: trailing tags such as "(Official Video)" or "[Lyrics]" are dropped, in any
+/// case. The stored title, search, MPRIS, Discord and notifications keep the original. A title that
+/// would be left empty is shown whole.
+pub(super) fn display_title(title: &str) -> &str {
+    let mut shown = title.trim_end();
+    loop {
+        let open = match shown.chars().next_back() {
+            Some(')') => '(',
+            Some(']') => '[',
+            _ => break,
+        };
+        let Some(start) = shown.rfind(open) else {
+            break;
+        };
+        let tag = shown[start + 1..shown.len() - 1].trim();
+        if !TITLE_TAGS
+            .iter()
+            .any(|known| tag.eq_ignore_ascii_case(known))
+        {
+            break;
+        }
+        shown = shown[..start].trim_end();
+    }
+    if shown.is_empty() { title } else { shown }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Home,
@@ -238,7 +281,7 @@ impl App {
         let favorites = if narrow {
             "Favorites"
         } else {
-            "Favorite Songs"
+            "Favorite songs"
         };
         let titles = ["Home", favorites, "Settings"];
         let active = self.active_tab();
@@ -505,7 +548,7 @@ impl App {
                 .into()
         };
         let text_width = (width - 32.0 - 44.0 - 12.0 - 150.0).max(60.0);
-        let title = track.map_or_else(String::new, |t| t.title.clone());
+        let title = track.map_or_else(String::new, |t| display_title(&t.title).to_owned());
         let subtitle = track.map_or_else(String::new, |t| t.artist.clone());
         // A mouse area rather than a button: the artist name inside is a button of its own,
         // and a click on it searches instead of opening Now Playing.
@@ -577,7 +620,7 @@ impl App {
         let text_width = (side - 52.0 - 12.0 - 44.0 - 20.0).max(40.0);
         let title = track.map_or_else(
             || self.tr("Nothing playing").into_owned(),
-            |t| t.title.clone(),
+            |t| display_title(&t.title).to_owned(),
         );
         let subtitle = status.unwrap_or_else(|| {
             track.map_or_else(
@@ -823,7 +866,30 @@ pub(super) fn spacer<'a>(height: f32) -> Element<'a, Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{display_title, fit, meta_text};
+
+    #[test]
+    fn upload_tags_are_dropped_from_the_shown_title_only_at_its_end() {
+        assert_eq!(display_title("Song (Official Video)"), "Song");
+        assert_eq!(display_title("Song [LYRICS]"), "Song");
+        assert_eq!(display_title("Song (Official Audio) [Lyric Video]"), "Song");
+        assert_eq!(display_title("Song (Live)"), "Song (Live)");
+        assert_eq!(
+            display_title("Audio (Lyrics) Remix"),
+            "Audio (Lyrics) Remix"
+        );
+        assert_eq!(display_title("(Official Video)"), "(Official Video)");
+        assert_eq!(
+            display_title("Song (Remastered 2009)"),
+            "Song (Remastered 2009)"
+        );
+    }
+
+    #[test]
+    fn catalog_metadata_is_shown_with_middle_dots() {
+        assert_eq!(meta_text("Song • Artist • 3:45"), "Song · Artist · 3:45");
+        assert_eq!(meta_text("Album"), "Album");
+    }
 
     #[test]
     fn latin_text_is_cut_by_characters_with_an_ellipsis() {

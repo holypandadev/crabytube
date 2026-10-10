@@ -1,10 +1,10 @@
 //! Now Playing: large artwork with transport on the left, Up Next and Lyrics
 //! on the right.
 
-use super::shell::fit;
+use super::shell::{display_title, fit};
 use super::theme::{
-    self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_TITLE,
-    UNSUNG_ON_LIGHT, hrule, label, vrule,
+    self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION,
+    TEXT_TITLE, UNSUNG_ON_LIGHT, hrule, label, vrule,
 };
 use super::{App, Message, NowPlayingTab, format_duration, layout};
 use crate::preferences::UiDensity;
@@ -56,7 +56,7 @@ impl App {
             return column![
                 label(self.tr("[ NOTHING PLAYING ]").into_owned(), TEXT_BODY),
                 label(
-                    self.tr("Choose a song from Home or Favorite Songs.")
+                    self.tr("Choose a song from Home or Favorite songs.")
                         .into_owned(),
                     TEXT_CAPTION
                 )
@@ -138,12 +138,12 @@ impl App {
         }
         row![
             column![
-                text(fit(&track.title, text_width, TEXT_TITLE))
+                text(fit(display_title(&track.title), text_width, TEXT_TITLE))
                     .size(TEXT_TITLE)
                     .font(MONO),
-                self.artist_link(&track.artist, text_width, 18.0, INK),
+                self.artist_link(&track.artist, text_width, TEXT_SECTION, INK),
                 label(
-                    fit(&meta.join("  •  "), text_width, TEXT_CAPTION),
+                    fit(&meta.join(" · "), text_width, TEXT_CAPTION),
                     TEXT_CAPTION
                 )
                 .color(DIM),
@@ -171,7 +171,7 @@ impl App {
         };
         let tabs = container(
             row![
-                tab("Up Next", NowPlayingTab::Queue),
+                tab("Up next", NowPlayingTab::Queue),
                 vrule(38.0, INK),
                 tab("Lyrics", NowPlayingTab::Lyrics),
             ]
@@ -272,7 +272,7 @@ impl App {
                     column![
                         row![
                             marker,
-                            text(fit(&entry.title, text_width, TEXT_BODY))
+                            text(fit(display_title(&entry.title), text_width, TEXT_BODY))
                                 .size(TEXT_BODY)
                                 .font(MONO)
                         ]

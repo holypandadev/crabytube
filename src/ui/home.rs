@@ -1,6 +1,6 @@
 //! Home: the search field, the "All-time essentials" carousel and search results.
 
-use super::shell::{fit, section_heading};
+use super::shell::{display_title, fit, meta_text, section_heading};
 use super::theme::{
     self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, hrule, icon, label,
 };
@@ -576,7 +576,7 @@ impl App {
             cards = cards.push(card(
                 self.cover(item.thumbnail_url.as_deref(), layout.card, variant),
                 fit(&item.title, text_width, TEXT_BODY),
-                fit(&item.subtitle, text_width, TEXT_CAPTION),
+                fit(&meta_text(&item.subtitle), text_width, TEXT_CAPTION),
                 layout.card,
                 action,
             ));
@@ -613,7 +613,7 @@ impl App {
         let count = self.catalog_results.len();
         content = content
             .push(
-                text(self.tr("Search Results"))
+                text(self.tr("Search results"))
                     .size(TEXT_SECTION)
                     .font(MONO),
             )
@@ -646,7 +646,7 @@ impl App {
         if let Some(top) = self.catalog_results.first() {
             content = content
                 .push(Space::new().height(18))
-                .push(label(self.tr("Top Result").into_owned(), TEXT_BODY))
+                .push(label(self.tr("Top result").into_owned(), TEXT_BODY))
                 .push(Space::new().height(8))
                 .push(self.top_result(top, width));
         }
@@ -806,7 +806,11 @@ impl App {
                     text(fit(&title, text_width, TEXT_SECTION))
                         .size(TEXT_SECTION)
                         .font(MONO),
-                    label(fit(&item.subtitle, text_width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    label(
+                        fit(&meta_text(&item.subtitle), text_width, TEXT_CAPTION),
+                        TEXT_CAPTION
+                    )
+                    .color(DIM),
                     Space::new().height(6),
                     button(
                         row![
@@ -983,9 +987,15 @@ impl App {
                                 crate::artwork::THUMB_MAX
                             ),
                             column![
-                                label(fit(&item.title, text_width, TEXT_BODY), TEXT_BODY),
-                                label(fit(&item.subtitle, text_width, TEXT_CAPTION), TEXT_CAPTION)
-                                    .color(DIM),
+                                label(
+                                    fit(display_title(&item.title), text_width, TEXT_BODY),
+                                    TEXT_BODY
+                                ),
+                                label(
+                                    fit(&meta_text(&item.subtitle), text_width, TEXT_CAPTION),
+                                    TEXT_CAPTION
+                                )
+                                .color(DIM),
                             ]
                             .spacing(6),
                         ]
@@ -1006,6 +1016,7 @@ impl App {
 
 /// `Title — Artist`, or just the title when the catalog omitted the artist.
 fn byline(title: &str, artist: &str) -> String {
+    let title = super::shell::display_title(title);
     if artist.trim().is_empty() {
         title.to_owned()
     } else {

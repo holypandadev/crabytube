@@ -236,13 +236,13 @@ impl App {
         let shelf = !self.recent.is_empty();
         match self.confirmation.as_ref().map(|pending| &pending.kind) {
             Some(Confirmation::ClearHistory) => self.setting(
-                "Search History",
+                "Search history",
                 Some(self.tr_static("Clear history and Jump back in?").into()),
                 self.confirm_buttons("Confirm", Message::ClearHistory),
                 width,
             ),
             Some(Confirmation::TurnOffHistory) => self.setting(
-                "Search History",
+                "Search history",
                 Some(
                     self.tr_static("Turn off history and remove Jump back in?")
                         .into(),
@@ -261,7 +261,7 @@ impl App {
                 .replacen("{}", &searches.to_string(), 1);
                 let remember = self.preferences.remember_history;
                 self.setting(
-                    "Search History",
+                    "Search history",
                     Some(hint),
                     row![
                         button(label(self.tr("Clear").into_owned(), TEXT_CAPTION))
@@ -356,8 +356,8 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Compact Mode",
-                    Some("Smaller rows in Up Next, results, collections and Favorites.".into()),
+                    "Compact mode",
+                    Some("Smaller rows in Up next, results, collections and Favorites.".into()),
                     toggle(
                         p.ui_density == UiDensity::Compact,
                         Message::Preference(Preference::UiDensity(
@@ -371,7 +371,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Reduce Motion",
+                    "Reduce motion",
                     None,
                     toggle(
                         p.reduced_motion,
@@ -380,7 +380,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Scale With Window",
+                    "Scale with window",
                     Some("Keeps the layout's proportions on large windows.".into()),
                     toggle(
                         p.scale_with_window,
@@ -389,7 +389,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "GPU Acceleration",
+                    "GPU acceleration",
                     Some(
                         "Smoother on large windows; uses much more memory. Applies after restart."
                             .into(),
@@ -420,7 +420,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Shuffle Whole Queue",
+                    "Shuffle whole queue",
                     None,
                     toggle(
                         p.shuffle_all,
@@ -429,7 +429,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Restore Queue on Launch",
+                    "Restore queue on launch",
                     Some("Playback never starts by itself.".into()),
                     toggle(
                         p.remember_queue,
@@ -496,7 +496,7 @@ impl App {
             "Audio",
             width,
             vec![self.setting(
-                "Output Device",
+                "Output device",
                 Some(device_hint),
                 device_picker.into(),
                 width,
@@ -508,7 +508,7 @@ impl App {
         let p = &self.preferences;
         let mut rows = vec![
             self.setting(
-                "Show Lyrics by Default",
+                "Show lyrics by default",
                 Some("Now Playing opens on the Lyrics tab.".into()),
                 toggle(
                     p.show_lyrics_default,
@@ -517,7 +517,7 @@ impl App {
                 width,
             ),
             self.setting(
-                "Search Suggestions",
+                "Search suggestions",
                 None,
                 toggle(
                     p.search_suggestions,
@@ -526,7 +526,7 @@ impl App {
                 width,
             ),
             self.setting(
-                "Track Notifications",
+                "Track notifications",
                 Some(if cfg!(target_os = "linux") {
                     "Shows a notification when a track starts while the window is in the background."
                         .into()
@@ -543,7 +543,7 @@ impl App {
         ];
         if cfg!(target_os = "linux") {
             rows.push(self.setting(
-                "Launch on Startup",
+                "Launch on startup",
                 None,
                 toggle(
                     p.startup,
@@ -552,7 +552,7 @@ impl App {
                 width,
             ));
             rows.push(self.setting(
-                "Close to Tray",
+                "Close to tray",
                 Some(if self.tray_available {
                     "Keep playing in the system tray.".into()
                 } else {
@@ -589,7 +589,7 @@ impl App {
             width,
             vec![
                 self.setting(
-                    "Text Size",
+                    "Text size",
                     None,
                     slider_row(
                         format!("{} px", p.lyrics_font_size.round() as u32),
@@ -605,7 +605,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Timing Offset",
+                    "Timing offset",
                     Some("Shifts every song. Positive shows lines later.".into()),
                     slider_row(
                         format!("{:+.1} s", p.lyrics_offset_ms as f64 / 1000.0),
@@ -621,7 +621,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Show Translation",
+                    "Show translation",
                     None,
                     toggle(
                         p.lyrics_show_translation,
@@ -632,7 +632,7 @@ impl App {
                     width,
                 ),
                 self.setting(
-                    "Follow Current Line",
+                    "Follow current line",
                     None,
                     toggle(
                         p.lyrics_follow,
@@ -659,7 +659,7 @@ impl App {
             self.discord_presence.status().label().to_owned()
         };
         let mut rows = vec![self.setting(
-            "Discord Presence",
+            "Discord presence",
             Some(discord_status),
             toggle(
                 p.discord_presence,
@@ -669,7 +669,7 @@ impl App {
         )];
         if cfg!(target_os = "linux") {
             rows.push(self.setting(
-                "Media Controls (MPRIS)",
+                "Media controls (MPRIS)",
                 Some(fit(
                     &self.mpris.status(),
                     width - 2.0 * BOX_PADDING - 40.0,
@@ -695,7 +695,7 @@ impl App {
         };
         let mut rows = vec![
             self.setting(
-                "Artwork Cache",
+                "Artwork cache",
                 Some(
                     self.tr_static("{} on disk · {} in memory")
                         .replacen("{}", &mib(usage.artwork_bytes, language), 1)
@@ -705,13 +705,13 @@ impl App {
                 width,
             ),
             self.setting(
-                "Lyrics Cache",
+                "Lyrics cache",
                 Some(mib(usage.lyrics_bytes, language)),
                 action("Clear", Message::ClearLyricsCache),
                 width,
             ),
             self.setting(
-                "Playback Helpers",
+                "Playback helpers",
                 Some(
                     self.tr_static("Player {} · BotGuard {} · Home {}")
                         .replacen("{}", &mib(usage.player_js_bytes, language), 1)
@@ -735,7 +735,7 @@ impl App {
                     width,
                 ),
                 _ => self.setting(
-                    "Local Data",
+                    "Local data",
                     Some("Favorites, queue and settings as JSON in Documents.".into()),
                     row![
                         action("Export", Message::ExportLocalData),
