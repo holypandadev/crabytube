@@ -330,6 +330,21 @@ enum Event {
 /// and opening it again on resume takes a few tens of milliseconds.
 const OUTPUT_IDLE_AFTER_PAUSE: Duration = Duration::from_secs(5);
 
+/// Starts the grace period of a pause. The output is released when it ends, if the same pause still holds.
+fn schedule_output_release(
+    pause_serial: &mut u64,
+    events_tx: &mpsc::UnboundedSender<Event>,
+    after: Duration,
+) {
+    *pause_serial = pause_serial.wrapping_add(1);
+    let serial = *pause_serial;
+    let events_tx = events_tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(after).await;
+        let _ = events_tx.send(Event::OutputIdle { serial });
+    });
+}
+
 /// Decoded samples reach the output in chunks of this many interleaved samples: one channel
 /// operation per chunk instead of one per sample keeps the per-sample cost low while playing.
 const AUDIO_CHUNK_SAMPLES: usize = 2048;
@@ -623,7 +638,11 @@ async fn actor(
                     if status.state == PlaybackState::Resolving {
                         paused_by_user = true;
                         transition(&mut status, PlaybackState::Paused);
+                        schedule_output_release(&mut pause_serial, &events_tx, OUTPUT_IDLE_AFTER_PAUSE);
                         let _ = status_tx.send(status.clone());
+                    } else if status.state == PlaybackState::Seeking {
+                        // The seek lands paused: its Seeked event leaves the output closed or silent.
+                        paused_by_user = true;
                     } else if matches!(status.state, PlaybackState::Playing | PlaybackState::Buffering) {
                         if let Some(output) = output.as_ref() {
                             output.player.pause();
@@ -631,13 +650,7 @@ async fn actor(
                         paused_by_user = true;
                         transition(&mut status, PlaybackState::Paused);
                         info!(position_ms = status.position.as_millis(), "pause");
-                        pause_serial = pause_serial.wrapping_add(1);
-                        let serial = pause_serial;
-                        let events_tx = events_tx.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(OUTPUT_IDLE_AFTER_PAUSE).await;
-                            let _ = events_tx.send(Event::OutputIdle { serial });
-                        });
+                        schedule_output_release(&mut pause_serial, &events_tx, OUTPUT_IDLE_AFTER_PAUSE);
                         let _ = status_tx.send(status.clone());
                     }
                 }
@@ -677,6 +690,9 @@ async fn actor(
                         }
                         info!(position_ms = status.position.as_millis(), "resume");
                         let _ = status_tx.send(status.clone());
+                    } else if status.state == PlaybackState::Seeking {
+                        // Play during a seek: the Seeked event starts the output.
+                        paused_by_user = false;
                     }
                 }
                 Some(Command::Stop) => {
@@ -777,7 +793,8 @@ async fn actor(
                 },
                 Some(Event::Prepared { generation: event_generation, selected_at, track, duration, source }) if generation_matches(generation, event_generation) => match source {
                     Ok(active_audio) => {
-                        if output.is_none() {
+                        // A paused track does not open the device: resume opens it and queues the source.
+                        if output.is_none() && !paused_by_user {
                             let opened = open_selected_output(status.volume, output_device_id.as_deref());
                             match opened {
                                 Ok(opened) => {
@@ -801,8 +818,9 @@ async fn actor(
                         status.underruns = 0;
                         observed_underruns = 0;
                         transition(&mut status, if paused_by_user { PlaybackState::Paused } else { PlaybackState::Buffering });
-                        let player = &output.as_ref().expect("output was opened above").player;
-                        player.set_volume(status.volume);
+                        if let Some(output) = output.as_ref() {
+                            output.player.set_volume(status.volume);
+                        }
                         let rodio_source = AudioSource {
                             samples: active_audio.samples.clone(),
                             current: Vec::new(),
@@ -831,9 +849,13 @@ async fn actor(
                                 let _ = events_tx.send(Event::Seeked { generation: current_generation, seek_id: current_seek_generation, requested: position, result });
                             });
                             transition(&mut status, PlaybackState::Seeking);
-                        } else {
-                            player.append(rodio_source);
-                            if !paused_by_user { player.play(); }
+                        } else if let Some(output) = output.as_ref() {
+                            output.player.append(rodio_source);
+                            if paused_by_user {
+                                schedule_output_release(&mut pause_serial, &events_tx, OUTPUT_IDLE_AFTER_PAUSE);
+                            } else {
+                                output.player.play();
+                            }
                         }
                         info!("audio source prepared");
                         let _ = status_tx.send(status.clone());
@@ -855,7 +877,11 @@ async fn actor(
                             transition(&mut status, if paused_by_user { PlaybackState::Paused } else { PlaybackState::Buffering });
                             let rodio_source = audio.source();
                             output.player.append(rodio_source);
-                            if !paused_by_user { output.player.play(); }
+                            if paused_by_user {
+                                schedule_output_release(&mut pause_serial, &events_tx, OUTPUT_IDLE_AFTER_PAUSE);
+                            } else {
+                                output.player.play();
+                            }
                             info!(position_ms = requested.as_millis(), "seek");
                         }
                         (Ok(()), Some(audio), None) => {
@@ -874,7 +900,11 @@ async fn actor(
                             status.position = position(&audio.cursor, audio.rate, audio.channels);
                             if let Some(output) = output {
                                 output.player.append(audio.source());
-                                if !paused_by_user { output.player.play(); }
+                                if paused_by_user {
+                                    schedule_output_release(&mut pause_serial, &events_tx, OUTPUT_IDLE_AFTER_PAUSE);
+                                } else {
+                                    output.player.play();
+                                }
                             }
                             transition(&mut status, if paused_by_user { PlaybackState::Paused } else { PlaybackState::Buffering });
                         }
@@ -1914,5 +1944,30 @@ mod tests {
         assert!(!super::refused_by_googlevideo(&EngineError::Decoder(
             "HTTP stream returned status 403".into()
         )));
+    }
+
+    #[tokio::test]
+    async fn each_pause_schedules_a_release_tagged_with_its_own_serial() {
+        let (events_tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let mut pause_serial = 0_u64;
+        super::schedule_output_release(&mut pause_serial, &events_tx, Duration::from_millis(5));
+        super::schedule_output_release(&mut pause_serial, &events_tx, Duration::from_millis(5));
+        assert_eq!(pause_serial, 2);
+        let mut released = Vec::new();
+        for _ in 0..2 {
+            match events.recv().await {
+                Some(super::Event::OutputIdle { serial }) => released.push(serial),
+                _ => panic!("expected a scheduled output release"),
+            }
+        }
+        released.sort_unstable();
+        assert_eq!(released, vec![1, 2]);
+    }
+
+    #[test]
+    fn a_seek_that_was_paused_lands_paused_or_buffering() {
+        use super::PlaybackState::{Buffering, Paused, Seeking};
+        assert!(super::is_valid_transition(Seeking, Paused));
+        assert!(super::is_valid_transition(Seeking, Buffering));
     }
 }
