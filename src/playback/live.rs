@@ -204,6 +204,7 @@ fn number_moofs(media: &mut [u8], next: &mut u32) {
 pub(super) fn open_broadcast(
     client: reqwest::Client,
     url: reqwest::Url,
+    headers: reqwest::header::HeaderMap,
     cancellation: CancellationToken,
     fetch_error: Arc<Mutex<Option<String>>>,
 ) -> LiveAudioReader {
@@ -211,6 +212,7 @@ pub(super) fn open_broadcast(
     tokio::spawn(fetch_fragments(
         client,
         url,
+        headers,
         cancellation,
         sender,
         fetch_error,
@@ -225,6 +227,7 @@ pub(super) fn open_broadcast(
 async fn fetch_fragments(
     client: reqwest::Client,
     url: reqwest::Url,
+    headers: reqwest::header::HeaderMap,
     cancellation: CancellationToken,
     sender: Sender<Vec<u8>>,
     fetch_error: Arc<Mutex<Option<String>>>,
@@ -240,7 +243,7 @@ async fn fetch_fragments(
             _ = tokio::time::sleep(wait) => {}
         }
         wait = EDGE_POLL_WAIT;
-        let polled = poll_once(&client, &url, &cancellation).await;
+        let polled = poll_once(&client, &url, &headers, &cancellation).await;
         let fragment = match polled {
             Poll::Cancelled => return,
             Poll::Fragment(fragment) => {
@@ -304,11 +307,12 @@ enum Poll {
 async fn poll_once(
     client: &reqwest::Client,
     url: &reqwest::Url,
+    headers: &reqwest::header::HeaderMap,
     cancellation: &CancellationToken,
 ) -> Poll {
     let response = tokio::select! {
         _ = cancellation.cancelled() => return Poll::Cancelled,
-        response = client.get(url.clone()).header(reqwest::header::RANGE, "bytes=0-").send() => response,
+        response = client.get(url.clone()).headers(headers.clone()).header(reqwest::header::RANGE, "bytes=0-").send() => response,
     };
     let response = match response {
         Ok(response) => response,

@@ -1255,8 +1255,12 @@ async fn prepare_stream(
     if stream.live {
         // A broadcast has no length: its fragments are fetched as they come, from the live edge.
         let stream = stream.into_stream();
-        let client = match media_client(&stream) {
-            Ok(client) => client,
+        let client = match shared_media_client() {
+            Ok(client) => client.clone(),
+            Err(error) => return Some((None, Err(error))),
+        };
+        let headers = match media_headers(&stream) {
+            Ok(headers) => headers,
             Err(error) => return Some((None, Err(error))),
         };
         let url = match reqwest::Url::parse(&stream.url) {
@@ -1266,7 +1270,13 @@ async fn prepare_stream(
             }
         };
         let fetch_error = Arc::new(Mutex::new(None));
-        let reader = live::open_broadcast(client, url, token.clone(), Arc::clone(&fetch_error));
+        let reader = live::open_broadcast(
+            client,
+            url,
+            headers,
+            token.clone(),
+            Arc::clone(&fetch_error),
+        );
         let source = create_audio_source(
             reader,
             MediaKind::Live,
@@ -1367,6 +1377,7 @@ fn reopen_output(
 struct YoutubeHttpSource {
     client: reqwest::Client,
     url: reqwest::Url,
+    headers: reqwest::header::HeaderMap,
     stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + Sync>>,
     content_length: Option<u64>,
     last_error: Arc<Mutex<Option<String>>>,
@@ -1414,6 +1425,7 @@ impl YoutubeHttpSource {
         let response = self
             .client
             .get(self.url.clone())
+            .headers(self.headers.clone())
             .header(reqwest::header::RANGE, range.clone())
             .send()
             .await
@@ -1478,17 +1490,19 @@ impl SourceStream for YoutubeHttpSource {
     type Params = (
         reqwest::Client,
         reqwest::Url,
+        reqwest::header::HeaderMap,
         Option<u64>,
         Arc<Mutex<Option<String>>>,
     );
     type StreamCreationError = YoutubeHttpError;
 
     async fn create(
-        (client, url, content_length, last_error): Self::Params,
+        (client, url, headers, content_length, last_error): Self::Params,
     ) -> Result<Self, Self::StreamCreationError> {
         let mut source = Self {
             client,
             url,
+            headers,
             stream: Box::pin(futures_util::stream::empty()),
             content_length,
             last_error,
@@ -1536,7 +1550,25 @@ impl SourceStream for YoutubeHttpSource {
 }
 
 /// The HTTP client for a media URL, with the headers the player response asked for.
-fn media_client(stream: &AudioStream) -> Result<reqwest::Client, EngineError> {
+/// One client for all media, so connections and TLS sessions are reused from track to track.
+fn shared_media_client() -> Result<&'static reqwest::Client, EngineError> {
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            crate::network::configure_http(reqwest::Client::builder())
+                .connect_timeout(Duration::from_secs(6))
+                // A per-read timeout: a total timeout cuts off slow links that are still delivering data.
+                .read_timeout(Duration::from_secs(15))
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|message| EngineError::Network(message.clone()))
+}
+
+/// The headers a stream's requests carry. They are sent with each request, not baked into the shared client.
+fn media_headers(stream: &AudioStream) -> Result<reqwest::header::HeaderMap, EngineError> {
     let mut headers = reqwest::header::HeaderMap::new();
     for (name, value) in &stream.request_headers {
         let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
@@ -1545,13 +1577,7 @@ fn media_client(stream: &AudioStream) -> Result<reqwest::Client, EngineError> {
             .map_err(|error| EngineError::Network(error.to_string()))?;
         headers.insert(name, value);
     }
-    crate::network::configure_http(reqwest::Client::builder())
-        .connect_timeout(Duration::from_secs(6))
-        // A per-read timeout: a total timeout cuts off slow links that are still delivering data.
-        .read_timeout(Duration::from_secs(15))
-        .default_headers(headers)
-        .build()
-        .map_err(|error| EngineError::Network(error.to_string()))
+    Ok(headers)
 }
 
 async fn open_stream(
@@ -1563,14 +1589,20 @@ async fn open_stream(
     ),
     EngineError,
 > {
-    let client = media_client(&stream)?;
+    let client = shared_media_client()?.clone();
+    let headers = media_headers(&stream)?;
     let url = reqwest::Url::parse(&stream.url)
         .map_err(|error| EngineError::Network(error.to_string()))?;
     let fetch_error = Arc::new(Mutex::new(None));
-    let source =
-        YoutubeHttpSource::create((client, url, stream.content_length, Arc::clone(&fetch_error)))
-            .await
-            .map_err(|error| EngineError::Network(error.to_string()))?;
+    let source = YoutubeHttpSource::create((
+        client,
+        url,
+        headers,
+        stream.content_length,
+        Arc::clone(&fetch_error),
+    ))
+    .await
+    .map_err(|error| EngineError::Network(error.to_string()))?;
     let reader = StreamDownload::from_stream(
         source,
         TempStorageProvider::new_in(stream_temp_dir()),
@@ -2103,6 +2135,56 @@ mod tests {
         port
     }
 
+    /// Answers one request with `response` and hands back the request text it received.
+    fn serve_one_capturing(response: &'static str) -> (u16, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let port = listener.local_addr().expect("local addr").port();
+        let (sender, requests) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 512];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match socket.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&chunk[..read]),
+                }
+            }
+            let _ = sender.send(String::from_utf8_lossy(&request).into_owned());
+            let _ = socket.write_all(response.as_bytes());
+        });
+        (port, requests)
+    }
+
+    #[tokio::test]
+    async fn range_requests_carry_the_stream_headers_on_the_shared_client() {
+        use super::YoutubeHttpSource;
+        let (port, requests) = serve_one_capturing(
+            "HTTP/1.1 206 Partial Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-stream-token",
+            reqwest::header::HeaderValue::from_static("abc"),
+        );
+        let source = YoutubeHttpSource {
+            client: super::shared_media_client().expect("shared client").clone(),
+            url: reqwest::Url::parse(&format!("http://127.0.0.1:{port}/audio")).unwrap(),
+            headers,
+            stream: Box::pin(futures_util::stream::empty()),
+            content_length: None,
+            last_error: Arc::new(std::sync::Mutex::new(None)),
+        };
+        assert!(source.request_range("bytes=0-3".into()).await.is_ok());
+        let request = requests
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the request reached the test server");
+        assert!(request.to_ascii_lowercase().contains("x-stream-token: abc"));
+        assert!(request.to_ascii_lowercase().contains("range: bytes=0-3"));
+    }
+
     #[tokio::test]
     async fn fetch_error_clears_after_a_successful_range_request() {
         use super::{YoutubeHttpSource, fetch_error_message};
@@ -2116,6 +2198,7 @@ mod tests {
         let source = YoutubeHttpSource {
             client: reqwest::Client::new(),
             url: reqwest::Url::parse(&format!("http://127.0.0.1:{port}/audio")).unwrap(),
+            headers: reqwest::header::HeaderMap::new(),
             stream: Box::pin(futures_util::stream::empty()),
             content_length: None,
             last_error: Arc::clone(&last_error),
