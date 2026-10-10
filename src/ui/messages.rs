@@ -159,6 +159,11 @@ pub(super) enum Message {
     SeekChanged(f32),
     SeekReleased,
     PlaybackTick,
+    /// The cover of the restored track, read from disk at startup. `None` when no file was saved.
+    RestoredCoverLoaded {
+        url: String,
+        handle: Option<image::Handle>,
+    },
     /// Two seconds after Home appears, so the first track skips the player page download.
     PrewarmPlayback,
     /// Fires once the scroll throttle window ends; see `scroll_preload_task`.

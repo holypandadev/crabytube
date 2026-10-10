@@ -264,6 +264,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::WindowMinimizedChecked(_)
         | Message::AreaMeasured(_)
         | Message::ArtworkLoaded { .. }
+        | Message::RestoredCoverLoaded { .. }
         | Message::ArtworkRetryDue
         | Message::ScrollPreloadDue
         | Message::CarouselFrame(_)
@@ -1326,6 +1327,12 @@ impl App {
                 };
                 return Task::batch([artwork, more]);
             }
+            Message::RestoredCoverLoaded { url, handle } => {
+                if let Some(handle) = handle {
+                    self.artwork_cache
+                        .insert(url, crate::artwork::THUMB_MAX, handle);
+                }
+            }
             Message::ScrollPreloadDue
             | Message::ArtworkRetryDue
             | Message::ArtworkLoaded { .. }
@@ -2054,11 +2061,13 @@ impl App {
         ]);
         #[cfg(not(feature = "diagnostics"))]
         let diagnostic_exit = Task::none();
+        let restored_cover = app.restore_cover_task();
         (
             app,
             Task::batch([
                 home_task,
                 artwork_task,
+                restored_cover,
                 tray_task,
                 restore_window,
                 display_scale,
@@ -4664,6 +4673,52 @@ mod tests {
             ..home::HomePicks::default()
         };
         assert_eq!(app.refresh_error(), Some("offline"));
+    }
+
+    #[test]
+    fn a_restored_cover_reaches_the_player_cache_only_when_a_file_was_saved() {
+        let mut app = App::default();
+        let url = "https://example.invalid/restored.jpg".to_string();
+        drop(app.update(Message::RestoredCoverLoaded {
+            url: url.clone(),
+            handle: None,
+        }));
+        assert!(
+            !app.artwork_cache
+                .contains_variant(&url, crate::artwork::THUMB_MAX)
+        );
+        let handle = image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+        drop(app.update(Message::RestoredCoverLoaded {
+            url: url.clone(),
+            handle: Some(handle),
+        }));
+        assert!(
+            app.artwork_cache
+                .contains_variant(&url, crate::artwork::THUMB_MAX)
+        );
+    }
+
+    #[test]
+    fn the_cover_of_a_restored_track_survives_the_cache_trims() {
+        let url = "https://example.invalid/restored-trim.jpg";
+        let track = crate::music::Track {
+            thumbnail_url: Some(url.into()),
+            ..fixture_track("a")
+        };
+        let mut app = App {
+            queue: Arc::new(vec![track]),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        assert_eq!(app.playing_cover_url(), Some(url));
+        let handle = image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+        app.artwork_cache
+            .insert(url.into(), crate::artwork::THUMB_MAX, handle);
+        app.release_offscreen_artwork_for(&Page::Home);
+        assert!(
+            app.artwork_cache
+                .contains_variant(url, crate::artwork::THUMB_MAX)
+        );
     }
 
     #[test]

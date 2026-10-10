@@ -36,6 +36,34 @@ fn rows_by_urgency(window: Range<usize>, visible: Range<usize>) -> impl Iterator
 }
 
 impl App {
+    /// The cover of the restored track, read from the disk cache when the session starts. Nothing is
+    /// downloaded here: without a saved file the player keeps its placeholder until playback starts.
+    pub(super) fn restore_cover_task(&self) -> Task<Message> {
+        if self.playback_status.track.is_some() {
+            return Task::none();
+        }
+        let Some(url) = self
+            .shown_track()
+            .and_then(|track| track.thumbnail_url.clone())
+        else {
+            return Task::none();
+        };
+        let max_dim = crate::artwork::THUMB_MAX;
+        if self.artwork_cache.contains_variant(&url, max_dim) {
+            return Task::none();
+        }
+        let read = url.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || crate::artwork::saved_sized(&read, max_dim))
+                    .await
+                    .ok()
+                    .flatten()
+            },
+            move |handle| Message::RestoredCoverLoaded { url, handle },
+        )
+    }
+
     pub(super) fn load_artwork(&mut self, url: Option<String>) -> Task<Message> {
         if let Some(previous) = self.artwork_cancel.take() {
             previous.cancel();
@@ -196,10 +224,10 @@ impl App {
             .collect()
     }
 
+    /// The cover of the track the player shows. It stays in memory while the cache is trimmed. For a
+    /// restored track that is the queue's current entry, until the engine reports a track.
     pub(super) fn playing_cover_url(&self) -> Option<&str> {
-        self.playback_status
-            .track
-            .as_ref()
+        self.shown_track()
             .and_then(|track| track.thumbnail_url.as_deref())
     }
 

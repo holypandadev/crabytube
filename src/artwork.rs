@@ -301,6 +301,21 @@ fn artwork_cache_root() -> std::path::PathBuf {
 #[cfg(test)]
 static TEST_CACHE_ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
 
+/// The cover saved on disk for this URL at this size, read without any network request. A restored
+/// session uses it at startup: a missing or unreadable file gives `None`, and nothing is fetched.
+pub fn saved_sized(url: &str, max_dim: u32) -> Option<image::Handle> {
+    let max_dim = max_dim.clamp(64, LARGE_MAX);
+    // The large cover is what a player request saves, so it is scaled down when that is all there is.
+    [
+        variant_cache_path(url, max_dim),
+        variant_cache_path(url, LARGE_MAX),
+        legacy_cache_path(url),
+    ]
+    .into_iter()
+    .filter(|candidate| candidate.is_file())
+    .find_map(|candidate| cached_or_remove_sized(candidate, max_dim))
+}
+
 /// The large cover already saved on disk for this URL. Nothing is downloaded to find it.
 pub fn saved_cover_path(url: &str) -> Option<std::path::PathBuf> {
     let path = variant_cache_path(url, LARGE_MAX);
@@ -767,6 +782,34 @@ mod tests {
         assert!(!cache.contains_key("offscreen"));
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.bytes(), 2 * 256);
+    }
+
+    #[test]
+    fn a_saved_cover_is_read_from_disk_and_a_missing_one_is_not_fetched() {
+        TEST_CACHE_ROOT.get_or_init(|| {
+            std::env::temp_dir().join(format!(
+                "crabytube-artwork-test-root-{}",
+                std::process::id()
+            ))
+        });
+        let url = "https://example.invalid/restored-cover.jpg";
+        let thumb = variant_cache_path(url, THUMB_MAX);
+        let large = variant_cache_path(url, LARGE_MAX);
+        let _ = std::fs::remove_file(&thumb);
+        let _ = std::fs::remove_file(&large);
+        assert!(
+            saved_sized(url, THUMB_MAX).is_none(),
+            "nothing is saved, so nothing is read or fetched"
+        );
+        std::fs::create_dir_all(large.parent().unwrap()).unwrap();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        ::image::RgbaImage::from_pixel(8, 8, ::image::Rgba([5, 5, 5, 255]))
+            .write_to(&mut encoded, ::image::ImageFormat::Png)
+            .unwrap();
+        // Only the large cover is saved, as a player request leaves it: it is scaled down.
+        std::fs::write(&large, encoded.get_ref()).unwrap();
+        assert!(saved_sized(url, THUMB_MAX).is_some());
+        let _ = std::fs::remove_file(&large);
     }
 
     #[test]
