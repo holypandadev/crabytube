@@ -1095,7 +1095,7 @@ async fn actor(
             },
             _ = ticker.tick(), if active.is_some() && !paused_by_user => {
                 if let Some(audio) = active.as_ref() {
-                    status.position = position(&audio.cursor, audio.rate, audio.channels);
+                    status.position = audible_position(output.as_ref(), audio, Instant::now());
                     let underruns = audio.underruns.load(Ordering::Relaxed);
                     status.underruns = underruns;
                     if underruns > observed_underruns {
@@ -1347,7 +1347,7 @@ struct PreparedAudio {
 }
 
 struct PlaybackOutput {
-    _device: rodio::MixerDeviceSink,
+    _device: crate::playback::output::OutputStream,
     player: Player,
     device_name: String,
 }
@@ -1363,6 +1363,28 @@ impl PlaybackOutput {
             player,
             device_name,
         })
+    }
+
+    fn clock(&self) -> &crate::playback::output::PlaybackClock {
+        self._device.clock()
+    }
+}
+
+/// The position the listener hears: the pulled position, less what the device still has to play.
+/// Without a device clock yet, the pulled position is the best estimate.
+fn audible_position(
+    output: Option<&PlaybackOutput>,
+    audio: &ActiveAudio,
+    now: Instant,
+) -> Duration {
+    match output {
+        Some(output) => output.clock().heard_position(
+            audio.cursor.load(Ordering::Relaxed),
+            now,
+            audio.rate,
+            audio.channels,
+        ),
+        None => position(&audio.cursor, audio.rate, audio.channels),
     }
 }
 

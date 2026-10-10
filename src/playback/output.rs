@@ -1,7 +1,21 @@
-use std::{fmt, str::FromStr};
+use std::{
+    fmt,
+    num::NonZero,
+    str::FromStr,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
-use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{DeviceSinkBuilder, MixerDeviceSink};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{
+    BufferSize, FromSample, OutputCallbackInfo, OutputStreamTimestamp, SampleFormat, SizedSample,
+    StreamConfig,
+};
+use rodio::mixer::Mixer;
+use tracing::warn;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputDeviceChoice {
@@ -58,7 +72,7 @@ pub fn enumerate_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
     Ok(choices)
 }
 
-pub fn open_output_device(selected_id: Option<&str>) -> Result<(MixerDeviceSink, String), String> {
+pub fn open_output_device(selected_id: Option<&str>) -> Result<(OutputStream, String), String> {
     let host = cpal::default_host();
     let device = match selected_id {
         Some(id) => {
@@ -74,19 +88,166 @@ pub fn open_output_device(selected_id: Option<&str>) -> Result<(MixerDeviceSink,
         .description()
         .map(|description| description.name().to_owned())
         .unwrap_or_else(|_| String::from("Audio output"));
-    // A bigger period means fewer device callbacks. Each callback wakes the audio server, which
-    // dominates the output cost while paused. The fallback keeps the device's own buffer if
-    // this size is refused.
-    let sink = DeviceSinkBuilder::from_device(device)
-        .map(|builder| builder.with_buffer_size(cpal::BufferSize::Fixed(4096)))
-        .and_then(|builder| builder.open_sink_or_fallback())
+    let stream = open_stream(&device)?;
+    Ok((stream, label))
+}
+
+/// The largest device latency taken into account. A longer reading is treated as unreliable.
+const MAX_DEVICE_LATENCY: Duration = Duration::from_secs(1);
+
+/// An open output: a cpal stream that plays the mixer the player feeds, and reports when each of its
+/// buffers is heard. rodio's own device sink keeps that timing to itself.
+pub struct OutputStream {
+    _stream: cpal::Stream,
+    mixer: Mixer,
+    clock: Arc<PlaybackClock>,
+}
+
+impl OutputStream {
+    pub fn mixer(&self) -> &Mixer {
+        &self.mixer
+    }
+
+    pub fn clock(&self) -> &PlaybackClock {
+        &self.clock
+    }
+}
+
+/// When the device last finished playing a buffer, from cpal's timestamps.
+#[derive(Default)]
+pub struct PlaybackClock {
+    /// Nanoseconds after `clock_base()` at which the last buffer finishes playing. Zero before any buffer.
+    buffer_ends: AtomicU64,
+}
+
+/// The instant that clock readings are measured from, so the audio callback can store one in an atomic.
+fn clock_base() -> Instant {
+    static BASE: OnceLock<Instant> = OnceLock::new();
+    *BASE.get_or_init(Instant::now)
+}
+
+impl PlaybackClock {
+    fn record_buffer_end(&self, end: Instant) {
+        let nanos = u64::try_from(end.saturating_duration_since(clock_base()).as_nanos())
+            .unwrap_or(u64::MAX);
+        // Zero means no buffer yet, so an end exactly at the base is stored one nanosecond later.
+        self.buffer_ends.store(nanos.max(1), Ordering::Relaxed);
+    }
+
+    /// The position the listener hears at `now`. The pulled position runs ahead of what is audible by
+    /// the samples the device still has to play: those before the end of its last buffer.
+    pub fn heard_position(
+        &self,
+        pulled_samples: u64,
+        now: Instant,
+        rate: u32,
+        channels: u16,
+    ) -> Duration {
+        let samples_per_second = f64::from(rate.max(1)) * f64::from(channels.max(1));
+        let in_flight = match self.buffer_ends.load(Ordering::Relaxed) {
+            0 => 0.0,
+            nanos => clock_base()
+                .checked_add(Duration::from_nanos(nanos))
+                .map_or(0.0, |end| {
+                    end.saturating_duration_since(now).as_secs_f64() * samples_per_second
+                }),
+        };
+        Duration::from_secs_f64((pulled_samples as f64 - in_flight).max(0.0) / samples_per_second)
+    }
+}
+
+/// The latency from the audio callback to the moment the device plays its first sample of that buffer.
+fn device_latency(timing: &OutputStreamTimestamp) -> Duration {
+    timing
+        .playback
+        .duration_since(&timing.callback)
+        .unwrap_or(Duration::ZERO)
+        .min(MAX_DEVICE_LATENCY)
+}
+
+/// Fills one device buffer with the mixer's samples, and silence where the mixer has none.
+fn fill<T: SizedSample + FromSample<f32>>(mixer: &mut impl Iterator<Item = f32>, out: &mut [T]) {
+    for sample in out {
+        *sample = mixer.next().map(T::from_sample).unwrap_or(T::EQUILIBRIUM);
+    }
+}
+
+/// Opens the device's default format. It asks for a 4096-frame buffer first and falls back to the
+/// device's own buffer when that size is refused, as rodio's device sink did.
+fn open_stream(device: &cpal::Device) -> Result<OutputStream, String> {
+    let supported = device
+        .default_output_config()
         .map_err(|error| error.to_string())?;
-    Ok((sink, label))
+    let mut last_error = String::new();
+    for buffer_size in [BufferSize::Fixed(4096), BufferSize::Default] {
+        let config = StreamConfig {
+            channels: supported.channels(),
+            sample_rate: supported.sample_rate(),
+            buffer_size,
+        };
+        match build_stream(device, supported.sample_format(), &config) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+fn build_stream(
+    device: &cpal::Device,
+    format: SampleFormat,
+    config: &StreamConfig,
+) -> Result<OutputStream, String> {
+    match format {
+        SampleFormat::F32 => build_typed::<f32>(device, config),
+        SampleFormat::I16 => build_typed::<i16>(device, config),
+        SampleFormat::U16 => build_typed::<u16>(device, config),
+        SampleFormat::I32 => build_typed::<i32>(device, config),
+        SampleFormat::U32 => build_typed::<u32>(device, config),
+        other => Err(format!("unsupported sample format {other:?}")),
+    }
+}
+
+fn build_typed<T>(device: &cpal::Device, config: &StreamConfig) -> Result<OutputStream, String>
+where
+    T: SizedSample + FromSample<f32> + Send + 'static,
+{
+    let _ = clock_base();
+    let channels = config.channels;
+    let rate = config.sample_rate;
+    let (mixer, mut source) = rodio::mixer::mixer(
+        NonZero::new(channels).ok_or("the device reports no channels")?,
+        NonZero::new(rate).ok_or("the device reports no sample rate")?,
+    );
+    let clock = Arc::new(PlaybackClock::default());
+    let callback_clock = Arc::clone(&clock);
+    let stream = device
+        .build_output_stream::<T, _, _>(
+            config,
+            move |data: &mut [T], info: &OutputCallbackInfo| {
+                let now = Instant::now();
+                let latency = device_latency(&info.timestamp());
+                fill(&mut source, data);
+                let frames = data.len() / usize::from(channels.max(1));
+                let buffer = Duration::from_secs_f64(frames as f64 / f64::from(rate));
+                callback_clock.record_buffer_end(now + latency + buffer);
+            },
+            |error| warn!(%error, "audio output failed"),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+    stream.play().map_err(|error| error.to_string())?;
+    Ok(OutputStream {
+        _stream: stream,
+        mixer,
+        clock,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{OutputDeviceChoice, enumerate_output_devices, open_output_device};
+    use std::time::Duration;
 
     #[test]
     fn default_output_choice_has_a_stable_setting_label() {
@@ -119,5 +280,73 @@ mod tests {
     #[test]
     fn malformed_output_device_ids_are_rejected_before_opening_a_device() {
         assert!(open_output_device(Some("not-a-valid-device-id")).is_err());
+    }
+
+    fn about(seconds: f64, expected: Duration) -> bool {
+        (seconds - expected.as_secs_f64()).abs() < 1e-6
+    }
+
+    #[test]
+    fn the_heard_position_leaves_out_what_the_device_still_has_to_play() {
+        let clock = super::PlaybackClock::default();
+        // Before any buffer, the pulled position is all there is: 1000 samples at 1 kHz stereo.
+        let before_any = super::clock_base();
+        assert!(about(
+            clock
+                .heard_position(1_000, before_any, 1_000, 2)
+                .as_secs_f64(),
+            Duration::from_millis(500)
+        ));
+        // The last buffer ends 50 ms from now, and 100 of the 1000 samples are still to play.
+        let now = super::clock_base() + Duration::from_secs(1);
+        clock.record_buffer_end(now + Duration::from_millis(50));
+        assert!(about(
+            clock.heard_position(1_000, now, 1_000, 2).as_secs_f64(),
+            Duration::from_millis(450)
+        ));
+        // Once that buffer has played out, the pulled position is what is heard.
+        assert!(about(
+            clock
+                .heard_position(1_000, now + Duration::from_millis(100), 1_000, 2)
+                .as_secs_f64(),
+            Duration::from_millis(500)
+        ));
+        // A device that reports a huge lag never takes the position below zero.
+        clock.record_buffer_end(now + Duration::from_secs(10));
+        assert_eq!(clock.heard_position(1_000, now, 1_000, 2), Duration::ZERO);
+    }
+
+    #[test]
+    fn device_latency_is_the_gap_from_callback_to_playback_within_one_second() {
+        use cpal::{OutputStreamTimestamp, StreamInstant};
+        let callback = StreamInstant::new(10, 0);
+        let timing = |playback: StreamInstant| OutputStreamTimestamp { callback, playback };
+        assert_eq!(
+            super::device_latency(&timing(StreamInstant::new(10, 30_000_000))),
+            Duration::from_millis(30)
+        );
+        // A playback time before the callback adds no latency.
+        assert_eq!(
+            super::device_latency(&timing(StreamInstant::new(9, 0))),
+            Duration::ZERO
+        );
+        assert_eq!(
+            super::device_latency(&timing(StreamInstant::new(60, 0))),
+            super::MAX_DEVICE_LATENCY
+        );
+    }
+
+    #[test]
+    fn a_device_buffer_takes_the_mixer_then_silence_in_its_own_format() {
+        let mut mixer = [0.5_f32, -0.5].into_iter();
+        let mut out = [0.0_f32; 4];
+        super::fill(&mut mixer, &mut out);
+        assert_eq!(out, [0.5, -0.5, 0.0, 0.0]);
+
+        let mut one_sample = [1.0_f32].into_iter();
+        let mut converted = [0_i16; 2];
+        super::fill(&mut one_sample, &mut converted);
+        assert!(converted[0] > 32_000);
+        assert_eq!(converted[1], 0);
     }
 }
