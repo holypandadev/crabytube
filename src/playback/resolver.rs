@@ -623,9 +623,14 @@ impl YouTubeStreamResolver {
             cancellation,
         )
         .await?;
-        let config = parse_ytcfg(&page).ok_or_else(|| {
-            StreamError::Config("client config did not contain an Innertube configuration".into())
-        })?;
+        // The page is large, so the search and the JSON parse run off the playback runtime.
+        let config = off_runtime(move || parse_ytcfg(&page))
+            .await
+            .ok_or_else(|| {
+                StreamError::Config(
+                    "client config did not contain an Innertube configuration".into(),
+                )
+            })?;
         let mut context = config
             .get("INNERTUBE_CONTEXT")
             .and_then(Value::as_object)
@@ -688,12 +693,16 @@ impl YouTubeStreamResolver {
         } else {
             None
         };
-        let botguard_config = botguard_page.as_deref().and_then(parse_ytcfg);
-        let homepage_challenge_json = botguard_page
-            .as_deref()
-            .and_then(parse_yt_at_n)
-            .and_then(|attestation| attestation.get("bgChallenge").cloned())
-            .and_then(|challenge| serde_json::to_string(&challenge).ok());
+        let (botguard_config, homepage_challenge_json) = off_runtime(move || {
+            let config = botguard_page.as_deref().and_then(parse_ytcfg);
+            let challenge = botguard_page
+                .as_deref()
+                .and_then(parse_yt_at_n)
+                .and_then(|attestation| attestation.get("bgChallenge").cloned())
+                .and_then(|challenge| serde_json::to_string(&challenge).ok());
+            (config, challenge)
+        })
+        .await;
         let event_id = botguard_config
             .as_ref()
             .unwrap_or(&config)
@@ -907,7 +916,10 @@ impl YouTubeStreamResolver {
                 "https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1"
             );
             let webpage = Self::fetch_page(&webpage_url, None, cancellation).await?;
-            runtime.player_js_url = parse_ytcfg(&webpage).and_then(|config| player_js_url(&config));
+            runtime.player_js_url = off_runtime(move || {
+                parse_ytcfg(&webpage).and_then(|config| player_js_url(&config))
+            })
+            .await;
             let mut cached_runtime = self.runtime.lock().await;
             if let Some(cached) = cached_runtime.as_mut() {
                 cached.player_js_url = runtime.player_js_url.clone();
