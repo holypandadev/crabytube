@@ -410,6 +410,8 @@ pub struct YouTubeStreamResolver {
     profile: ClientProfile,
     runtime: tokio::sync::Mutex<Option<PlayerRuntime>>,
     player_cache: tokio::sync::Mutex<HashMap<String, PlayerJsCacheEntry>>,
+    /// The prewarm still fetching the player data, if any. A Play cancels it and fetches the data itself.
+    prewarming: std::sync::Mutex<Option<CancellationToken>>,
     /// Plays live broadcasts that the primary client refuses: the mobile web client serves their audio.
     live_fallback: Option<Box<YouTubeStreamResolver>>,
 }
@@ -566,6 +568,7 @@ impl YouTubeStreamResolver {
             profile: ClientProfile::WebMusic,
             runtime: tokio::sync::Mutex::new(None),
             player_cache: tokio::sync::Mutex::new(HashMap::new()),
+            prewarming: std::sync::Mutex::new(None),
             live_fallback: Some(Box::new(Self::with_provider(
                 session,
                 token_provider,
@@ -584,7 +587,20 @@ impl YouTubeStreamResolver {
             profile,
             runtime: tokio::sync::Mutex::new(None),
             player_cache: tokio::sync::Mutex::new(HashMap::new()),
+            prewarming: std::sync::Mutex::new(None),
             live_fallback: None,
+        }
+    }
+
+    /// Stops an unfinished prewarm, so a Play fetches the player data alone rather than wait for it.
+    fn cancel_prewarm(&self) {
+        let token = self
+            .prewarming
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(token) = token {
+            token.cancel();
         }
     }
 
@@ -1014,8 +1030,19 @@ async fn retry_config_get(
 #[async_trait]
 impl StreamResolver for YouTubeStreamResolver {
     async fn prewarm(&self) {
-        match self.player_runtime(&CancellationToken::new()).await {
+        let token = CancellationToken::new();
+        *self
+            .prewarming
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
+        let result = self.player_runtime(&token).await;
+        *self
+            .prewarming
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        match result {
             Ok(_) => info!("player runtime prewarmed"),
+            Err(StreamError::Cancelled) => info!("player runtime prewarm stopped for a play"),
             Err(error) => warn!(?error, "player runtime prewarm failed"),
         }
     }
@@ -1027,6 +1054,7 @@ impl StreamResolver for YouTubeStreamResolver {
         quality: AudioQuality,
         cancellation: CancellationToken,
     ) -> Result<ValidatedPlaybackResolution, StreamError> {
+        self.cancel_prewarm();
         let mut max_validation_attempts = if self.profile == ClientProfile::WebMusic {
             1
         } else {
@@ -1057,17 +1085,22 @@ impl StreamResolver for YouTubeStreamResolver {
                 if !runtime.profile.requires_gvs_po_token {
                     return Ok(None);
                 }
-                self.token_provider
+                match self
+                    .token_provider
                     .tokens(
                         po_token_request(&runtime, &visitor_data, track),
                         cancellation.child_token(),
                     )
                     .await
-                    .map(Some)
-                    .map_err(|error| match error {
-                        PoTokenError::Cancelled => StreamError::Cancelled,
-                        _ => StreamError::PoToken(error.to_string()),
-                    })
+                {
+                    Ok(tokens) => Ok(Some(tokens)),
+                    Err(PoTokenError::Cancelled) => Err(StreamError::Cancelled),
+                    Err(error) => {
+                        // Tokens the player stops accepting usually mean its data changed: fetch it again.
+                        *self.runtime.lock().await = None;
+                        Err(StreamError::PoToken(error.to_string()))
+                    }
+                }
             };
             // The player request carries no PO token, so it runs while the tokens are minted.
             let (tokens, payload) = tokio::select! {
@@ -1175,6 +1208,8 @@ impl StreamResolver for YouTubeStreamResolver {
                     "player returned formats but none matched audio-only AAC with a direct URL"
                 );
                 if ciphered_audio_formats > 0 {
+                    // The player data no longer decodes this format: it is fetched again on the next attempt.
+                    *self.runtime.lock().await = None;
                     return Err(StreamError::Cipher(format!(
                         "YouTube returned {ciphered_audio_formats} audio format(s) with signatureCipher but no direct URL; a compatible player signature decipher is required"
                     )));
@@ -1348,6 +1383,8 @@ impl StreamResolver for YouTubeStreamResolver {
             if status == reqwest::StatusCode::FORBIDDEN
                 && (validation_attempt < max_validation_attempts || tokens_reused)
             {
+                // A refusal can come from a player or challenge that changed, so the retry fetches it again.
+                *self.runtime.lock().await = None;
                 if tokens_reused {
                     // Saved tokens were refused: drop them and the saved runtime, then retry once cold.
                     warn!(
@@ -1357,7 +1394,6 @@ impl StreamResolver for YouTubeStreamResolver {
                     self.token_provider.forget_visitor(&visitor_data).await;
                     crate::runtime_cache::forget_visitor();
                     crate::runtime_cache::forget_web();
-                    *self.runtime.lock().await = None;
                     max_validation_attempts = max_validation_attempts.max(validation_attempt + 1);
                 }
                 let delay = if validation_attempt == 1 { 175 } else { 375 };
@@ -1570,10 +1606,15 @@ impl YouTubeStreamResolver {
             };
             let result = tokio::select! {
                 _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                result = run_js_challenge_helper(input, signature.clone(), n_value.clone(), cancellation.child_token()) => result.map_err(|error| match error {
-                    StreamError::Cancelled => StreamError::Cancelled,
-                    other => StreamError::Cipher(other.to_string()),
-                })?,
+                result = run_js_challenge_helper(input, signature.clone(), n_value.clone(), cancellation.child_token()) => match result {
+                    Ok(result) => result,
+                    Err(StreamError::Cancelled) => return Err(StreamError::Cancelled),
+                    Err(other) => {
+                        // The challenge no longer solves against this player: it is fetched again.
+                        *self.runtime.lock().await = None;
+                        return Err(StreamError::Cipher(other.to_string()));
+                    }
+                },
             };
             info!(js_helper_peak_rss_kib = ?result.peak_rss_kib, "JS challenge helper finished");
             if let Some(memory_profile) = &result.memory_profile {
@@ -2141,6 +2182,18 @@ fn quality_allows(quality: AudioQuality, bitrate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_play_cancels_an_unfinished_prewarm_once() {
+        let resolver = super::YouTubeStreamResolver::new(crate::music::YouTubeSession::default());
+        let prewarm = tokio_util::sync::CancellationToken::new();
+        *resolver.prewarming.lock().unwrap() = Some(prewarm.clone());
+        resolver.cancel_prewarm();
+        assert!(prewarm.is_cancelled());
+        assert!(resolver.prewarming.lock().unwrap().is_none());
+        // A second play finds nothing left to cancel.
+        resolver.cancel_prewarm();
+    }
+
     #[test]
     fn a_player_runtime_is_reused_for_six_hours_only() {
         use super::{PLAYER_RUNTIME_TTL, runtime_is_fresh};
