@@ -13,6 +13,9 @@ use iced::{Alignment, Element, Length, Size};
 const BOX_PADDING: f32 = 20.0;
 const GRID_GAP: f32 = 24.0;
 const TWO_COLUMNS_FROM: f32 = 880.0;
+/// Below this width each setting puts its control under its label, so the control can take the
+/// full width of the box instead of a share of it.
+const STACK_ROWS_BELOW: f32 = 520.0;
 /// Estimated box chrome (padding, title and rules) and height per row. They only steer
 /// the column choice; nothing is sized from them.
 const BOX_CHROME_ESTIMATE: f32 = 80.0;
@@ -175,7 +178,8 @@ impl App {
         }
     }
 
-    /// One setting: label (and optional hint) on the left, control on the right.
+    /// One setting: label (and optional hint) on the left, control on the right. Narrow windows
+    /// put the control under the label.
     /// Cancel and confirm for an inline confirmation. Cancel leaves the setting as it was.
     fn confirm_buttons(&self, confirm: &'static str, message: Message) -> Element<'_, Message> {
         row![
@@ -289,6 +293,9 @@ impl App {
                     .color(DIM)
                     .width(Length::Fill),
             );
+        }
+        if self.area.width < STACK_ROWS_BELOW {
+            return column![left, control].spacing(10).padding([14, 0]).into();
         }
         row![container(left).width(Length::Fill), control]
             .spacing(16)
@@ -443,6 +450,13 @@ impl App {
         } else {
             "Changes apply to the next track.".to_owned()
         };
+        // Stacked rows give the device list the full width, so its names are not cut.
+        let stacked = self.area.width < STACK_ROWS_BELOW;
+        let device_width = if stacked {
+            Length::Fill
+        } else {
+            Length::Fixed((self.picker_width() - 40.0).max(100.0))
+        };
         let device_picker = row![
             pick_list(
                 self.output_devices.clone(),
@@ -455,7 +469,7 @@ impl App {
             .font(MONO)
             .text_size(14)
             .padding([8, 12])
-            .width((self.picker_width() - 40.0).max(100.0))
+            .width(device_width)
             .style(theme::pick_style)
             .menu_style(theme::menu_style),
             button(icon("repeat", 14.0, INK))
@@ -465,7 +479,12 @@ impl App {
                 .padding(9)
                 .style(theme::outline_button),
         ]
-        .spacing(6);
+        .spacing(6)
+        .width(if stacked {
+            Length::Fill
+        } else {
+            Length::Shrink
+        });
         self.settings_box(
             "Audio",
             width,
