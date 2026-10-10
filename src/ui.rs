@@ -1112,7 +1112,11 @@ impl App {
                         self.collection_cache.truncate(MAX_CACHED_COLLECTIONS);
                     }
                     if let Some(data) = &self.collection.data {
-                        tracing::info!(title = %data.title, tracks = data.tracks.len(), has_more = data.continuation.is_some(), "collection loaded");
+                        tracing::debug!(
+                            tracks = data.tracks.len(),
+                            has_more = data.continuation.is_some(),
+                            "collection loaded"
+                        );
                     }
                     return self.preload_current_page_artwork();
                 }

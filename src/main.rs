@@ -107,7 +107,9 @@ fn main() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let allocator_settings = tune_glibc_allocator();
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // Third-party crates log warnings only by default; the app's own info lines stay visible.
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,crabytube=info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     #[cfg(all(target_os = "linux", target_env = "gnu"))]

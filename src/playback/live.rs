@@ -312,7 +312,8 @@ async fn poll_once(
     };
     let response = match response {
         Ok(response) => response,
-        Err(error) => return Poll::Failed(format!("live poll failed: {error}")),
+        // The error text of a request carries the media URL, which is signed and must not reach logs.
+        Err(error) => return Poll::Failed(format!("live poll failed: {}", error.without_url())),
     };
     if !response.status().is_success() {
         return Poll::Failed(format!("live poll refused: HTTP {}", response.status()));

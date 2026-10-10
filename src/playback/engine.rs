@@ -25,7 +25,7 @@ use stream_download::{
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::live;
 use crate::{
@@ -450,6 +450,28 @@ fn seek_ends_track(target: Duration, duration: Option<Duration>) -> bool {
     duration.is_some_and(|duration| target >= duration)
 }
 
+/// Error text for the logs. Media URLs are signed, so every http(s) URL in the text becomes `<url>`.
+fn redact_urls(text: &str) -> String {
+    let mut redacted = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("http") {
+        let candidate = &rest[start..];
+        if !(candidate.starts_with("http://") || candidate.starts_with("https://")) {
+            redacted.push_str(&rest[..start + "http".len()]);
+            rest = &rest[start + "http".len()..];
+            continue;
+        }
+        redacted.push_str(&rest[..start]);
+        redacted.push_str("<url>");
+        let end = candidate
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ')' | ',' | '}'))
+            .unwrap_or(candidate.len());
+        rest = &candidate[end..];
+    }
+    redacted.push_str(rest);
+    redacted
+}
+
 fn transition(status: &mut PlaybackStatus, next: PlaybackState) {
     if is_valid_transition(status.state, next) {
         status.state = next;
@@ -568,7 +590,7 @@ async fn actor(
                     first_audio_logged = false;
                     decoder_finished = false;
                     let selected_at = Instant::now();
-                    info!(title = %track.title, artist = %track.artist, prepared = ahead.is_some(), "search result selected");
+                    debug!(video_id = %track.video_id, prepared = ahead.is_some(), "search result selected");
                     transition(&mut status, PlaybackState::Resolving);
                     status.track = Some(track.clone());
                     status.duration = None;
@@ -718,7 +740,7 @@ async fn actor(
                             stale.discard();
                         }
                     }
-                    Err(error) => info!(?error, "next track could not be prepared ahead"),
+                    Err(error) => debug!(error = %redact_urls(&format!("{error:?}")), "next track could not be prepared ahead"),
                 },
                 Some(Event::Resolved { generation: event_generation, selected_at, track, cancellation: token, result }) if generation_matches(generation, event_generation) => match result {
                     Ok(stream) => {
@@ -746,7 +768,7 @@ async fn actor(
                     Err(error) => {
                         output = None;
                         resume_at = None;
-                        error!(?error, "stream resolution failed");
+                        error!(error = %redact_urls(&format!("{error:?}")), "stream resolution failed");
                         transition(&mut status, PlaybackState::Error);
                         status.error = Some(error.user_message());
                         status.output_device = None;
@@ -818,7 +840,7 @@ async fn actor(
                     }
                     Err(error) => {
                         output = None;
-                        error!(?error, "stream open or decoder setup failed");
+                        error!(error = %redact_urls(&format!("{error:?}")), "stream open or decoder setup failed");
                         transition(&mut status, PlaybackState::Error);
                         status.error = Some(engine_error_message(&error).into());
                         let _ = status_tx.send(status.clone());
@@ -874,7 +896,7 @@ async fn actor(
                     // resume from the position playback reached; the output stays open, so the pause is short.
                     resumed_this_track = true;
                     resume_at = Some(status.position);
-                    warn!(?failure, position_ms = status.position.as_millis(), "stream URL refused mid-track; resolving again from this position");
+                    warn!(failure = %redact_urls(&format!("{failure:?}")), position_ms = status.position.as_millis(), "stream URL refused mid-track; resolving again from this position");
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
                     if let Some(output) = output.as_ref() {
                         output.player.clear();
@@ -898,7 +920,7 @@ async fn actor(
                     });
                 }
                 Some(Event::Failed { generation: event_generation, error: failure }) if generation_matches(generation, event_generation) => {
-                    error!(?failure, "playback stream failed after starting");
+                    error!(failure = %redact_urls(&format!("{failure:?}")), "playback stream failed after starting");
                     transition(&mut status, PlaybackState::Error);
                     status.error = Some(engine_error_message(&failure).into());
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
@@ -1613,7 +1635,7 @@ mod tests {
     use super::{
         AudioSource, EngineError, PlaybackState, PlaybackStatus, PlaybackStatusReceiver,
         ResolvedAudioFormat, engine_error_message, generation_matches, is_valid_transition,
-        playback_status_stream, seek_ends_track,
+        playback_status_stream, redact_urls, seek_ends_track,
     };
 
     #[tokio::test]
@@ -1798,6 +1820,22 @@ mod tests {
         assert!(!seek_ends_track(Duration::from_secs(199), Some(length)));
         // Without a known length the seek is sent to the decoder as before.
         assert!(!seek_ends_track(Duration::from_secs(260), None));
+    }
+
+    #[test]
+    fn media_urls_are_redacted_from_error_text() {
+        assert_eq!(redact_urls("plain failure"), "plain failure");
+        assert_eq!(
+            redact_urls(
+                r#"Network("https://rr1.example.test/videoplayback?sig=abc") after 3 tries"#
+            ),
+            r#"Network("<url>") after 3 tries"#
+        );
+        assert_eq!(
+            redact_urls("error for url (http://example.test/x), retry"),
+            "error for url (<url>), retry"
+        );
+        assert_eq!(redact_urls("the http header"), "the http header");
     }
 
     #[test]

@@ -225,7 +225,7 @@ impl App {
         {
             return Vec::new();
         }
-        tracing::info!(video_id = %current.video_id, "track metadata resolved");
+        tracing::debug!(video_id = %current.video_id, "track metadata resolved");
         if let Some(index) = self.queue_index
             && let Some(entry) = self.queue.get_mut(index)
             && entry.video_id == current.video_id
@@ -321,7 +321,7 @@ impl App {
         {
             return Task::none();
         }
-        tracing::info!(title = %track.title, index, queue_len = self.queue.len(), "selected catalog track for existing playback");
+        tracing::debug!(video_id = %track.video_id, index, queue_len = self.queue.len(), "selected catalog track for existing playback");
         if let Some(token) = self.radio_cancel.take() {
             token.cancel();
         }
