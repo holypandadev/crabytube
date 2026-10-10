@@ -23,6 +23,11 @@ const CARD_MAX: f32 = 400.0;
 const BLOCK_SHARE: f32 = 0.74;
 const SEARCH_H: f32 = 54.0;
 const SEARCH_MAX_W: f32 = 640.0;
+/// Results page: the field floats over the rows, which scroll underneath it.
+const SEARCH_TOP: f32 = 8.0;
+const SEARCH_MARGIN: f32 = 24.0;
+/// Scroll start of the results: the field's rectangle and its margin stay clear of the first row.
+const SEARCH_HEADER: f32 = SEARCH_TOP + SEARCH_H + SEARCH_MARGIN;
 /// Heading row, its gap, and the two caption lines under each cover.
 const CAROUSEL_CHROME_H: f32 = 24.0 + 18.0 + 10.0 + 20.0 + 18.0;
 const CAROUSEL_DURATION_MS: f32 = 320.0;
@@ -412,7 +417,7 @@ impl App {
         let search_width = area.width.min(SEARCH_MAX_W);
         let search_x = ((area.width - search_width) / 2.0).max(0.0);
         let query = self.search_query.trim();
-        let mut content = column![].spacing(0);
+        let mut content = column![Space::new().height(SEARCH_HEADER)].spacing(0);
         let count = self.catalog_results.len();
         content = content
             .push(text(self.tr("Search Results")).size(22).font(MONO))
@@ -509,20 +514,27 @@ impl App {
                 .push(self.collection_grid(&items, width));
         }
         content = content.push(Space::new().height(28));
-        let base = column![
-            Space::new().height(8),
-            container(self.search_field(search_width, false)).center_x(Length::Fill),
-            Space::new().height(24),
-            scrollable(content)
-                .id("search-content")
-                .on_scroll(|viewport| Message::SearchScrolled(viewport.absolute_offset()))
-                .direction(theme::vbar())
-                .style(theme::scroll_style)
-                .height(Length::Fill),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill);
-        self.with_suggestions(base.into(), search_width, search_x, 8.0 + SEARCH_H)
+        // The results fill the whole page and scroll under the field. Only the field's own
+        // rectangle is opaque, so rows stay visible on both sides of it.
+        let results = scrollable(content)
+            .id("search-content")
+            .on_scroll(|viewport| Message::SearchScrolled(viewport.absolute_offset()))
+            .direction(theme::vbar())
+            .style(theme::scroll_style)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let field = container(self.search_field(search_width, false))
+            .width(Length::Fill)
+            .padding(iced::Padding {
+                top: SEARCH_TOP,
+                ..iced::Padding::ZERO
+            })
+            .center_x(Length::Fill);
+        let base: Element<'_, Message> = stack![results, field]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        self.with_suggestions(base, search_width, search_x, SEARCH_TOP + SEARCH_H)
     }
 
     /// Live broadcasts the results page lists above "Songs".

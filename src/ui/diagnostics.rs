@@ -93,6 +93,26 @@ impl App {
                             None => navigation,
                         }
                     }
+                    11 => {
+                        // The results scroll under the floating field. The row menu from the
+                        // previous step closes first, so the capture shows the rows only.
+                        let first = self
+                            .catalog_results
+                            .iter()
+                            .find_map(|item| item.track.as_ref())
+                            .map(|track| track.video_id.clone());
+                        let close = match first {
+                            Some(video_id) => self.update(Message::ToggleRowMenu(video_id)),
+                            None => Task::none(),
+                        };
+                        Task::batch([
+                            close,
+                            operation::scroll_to(
+                                "search-content",
+                                AbsoluteOffset { x: 0.0, y: 420.0 },
+                            ),
+                        ])
+                    }
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -288,7 +308,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 
 /// `--screenshots <dir>`: page name and the wait before each capture.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 11] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 12] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -300,6 +320,7 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 11] = [
     ("settings-scrolled", 1_200),
     ("collection", 3_000),
     ("row-menu", 1_000),
+    ("search-scrolled", 1_000),
 ];
 
 /// The collection the tour opens last: `CRABYTUBE_TOUR_COLLECTION=<browse id>`
