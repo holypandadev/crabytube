@@ -920,7 +920,12 @@ impl YouTubeStreamResolver {
             .map_err(|error| StreamError::Resolution(format!("invalid player JS URL: {error}")))?;
         let player_cache_key = sha256_hex(player_url.as_str().as_bytes());
         // A saved copy for this URL is reused, so a restart does not download the player again.
-        let (player_js, source_fp, source_path) = match saved_raw_player_js(&player_cache_key) {
+        let saved = off_runtime({
+            let key = player_cache_key.clone();
+            move || saved_raw_player_js(&key)
+        })
+        .await;
+        let (player_js, source_fp, source_path) = match saved {
             Some(saved) => {
                 info!(client = runtime.profile.name, "player JS reused from disk");
                 saved
@@ -932,7 +937,7 @@ impl YouTubeStreamResolver {
                     cancellation,
                 )
                 .await?;
-                let source_fp = sha256_hex(player_js.as_bytes());
+                let (player_js, source_fp) = with_fingerprint(player_js).await;
                 let source_path = raw_player_js_path(&player_cache_key, &source_fp);
                 if let Some(path) = &source_path {
                     store_raw_player_js(path, &player_js);
@@ -1550,7 +1555,7 @@ impl YouTubeStreamResolver {
                         cancellation,
                     )
                     .await?;
-                    let source_fp = sha256_hex(source.as_bytes());
+                    let (source, source_fp) = with_fingerprint(source).await;
                     let source_path = raw_player_js_path(&cache_key, &source_fp);
                     if let Some(path) = &source_path {
                         store_raw_player_js(path, &source);
@@ -1845,6 +1850,23 @@ async fn run_js_helper_once(
     }
     serde_json::from_slice(&output.stdout)
         .map_err(|error| StreamError::Decoder(format!("invalid helper response: {error}")))
+}
+
+/// Runs CPU-heavy or blocking work on the blocking pool, so the runtime that serves playback keeps running.
+async fn off_runtime<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(value) => value,
+        Err(error) => std::panic::resume_unwind(error.into_panic()),
+    }
+}
+
+/// A player's text with its SHA-256 fingerprint. Players are megabytes, so the hash runs off the runtime.
+async fn with_fingerprint(text: String) -> (String, String) {
+    off_runtime(move || {
+        let fingerprint = sha256_hex(text.as_bytes());
+        (text, fingerprint)
+    })
+    .await
 }
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -2182,6 +2204,13 @@ fn quality_allows(quality: AudioQuality, bitrate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_player_comes_back_with_the_fingerprint_of_its_own_text() {
+        let (text, fingerprint) = super::with_fingerprint("player".to_owned()).await;
+        assert_eq!(text, "player");
+        assert_eq!(fingerprint, super::sha256_hex(b"player"));
+    }
+
     #[test]
     fn a_play_cancels_an_unfinished_prewarm_once() {
         let resolver = super::YouTubeStreamResolver::new(crate::music::YouTubeSession::default());
