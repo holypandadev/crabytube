@@ -1648,6 +1648,7 @@ impl App {
                 let mut defaults = Preferences {
                     window_width: current.window_width,
                     window_height: current.window_height,
+                    ui_language: current.ui_language,
                     lyrics_offsets: current.lyrics_offsets,
                     lyrics_offset_order: current.lyrics_offset_order,
                     ..Preferences::default()
@@ -2864,6 +2865,19 @@ pub fn run() -> iced::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_keeps_the_chosen_language() {
+        let mut app = App::default();
+        app.preferences.ui_language = crate::preferences::UiLanguage::Spanish;
+        drop(app.update(Message::ResetSettings));
+        assert_eq!(
+            app.preferences.ui_language,
+            crate::preferences::UiLanguage::Spanish
+        );
+        // Everything else returns to its default.
+        assert_eq!(app.preferences.volume, Preferences::default().volume);
+    }
 
     fn song(title: &str) -> Track {
         Track {
