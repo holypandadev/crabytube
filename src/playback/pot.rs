@@ -45,11 +45,22 @@ pub struct PoToken {
     pub valid_until: i64,
 }
 
+impl PoToken {
+    /// The placeholder for a token the request did not ask for: empty, so it is never stored.
+    fn not_requested() -> Self {
+        Self {
+            value: String::new(),
+            valid_until: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PoTokens {
     pub session: PoToken,
+    /// Empty unless the request asked for it (`PoTokenRequest::needs_content`).
     pub content: PoToken,
-    /// True when both tokens came from the saved cache rather than a helper run.
+    /// True when the tokens came from the saved cache rather than a helper run.
     pub reused: bool,
 }
 
@@ -61,6 +72,14 @@ pub struct PoTokenRequest {
     pub ytcfg_json: String,
     pub homepage_challenge_json: Option<String>,
     pub event_id: Option<String>,
+    /// The content token is bound to the video. Only the VideoId binding uses it, so other
+    /// requests skip the BotGuard run for it.
+    pub needs_content: bool,
+}
+
+/// Which tokens a request still has to mint, given which ones are cached: (session, content).
+fn tokens_to_mint(session_cached: bool, content_cached: bool, needs_content: bool) -> (bool, bool) {
+    (!session_cached, needs_content && !content_cached)
 }
 
 #[derive(Debug, Error)]
@@ -490,38 +509,41 @@ impl PoTokenProvider for BotguardHelper {
                 .lock()
                 .await
                 .get(&request.visitor_data, &request.video_id, now);
-        if let (Some(session), Some(content)) = (&session, &content) {
+        let (mint_session, mint_content) =
+            tokens_to_mint(session.is_some(), content.is_some(), request.needs_content);
+        if let (Some(session), false, false) = (&session, mint_session, mint_content) {
             info!("reused cached BotGuard tokens");
             return Ok(PoTokens {
                 session: session.clone(),
-                content: content.clone(),
+                content: content.clone().unwrap_or_else(PoToken::not_requested),
                 reused: true,
             });
         }
-        let video_ids = if content.is_none() {
+        // Only a content token is bound to the video, so only it needs the batch of videos.
+        let video_ids = if !request.needs_content {
+            Vec::new()
+        } else if content.is_none() {
             self.batch_video_ids(&request.visitor_data, &request.video_id, now)
                 .await
         } else {
             vec![request.video_id.clone()]
         };
         let (generated, extra) = self
-            .generate(
-                &request,
-                (session.is_none(), content.is_none()),
-                &video_ids,
-                cancel,
-            )
+            .generate(&request, (mint_session, mint_content), &video_ids, cancel)
             .await?;
         let session =
             session.or_else(|| (!generated.session.value.is_empty()).then_some(generated.session));
-        let content =
-            content.or_else(|| (!generated.content.value.is_empty()).then_some(generated.content));
+        let content = if request.needs_content {
+            content.or_else(|| (!generated.content.value.is_empty()).then_some(generated.content))
+        } else {
+            Some(PoToken::not_requested())
+        };
         let (Some(session), Some(content)) = (session, content) else {
             return Err(PoTokenError::Protocol(
                 "helper omitted a requested token".into(),
             ));
         };
-        if session.valid_until <= now || content.valid_until <= now {
+        if session.valid_until <= now || (request.needs_content && content.valid_until <= now) {
             warn!("BotGuard returned an already expired token");
             return Err(PoTokenError::Protocol("token already expired".into()));
         }
@@ -663,5 +685,19 @@ mod tests {
         };
         let mut restored = PoTokenCache::from_persisted(persisted, 0);
         assert!(restored.get("visitor", "video-a", 0).1.is_none());
+    }
+
+    #[test]
+    fn a_request_mints_only_the_tokens_it_needs() {
+        use super::tokens_to_mint;
+        // Visitor-data binding, nothing cached: only the session token is minted.
+        assert_eq!(tokens_to_mint(false, false, false), (true, false));
+        // Video binding, nothing cached: both tokens are minted.
+        assert_eq!(tokens_to_mint(false, false, true), (true, true));
+        // Session cached: a request that does not use the content token mints nothing.
+        assert_eq!(tokens_to_mint(true, false, false), (false, false));
+        // Session cached but the video binding still needs its content token.
+        assert_eq!(tokens_to_mint(true, false, true), (false, true));
+        assert_eq!(tokens_to_mint(true, true, true), (false, false));
     }
 }

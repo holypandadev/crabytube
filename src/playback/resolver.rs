@@ -1885,6 +1885,7 @@ fn po_token_request(
         ytcfg_json: runtime.botguard_ytcfg_json.clone(),
         homepage_challenge_json: runtime.homepage_challenge_json.clone(),
         event_id: runtime.event_id.clone(),
+        needs_content: runtime.gvs_binding == GvsPoBinding::VideoId,
     }
 }
 
