@@ -3,6 +3,7 @@ mod collection;
 mod diagnostics;
 mod favorites;
 mod home;
+mod home_panels;
 mod layout;
 mod messages;
 mod now_playing;
@@ -149,6 +150,16 @@ struct App {
     tray_available: bool,
     tray_status: String,
     window_hidden_to_tray: bool,
+    /// Set by our own minimize button, and by focus changes checked with the window.
+    window_minimized: bool,
+    /// The local time the Home greeting shows.
+    clock: crate::local_clock::LocalClock,
+    process_sample: Option<crate::process_stats::ProcessSample>,
+    process_reading: Option<crate::process_stats::ProcessReading>,
+    /// "Jump back in": tracks and collections the user started, newest first.
+    recent: Vec<crate::preferences::RecentPlay>,
+    /// The track whose start was last recorded in `recent`.
+    recent_track_id: Option<String>,
     discord_presence_key: Option<(String, bool)>,
     discord_presence_position: Duration,
     discord_presence_updated_at: Option<std::time::Instant>,
@@ -486,6 +497,7 @@ impl App {
                     .and_then(move |id| iced::window::drag_resize(id, direction));
             }
             Message::MinimizeWindow => {
+                self.window_minimized = true;
                 return iced::window::latest().and_then(|id| iced::window::minimize(id, true));
             }
             Message::ToggleMaximize => {
@@ -712,6 +724,7 @@ impl App {
                         self.preferences.remember_history = v;
                         if !v {
                             self.search_history.clear();
+                            self.recent.clear();
                         }
                     }
                     Preference::ShuffleAll(v) => self.preferences.shuffle_all = v,
@@ -828,6 +841,7 @@ impl App {
             }
             Message::ClearHistory => {
                 self.search_history.clear();
+                self.recent.clear();
                 self.persist();
             }
 
@@ -1515,6 +1529,25 @@ impl App {
             }
             Message::WindowFocusChanged(focused) => {
                 self.window_focused = Some(focused);
+                if focused {
+                    self.window_minimized = false;
+                } else {
+                    // Minimizing takes the focus away too, so ask the window what happened.
+                    return iced::window::latest()
+                        .and_then(iced::window::is_minimized)
+                        .map(|minimized| {
+                            Message::WindowMinimizedChecked(minimized.unwrap_or(false))
+                        });
+                }
+            }
+            Message::WindowMinimizedChecked(minimized) => {
+                self.window_minimized = minimized;
+            }
+            Message::ClockTick => {
+                self.clock = crate::local_clock::LocalClock::now();
+            }
+            Message::StatusTick => {
+                self.refresh_process_status();
             }
             Message::TrackNotificationSent(id) => {
                 if id != 0 {
@@ -1530,7 +1563,7 @@ impl App {
                 }
             }
             Message::CarouselStep { forward } => {
-                let layout = home::HomeLayout::new(self.area, self.home_picks.items.len());
+                let layout = self.home_layout(self.area);
                 let max = layout.max_offset(self.home_picks.items.len());
                 let page = layout.visible.max(1) as f32 * layout.stride();
                 let target = if forward {
@@ -1729,6 +1762,12 @@ impl App {
             tray_available: false,
             tray_status: "System tray is starting.".into(),
             window_hidden_to_tray: false,
+            window_minimized: false,
+            clock: crate::local_clock::LocalClock::now(),
+            process_sample: None,
+            process_reading: None,
+            recent: Vec::new(),
+            recent_track_id: None,
             discord_presence_key: None,
             discord_presence_position: Duration::ZERO,
             discord_presence_updated_at: None,
@@ -1781,6 +1820,7 @@ impl App {
                 app.queue = saved.queue;
                 app.queue_index = saved.queue_index;
                 app.search_history = saved.history;
+                app.recent = saved.recent;
                 app.favorites = saved.favorites;
                 app.favorites_context = Arc::from(app.favorites.clone());
                 app.liked = app.favorites.iter().map(|t| t.video_id.clone()).collect();
@@ -1869,6 +1909,7 @@ impl App {
                 queue_index: self.queue_index,
                 history: self.search_history.clone(),
                 favorites: self.favorites.clone(),
+                recent: self.recent.clone(),
             });
         }
     }
@@ -1899,6 +1940,7 @@ impl App {
             queue_index: self.queue_index,
             history: self.search_history.clone(),
             favorites: self.favorites.clone(),
+            recent: self.recent.clone(),
         }
     }
 
@@ -1922,6 +1964,7 @@ impl App {
         self.queue_notice = None;
         self.queue_scroll = AbsoluteOffset::default();
         self.search_history = snapshot.history;
+        self.recent = snapshot.recent;
         self.favorites = snapshot.favorites;
         self.favorites_context = Arc::from(self.favorites.clone());
         self.library_notice = None;
@@ -2338,6 +2381,7 @@ impl App {
         self.invalidate_suggestions();
         self.page = page.clone();
         if self.page == Page::Home {
+            self.enter_home();
             tracing::info!(scroll_y = self.home_scroll.y, "returned to cached Home");
             Task::batch([
                 operation::scroll_to("home-content", self.home_scroll),
@@ -2697,6 +2741,10 @@ pub(super) struct QueueSource {
     pub title: String,
     /// Full size of the source list, which can exceed the queue's capped length.
     pub track_count: usize,
+    /// Where the list opens from, when it is an album or playlist that can be opened again.
+    pub browse: Option<crate::music::BrowseTarget>,
+    pub thumbnail_url: Option<String>,
+    pub album: bool,
 }
 
 fn bounded_queue_context(tracks: &[Track], index: usize, limit: usize) -> (Vec<Track>, usize) {
@@ -2938,6 +2986,9 @@ mod tests {
             queue_source: Some(super::QueueSource {
                 title: "Long Mix".into(),
                 track_count: 5000,
+                browse: None,
+                thumbnail_url: None,
+                album: false,
             }),
             ..App::default()
         };
@@ -3166,7 +3217,7 @@ mod tests {
 
         let artwork_task = app.update(Message::ResizeWorkDue(app.resize_work_generation));
 
-        let layout = super::home::HomeLayout::new(area, app.home_picks.items.len());
+        let layout = app.home_layout(area);
         assert!(app.artwork_requested.contains(&(
             "cover-0-11".into(),
             crate::artwork::variant_for_pixels(layout.card)
@@ -3185,7 +3236,7 @@ mod tests {
         let task = app.update(Message::DisplayScaleChanged(2.0));
 
         assert_eq!(app.window_scale_factor, 2.0);
-        let layout = super::home::HomeLayout::new(app.area, app.home_picks.items.len());
+        let layout = app.home_layout(app.area);
         // The doubled size, downgraded only as far as the decode budget needs.
         let variant = App::effective_variant_for_count(
             crate::artwork::variant_for_pixels(layout.card * 2.0),

@@ -1,12 +1,52 @@
 //! Playback and queue: the messages that drive the player, the queue and the radio.
 
 use super::*;
+use crate::preferences::{MAX_RECENT_PLAYS, RecentCollection, RecentPlay};
 
 /// Bounds of the karaoke wait between two highlight changes.
 const KARAOKE_MIN_WAIT: Duration = Duration::from_millis(60);
 const KARAOKE_MAX_WAIT: Duration = Duration::from_millis(500);
 
 impl App {
+    /// Adds the track that just started playing to "Jump back in", once per start. A track that
+    /// plays from an album or playlist records that collection instead.
+    pub(super) fn record_playing_track(&mut self) {
+        if self.playback_status.state != PlaybackState::Playing {
+            return;
+        }
+        let Some(track) = self.playback_status.track.clone() else {
+            return;
+        };
+        if self.recent_track_id.as_deref() == Some(track.video_id.as_str()) {
+            return;
+        }
+        self.recent_track_id = Some(track.video_id.clone());
+        if !self.preferences.remember_history {
+            return;
+        }
+        let play = match &self.queue_source {
+            Some(QueueSource {
+                title,
+                track_count,
+                browse: Some(browse),
+                thumbnail_url,
+                album,
+            }) => RecentPlay::Collection(RecentCollection {
+                title: title.clone(),
+                browse: browse.clone(),
+                track_count: *track_count,
+                thumbnail_url: thumbnail_url.clone(),
+                album: *album,
+            }),
+            _ => RecentPlay::Track(track),
+        };
+        let key = play.key();
+        self.recent.retain(|past| past.key() != key);
+        self.recent.insert(0, play);
+        self.recent.truncate(MAX_RECENT_PLAYS);
+        self.persist();
+    }
+
     pub(super) fn update_playback_status(&mut self, status: PlaybackStatus) -> Task<Message> {
         self.apply_helper_memory_budget();
         let previous_state = self.playback_status.state;
@@ -14,6 +54,7 @@ impl App {
         let previous_track = self.playback_status.track.clone();
         self.playback_status = status;
         self.playback_status_at = std::time::Instant::now();
+        self.record_playing_track();
         // A position that moves back within the same track is a seek or a restart, whatever started it.
         let same_track = previous_track.as_ref().map(|track| &track.video_id)
             == self

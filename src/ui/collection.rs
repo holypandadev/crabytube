@@ -1,6 +1,6 @@
 use super::shell::fit;
 use super::theme::{self, DIM, FADED, INK, MONO, RULE, hrule, icon, label};
-use super::{App, Message, format_duration};
+use super::{App, Message, Page, format_duration};
 use iced::widget::{
     Space, button, column, container,
     operation::{self, AbsoluteOffset},
@@ -196,9 +196,19 @@ impl App {
                 .into();
         };
         let queue_tracks = Arc::clone(&self.collection.tracks_context);
+        let browse = match &self.page {
+            Page::CollectionDetail(target) => Some(target.clone()),
+            _ => None,
+        };
+        let album = browse
+            .as_ref()
+            .is_some_and(|target| target.page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ALBUM"));
         let queue_source = super::QueueSource {
             title: data.title.clone(),
             track_count: data.tracks.len(),
+            browse,
+            thumbnail_url: data.thumbnail_url.clone(),
+            album,
         };
         // Phone-width windows stack the cover above the title and buttons.
         let narrow = width < super::home::NARROW_W;

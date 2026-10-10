@@ -1,5 +1,5 @@
 //! Versioned local state. No credentials, signed streams or raw service responses.
-use crate::music::Track;
+use crate::music::{BrowseTarget, Track};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -10,6 +10,7 @@ use std::{
 
 pub const MAX_QUEUE_TRACKS: usize = 2_000;
 pub const MAX_LOCAL_FAVORITES: usize = 10_000;
+pub const MAX_RECENT_PLAYS: usize = 12;
 pub const MAX_STATE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LYRICS_OFFSETS: usize = 500;
 const MAX_LYRICS_OFFSET_VIDEO_ID_BYTES: usize = 256;
@@ -284,6 +285,44 @@ impl Preferences {
         }
     }
 }
+/// Something the user started playing, listed under "Jump back in" on Home.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum RecentPlay {
+    Track(Track),
+    Collection(RecentCollection),
+}
+
+/// An album or playlist the user started, kept with what is needed to open it again.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecentCollection {
+    pub title: String,
+    pub browse: BrowseTarget,
+    /// Tracks in the collection when it started playing.
+    pub track_count: usize,
+    pub thumbnail_url: Option<String>,
+    /// Albums are labelled as such; other collections are labelled as playlists.
+    #[serde(default)]
+    pub album: bool,
+}
+
+impl RecentPlay {
+    /// Identifies the entry for de-duplication: the video ID of a track, or the browse ID of a
+    /// collection.
+    pub fn key(&self) -> String {
+        match self {
+            Self::Track(track) => format!("track:{}", track.video_id),
+            Self::Collection(collection) => format!("collection:{}", collection.browse.browse_id),
+        }
+    }
+
+    pub fn thumbnail_url(&self) -> Option<&str> {
+        match self {
+            Self::Track(track) => track.thumbnail_url.as_deref(),
+            Self::Collection(collection) => collection.thumbnail_url.as_deref(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Snapshot {
@@ -293,6 +332,8 @@ pub struct Snapshot {
     pub queue_index: Option<usize>,
     pub history: Vec<String>,
     pub favorites: Vec<Track>,
+    /// Newest first, without repeats.
+    pub recent: Vec<RecentPlay>,
 }
 impl Snapshot {
     pub fn normalize(&mut self) {
@@ -320,19 +361,7 @@ impl Snapshot {
         self.preferences.normalize_lyrics_offsets();
         self.queue.truncate(MAX_QUEUE_TRACKS);
         for track in self.queue.iter_mut().chain(self.favorites.iter_mut()) {
-            cap_string(&mut track.video_id, 256);
-            cap_string(&mut track.title, 512);
-            cap_string(&mut track.artist, 1_024);
-            if let Some(album) = &mut track.album {
-                cap_string(album, 512);
-            }
-            if track
-                .thumbnail_url
-                .as_ref()
-                .is_some_and(|url| url.len() > 2_048)
-            {
-                track.thumbnail_url = None;
-            }
+            cap_track(track);
         }
         self.queue_index = self.queue_index.filter(|index| *index < self.queue.len());
         if !self.preferences.remember_queue {
@@ -341,8 +370,21 @@ impl Snapshot {
         }
         if !self.preferences.remember_history {
             self.history.clear();
+            self.recent.clear();
         }
         self.history.truncate(30);
+        let mut keys = HashSet::new();
+        self.recent.retain(|play| keys.insert(play.key()));
+        self.recent.truncate(MAX_RECENT_PLAYS);
+        for play in &mut self.recent {
+            match play {
+                RecentPlay::Track(track) => cap_track(track),
+                RecentPlay::Collection(collection) => {
+                    cap_string(&mut collection.title, 512);
+                    cap_string(&mut collection.browse.browse_id, 256);
+                }
+            }
+        }
         for item in &mut self.history {
             cap_string(item, 256);
         }
@@ -400,6 +442,22 @@ pub fn write(path: &Path, value: &Snapshot) -> Result<(), String> {
     }
     std::fs::write(&temp, data).map_err(|e| e.to_string())?;
     std::fs::rename(&temp, path).map_err(|e| e.to_string())
+}
+
+fn cap_track(track: &mut Track) {
+    cap_string(&mut track.video_id, 256);
+    cap_string(&mut track.title, 512);
+    cap_string(&mut track.artist, 1_024);
+    if let Some(album) = &mut track.album {
+        cap_string(album, 512);
+    }
+    if track
+        .thumbnail_url
+        .as_ref()
+        .is_some_and(|url| url.len() > 2_048)
+    {
+        track.thumbnail_url = None;
+    }
 }
 
 fn cap_string(value: &mut String, max_bytes: usize) {
@@ -529,6 +587,55 @@ pub fn set_startup(enabled: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recent_plays_keep_the_newest_unique_entries_and_respect_history_privacy() {
+        let track = |id: &str| Track {
+            video_id: id.into(),
+            title: "Title".into(),
+            artist: "Artist".into(),
+            album: None,
+            thumbnail_url: None,
+            duration_secs: None,
+        };
+        let collection = RecentCollection {
+            title: "Mix".into(),
+            browse: BrowseTarget {
+                browse_id: "VLPL1".into(),
+                params: None,
+                page_type: None,
+            },
+            track_count: 3,
+            thumbnail_url: None,
+            album: false,
+        };
+        let mut s = Snapshot {
+            recent: vec![
+                RecentPlay::Track(track("a")),
+                RecentPlay::Collection(collection),
+                RecentPlay::Track(track("a")),
+            ],
+            ..Snapshot::default()
+        };
+        for index in 0..20 {
+            s.recent
+                .push(RecentPlay::Track(track(&format!("v{index}"))));
+        }
+        s.normalize();
+        assert_eq!(s.recent.len(), MAX_RECENT_PLAYS);
+        assert_eq!(s.recent[0].key(), "track:a");
+        assert_eq!(s.recent[1].key(), "collection:VLPL1");
+        assert_eq!(
+            s.recent
+                .iter()
+                .filter(|play| play.key() == "track:a")
+                .count(),
+            1
+        );
+        s.preferences.remember_history = false;
+        s.normalize();
+        assert!(s.recent.is_empty());
+    }
+
     #[test]
     fn restore_rejects_invalid_cursor_and_respects_privacy_toggles() {
         let mut s = Snapshot {

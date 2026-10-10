@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// Home's greeting changes once a minute at most, and the status line reads the process every
+/// five seconds. Both run only while Home is on screen.
+const HOME_CLOCK_TICK: std::time::Duration = std::time::Duration::from_secs(60);
+const HOME_STATUS_TICK: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl App {
     pub(super) fn subscription(&self) -> Subscription<Message> {
         let playback_status = iced::Subscription::run_with(
@@ -36,6 +41,18 @@ impl App {
             }
             _ => None,
         });
+        let home_visible =
+            self.page == Page::Home && !self.window_minimized && !self.window_hidden_to_tray;
+        let clock = if home_visible {
+            iced::time::every(HOME_CLOCK_TICK).map(|_| Message::ClockTick)
+        } else {
+            Subscription::none()
+        };
+        let status = if home_visible {
+            iced::time::every(HOME_STATUS_TICK).map(|_| Message::StatusTick)
+        } else {
+            Subscription::none()
+        };
         let diagnostic = diagnostic_subscription();
         let carousel = if self.carousel.animating() {
             iced::window::frames().map(Message::CarouselFrame)
@@ -49,6 +66,8 @@ impl App {
         };
         Subscription::batch([
             diagnostic,
+            clock,
+            status,
             carousel,
             fades,
             playback_status,

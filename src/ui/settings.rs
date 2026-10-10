@@ -389,7 +389,8 @@ impl App {
                 row![
                     button(label(self.tr("Clear").into_owned(), 12.0))
                         .on_press_maybe(
-                            (!self.search_history.is_empty()).then_some(Message::ClearHistory)
+                            (!self.search_history.is_empty() || !self.recent.is_empty())
+                                .then_some(Message::ClearHistory)
                         )
                         .padding([5, 10])
                         .style(theme::outline_button),

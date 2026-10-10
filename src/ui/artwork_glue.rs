@@ -81,13 +81,24 @@ impl App {
     pub(super) fn current_page_artwork(&self) -> Vec<CoverRequest> {
         match &self.page {
             Page::Home => {
-                let layout = home::HomeLayout::new(self.area, self.home_picks.items.len());
+                let layout = self.home_layout(self.area);
                 let variant = crate::artwork::variant_for_pixels(layout.card * self.pixel_scale());
-                self.home_picks
+                let mut requests: Vec<CoverRequest> = self
+                    .home_picks
                     .items
                     .iter()
                     .filter_map(|item| cover_request(item.thumbnail_url.as_deref(), variant))
-                    .collect()
+                    .collect();
+                let jump_variant = crate::artwork::variant_for_pixels(
+                    super::home_panels::JUMP_THUMB * self.pixel_scale(),
+                );
+                requests.extend(
+                    self.recent
+                        .iter()
+                        .take(layout.jump)
+                        .filter_map(|play| cover_request(play.thumbnail_url(), jump_variant)),
+                );
+                requests
             }
             Page::Search => self.search_artwork(),
             Page::Library => {

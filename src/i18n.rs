@@ -72,6 +72,32 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Party" => "Fiesta",
         "Listen your way" => "Escucha a tu manera",
         "Back" => "Atrás",
+        "1 song" => "1 canción",
+        "GOOD MORNING." => "BUENOS DÍAS.",
+        "GOOD AFTERNOON." => "BUENAS TARDES.",
+        "GOOD EVENING." => "BUENAS NOCHES.",
+        "GOOD NIGHT." => "BUENAS NOCHES.",
+        "JUMP BACK IN" => "SEGUIR ESCUCHANDO",
+        "FAVORITES" => "FAVORITOS",
+        "SUNDAY" => "DOMINGO",
+        "MONDAY" => "LUNES",
+        "TUESDAY" => "MARTES",
+        "WEDNESDAY" => "MIÉRCOLES",
+        "THURSDAY" => "JUEVES",
+        "FRIDAY" => "VIERNES",
+        "SATURDAY" => "SÁBADO",
+        "JAN" => "ENE",
+        "FEB" => "FEB",
+        "MAR" => "MAR",
+        "APR" => "ABR",
+        "MAY" => "MAY",
+        "JUN" => "JUN",
+        "JUL" => "JUL",
+        "AUG" => "AGO",
+        "SEP" => "SEP",
+        "OCT" => "OCT",
+        "NOV" => "NOV",
+        "DEC" => "DIC",
         "Copy title" => "Copiar título",
         "Copy artist" => "Copiar artista",
         "Copied" => "Copiado",
@@ -719,6 +745,20 @@ mod tests {
                 "Local data exported to /home/user/Documents/crabytube-backup.json."
             ),
             "Datos locales exportados a /home/user/Documents/crabytube-backup.json."
+        );
+    }
+
+    #[test]
+    fn home_panel_labels_translate_and_keep_english_unchanged() {
+        assert_eq!(translate(UiLanguage::Spanish, "THURSDAY"), "JUEVES");
+        assert_eq!(translate(UiLanguage::Spanish, "OCT"), "OCT");
+        assert_eq!(
+            translate(UiLanguage::Spanish, "JUMP BACK IN"),
+            "SEGUIR ESCUCHANDO"
+        );
+        assert_eq!(
+            translate(UiLanguage::English, "JUMP BACK IN"),
+            "JUMP BACK IN"
         );
     }
 

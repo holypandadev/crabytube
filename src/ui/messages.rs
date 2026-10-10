@@ -238,6 +238,12 @@ pub(super) enum Message {
     AreaMeasured(iced::Size),
     /// The window gained or lost focus.
     WindowFocusChanged(bool),
+    /// Whether the window is minimized, asked of the window after it lost focus.
+    WindowMinimizedChecked(bool),
+    /// A minute passed while Home is visible, so the greeting may have changed.
+    ClockTick,
+    /// Time to read the memory and CPU the Home status line shows.
+    StatusTick,
     /// A track notification was sent; zero when it was not.
     TrackNotificationSent(u32),
     /// Scrolls the Home carousel by one screen.

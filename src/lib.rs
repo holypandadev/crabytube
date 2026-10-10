@@ -7,8 +7,10 @@ pub mod ui;
 
 pub mod artwork;
 mod home_cache;
+pub mod local_clock;
 pub mod memory;
 pub mod preferences;
+pub mod process_stats;
 pub mod runtime_cache;
 pub mod storage;
 pub mod temp_cleanup;

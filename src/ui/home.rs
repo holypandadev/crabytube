@@ -128,6 +128,23 @@ impl Carousel {
     }
 }
 
+/// What the Home page shows around the search field and the carousel, as far as the layout
+/// needs to know. The lists themselves stay in the App.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct HomeExtras {
+    /// Recent searches that fit on one line, before any are dropped for lack of height.
+    pub chips: usize,
+    /// Entries in "Jump back in", before any are dropped for lack of height.
+    pub jump: usize,
+}
+
+/// The greeting is two lines while the page has room, and one line when it does not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GreetingSize {
+    Full,
+    Small,
+}
+
 /// Geometry of the Home page for a given content area.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct HomeLayout {
@@ -138,26 +155,79 @@ pub(super) struct HomeLayout {
     /// Width of the card row (and of the carousel block, which is centered).
     pub row_width: f32,
     pub search_width: f32,
-    /// Space above the search field, and between it and the carousel.
+    pub narrow: bool,
+    /// Space above the greeting, or above the search field when the block is centered.
     pub top: f32,
+    /// Space between the search field and the carousel; the chips take part of it.
     pub gap: f32,
+    pub greeting: GreetingSize,
+    pub greeting_font: f32,
+    /// Chips shown under the search field (0 hides the row).
+    pub chips: usize,
+    /// Entries shown in "Jump back in" (0 hides the section).
+    pub jump: usize,
+}
+
+/// Space between the greeting and the search field.
+pub(super) const GREETING_GAP: f32 = 24.0;
+pub(super) const GREETING_SUBLINE_GAP: f32 = 6.0;
+const GREETING_SUBLINE_H: f32 = 18.0;
+const SMALL_GREETING_H: f32 = 20.0;
+/// Space between the search field and the chips, and the chips' height.
+pub(super) const CHIPS_GAP: f32 = 12.0;
+pub(super) const CHIPS_H: f32 = 30.0;
+pub(super) const MAX_CHIPS: usize = 5;
+/// Space above "Jump back in", its heading, and each row of entries.
+pub(super) const JUMP_GAP: f32 = 28.0;
+const JUMP_HEADING_H: f32 = 24.0;
+pub(super) const JUMP_HEADING_GAP: f32 = 12.0;
+pub(super) const JUMP_ROW_H: f32 = 40.0;
+pub(super) const JUMP_ROW_GAP: f32 = 4.0;
+pub(super) const MAX_JUMP: usize = 4;
+/// Height of the status line at the foot of the page, rule included.
+pub(super) const STATUS_H: f32 = 36.0;
+/// Clear space kept above and below the Home block.
+const EDGE_GAP: f32 = 8.0;
+
+/// Height of the greeting block, including the gap that follows it.
+fn greeting_height(size: GreetingSize, font: f32) -> f32 {
+    match size {
+        GreetingSize::Full => {
+            (font * 1.3).ceil() + GREETING_SUBLINE_GAP + GREETING_SUBLINE_H + GREETING_GAP
+        }
+        GreetingSize::Small => SMALL_GREETING_H + GREETING_GAP,
+    }
+}
+
+fn chips_height(count: usize) -> f32 {
+    if count == 0 { 0.0 } else { CHIPS_GAP + CHIPS_H }
+}
+
+fn jump_height(count: usize, narrow: bool) -> f32 {
+    if count == 0 {
+        return 0.0;
+    }
+    let rows = (if narrow { count } else { count.div_ceil(2) }) as f32;
+    JUMP_GAP + JUMP_HEADING_H + JUMP_HEADING_GAP + rows * JUMP_ROW_H + (rows - 1.0) * JUMP_ROW_GAP
 }
 
 impl HomeLayout {
-    /// The search field and the carousel form one block, centered on the
-    /// page (a little above the middle). Cards grow with the height until the
-    /// block fills about three quarters of the page, then as many as fit
-    /// across share the width exactly, so neither axis is left mostly empty.
-    pub fn new(area: Size, items: usize) -> Self {
+    /// The greeting, the search field, the chips, the carousel and "Jump back in" form one
+    /// block, centered on the page (a little above the middle). Cards grow with the height
+    /// until the block fills about three quarters of the page, then as many as fit across
+    /// share the width exactly, so neither axis is left mostly empty. The search field and
+    /// the carousel keep this geometry; on a short page "Jump back in" goes first, then the
+    /// chips, and only then does the greeting shrink to one line.
+    pub fn new(area: Size, items: usize, extras: HomeExtras) -> Self {
         let width = area.width.max(CARD_MIN);
-        let height = area.height.max(0.0);
+        let page_h = (area.height - STATUS_H).max(0.0);
         let items = items.clamp(1, 8) as f32;
         let narrow = width < NARROW_W;
         let card_gap = if narrow { CARD_GAP_NARROW } else { CARD_GAP };
-        let gap = (height * 0.06).clamp(24.0, 56.0).floor();
+        let gap = (page_h * 0.06).clamp(24.0, 56.0).floor();
         let fixed = SEARCH_H + gap + CAROUSEL_CHROME_H;
         // Largest card the height allows.
-        let tallest = (height * BLOCK_SHARE - fixed).clamp(CARD_MIN, CARD_MAX);
+        let tallest = (page_h * BLOCK_SHARE - fixed).clamp(CARD_MIN, CARD_MAX);
         // As many cards as needed for that size to fill the width (at least
         // two on narrow screens, so the row reads as a carousel).
         let mut across = ((width + card_gap) / (tallest + card_gap)).ceil();
@@ -172,18 +242,48 @@ impl HomeLayout {
         }
         // Very short windows: shrink the cards so the block still fits.
         card = card
-            .min((height - fixed - 32.0).max(CARD_MIN * 0.75))
+            .min((page_h - fixed - 32.0).max(CARD_MIN * 0.75))
             .floor();
-        let block = fixed + card;
-        let top = ((height - block) / 2.0 * 0.9).max(16.0).floor();
+        let greeting_font = (width * 0.035)
+            .clamp(28.0, 44.0)
+            .min(page_h * 0.06)
+            .max(20.0)
+            .floor();
+        let carousel = fixed + card;
+        let block = |greeting: GreetingSize, chips: usize, jump: usize| {
+            greeting_height(greeting, greeting_font)
+                + chips_height(chips)
+                + carousel
+                + jump_height(jump, narrow)
+        };
+        let budget = page_h - 2.0 * EDGE_GAP;
+        let mut chips = extras.chips.min(MAX_CHIPS);
+        let mut jump = extras.jump.min(MAX_JUMP);
+        let mut greeting = GreetingSize::Full;
+        if block(greeting, chips, jump) > budget {
+            jump = 0;
+        }
+        if block(greeting, chips, jump) > budget {
+            chips = 0;
+        }
+        if block(greeting, chips, jump) > budget {
+            greeting = GreetingSize::Small;
+        }
+        let total = block(greeting, chips, jump);
+        let top = ((page_h - total) / 2.0 * 0.9).max(EDGE_GAP).floor();
         Self {
             visible: across as usize,
             card,
             card_gap,
             row_width: across * (card + card_gap) - card_gap,
             search_width: width.min(SEARCH_MAX_W),
+            narrow,
             top,
             gap,
+            greeting,
+            greeting_font,
+            chips,
+            jump,
         }
     }
 
@@ -194,6 +294,29 @@ impl HomeLayout {
     /// Largest scroll offset for `count` cards.
     pub fn max_offset(&self, count: usize) -> f32 {
         (count as f32 * self.stride() - self.card_gap - self.row_width).max(0.0)
+    }
+
+    /// Height of the greeting block, gap included.
+    pub fn greeting_height(&self) -> f32 {
+        greeting_height(self.greeting, self.greeting_font)
+    }
+
+    /// Y of the search field from the top of the page.
+    pub fn search_top(&self) -> f32 {
+        self.top + self.greeting_height()
+    }
+
+    /// Y of the bottom edge of the whole block, from the top of the page. The tests check the
+    /// whole stack against the page; the app itself only needs the parts.
+    #[cfg(test)]
+    pub fn block_bottom(&self) -> f32 {
+        self.search_top()
+            + SEARCH_H
+            + chips_height(self.chips)
+            + self.gap
+            + CAROUSEL_CHROME_H
+            + self.card
+            + jump_height(self.jump, self.narrow)
     }
 }
 
@@ -211,6 +334,23 @@ pub(super) fn subtitle_duration(subtitle: &str) -> Option<&str> {
 }
 
 impl App {
+    /// The Home geometry for `area`, counting the chips and entries the App has content for.
+    pub(super) fn home_layout(&self, area: Size) -> HomeLayout {
+        let width = area.width.max(CARD_MIN);
+        let narrow = width < NARROW_W;
+        let search_width = width.min(SEARCH_MAX_W);
+        let chips = if self.preferences.remember_history {
+            super::home_panels::chip_queries(&self.search_history, search_width, narrow).len()
+        } else {
+            0
+        };
+        let extras = HomeExtras {
+            chips,
+            jump: self.recent.len().min(MAX_JUMP),
+        };
+        HomeLayout::new(area, self.home_picks.items.len(), extras)
+    }
+
     /// The search field alone, without suggestions.
     fn search_field(&self, width: f32, hint: bool) -> Element<'_, Message> {
         container(
@@ -301,7 +441,7 @@ impl App {
     }
 
     pub(super) fn home_page(&self, area: Size) -> Element<'_, Message> {
-        let layout = HomeLayout::new(area, self.home_picks.items.len());
+        let layout = self.home_layout(area);
         let search_x = ((area.width - layout.search_width) / 2.0).max(0.0);
         let carousel: Element<'_, Message> = if self.home_picks.items.is_empty() {
             let status: Element<'_, Message> = if self.home_loading {
@@ -331,19 +471,30 @@ impl App {
                 .center_x(Length::Fill)
                 .into()
         };
-        let base = column![
-            Space::new().height(layout.top),
-            container(self.search_field(layout.search_width, true)).center_x(Length::Fill),
-            Space::new().height(layout.gap),
-            carousel,
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill);
+        let mut page = column![Space::new().height(layout.top), self.greeting_view(&layout)]
+            .width(Length::Fill)
+            .height(Length::Fill);
+        page = page
+            .push(container(self.search_field(layout.search_width, true)).center_x(Length::Fill));
+        if layout.chips > 0 {
+            page = page
+                .push(Space::new().height(CHIPS_GAP))
+                .push(self.recent_chips_view(&layout));
+        }
+        page = page.push(Space::new().height(layout.gap)).push(carousel);
+        if layout.jump > 0 {
+            page = page
+                .push(Space::new().height(JUMP_GAP))
+                .push(self.jump_view(&layout));
+        }
+        page = page
+            .push(Space::new().height(Length::Fill))
+            .push(self.status_line());
         self.with_suggestions(
-            base.into(),
+            page.into(),
             layout.search_width,
             search_x,
-            layout.top + SEARCH_H,
+            layout.search_top() + SEARCH_H,
         )
     }
 
@@ -843,10 +994,14 @@ mod tests {
             (1856.0, 860.0),
             (2496.0, 1300.0),
         ] {
-            let layout = HomeLayout::new(Size::new(width, height), 12);
-            let block = SEARCH_H + layout.gap + layout.card + CAROUSEL_CHROME_H;
+            let layout = HomeLayout::new(
+                Size::new(width, height),
+                12,
+                HomeExtras { chips: 5, jump: 4 },
+            );
+            let page_h = height - STATUS_H;
             assert!(
-                layout.top + block <= height + 1.0,
+                layout.block_bottom() <= page_h + 0.5,
                 "{width}x{height}: {layout:?}"
             );
             assert!(
@@ -859,9 +1014,9 @@ mod tests {
             );
             // The block is centered: the space below is never much smaller
             // than the space above, and neither dwarfs the block.
-            let below = height - layout.top - block;
+            let below = page_h - layout.block_bottom();
             assert!(below + 1.0 >= layout.top, "{width}x{height}: {layout:?}");
-            assert!(layout.top <= block, "{width}x{height}: {layout:?}");
+            assert!(layout.top <= page_h, "{width}x{height}: {layout:?}");
             // The cards span the width unless the height caps them.
             assert!(
                 layout.row_width >= width - layout.card - layout.card_gap,
@@ -869,7 +1024,59 @@ mod tests {
             );
         }
         // Phone width: at least two cards, so the row reads as a carousel.
-        assert!(HomeLayout::new(Size::new(326.0, 650.0), 12).visible >= 2);
+        assert!(HomeLayout::new(Size::new(326.0, 650.0), 12, HomeExtras::default()).visible >= 2);
+    }
+
+    #[test]
+    fn short_pages_drop_jump_back_in_then_the_chips_then_shrink_the_greeting() {
+        for width in [360.0, 390.0, 1270.0] {
+            for height in (560..=1100).step_by(4) {
+                let size = Size::new(width, height as f32);
+                let layout = HomeLayout::new(size, 12, HomeExtras { chips: 5, jump: 4 });
+                let page_h = height as f32 - STATUS_H;
+                assert!(
+                    layout.block_bottom() <= page_h + 0.5,
+                    "{width}x{height}: {layout:?}"
+                );
+                if layout.greeting == GreetingSize::Small {
+                    assert_eq!((layout.chips, layout.jump), (0, 0), "{width}x{height}");
+                }
+                if layout.chips == 0 {
+                    assert_eq!(layout.jump, 0, "{width}x{height}: {layout:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_extra_panels_never_resize_the_search_field_or_the_carousel() {
+        for (width, height) in [(390.0, 844.0), (1270.0, 720.0), (1920.0, 1080.0)] {
+            let size = Size::new(width, height);
+            let bare = HomeLayout::new(size, 12, HomeExtras::default());
+            let full = HomeLayout::new(size, 12, HomeExtras { chips: 5, jump: 4 });
+            assert_eq!(bare.card, full.card, "{width}x{height}");
+            assert_eq!(bare.visible, full.visible, "{width}x{height}");
+            assert_eq!(bare.gap, full.gap, "{width}x{height}");
+            assert_eq!(bare.search_width, full.search_width, "{width}x{height}");
+        }
+    }
+
+    #[test]
+    fn tall_windows_show_every_panel_and_keep_the_block_centered() {
+        let layout = HomeLayout::new(
+            Size::new(1920.0, 1080.0),
+            12,
+            HomeExtras { chips: 5, jump: 4 },
+        );
+        assert_eq!(layout.greeting, GreetingSize::Full);
+        assert_eq!((layout.chips, layout.jump), (5, 4), "{layout:?}");
+        let page_h = 1080.0 - STATUS_H;
+        let below = page_h - layout.block_bottom();
+        assert!(below >= layout.top, "{layout:?}");
+        assert!(below - layout.top <= page_h * 0.2, "{layout:?}");
+        // The search field sits below the greeting, and the status line is never covered.
+        assert!(layout.search_top() > layout.top, "{layout:?}");
+        assert!(layout.block_bottom() <= page_h, "{layout:?}");
     }
 
     #[test]
