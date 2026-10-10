@@ -49,6 +49,8 @@ pub fn virtual_range(
 /// `spacing(18/12/8)` column — so no double spacing drifts the window.
 /// 44 px cover + 10 px padding above and below + 1 px rule.
 pub const COLLECTION_ROW_PITCH: f32 = 65.0;
+/// How far from the end of the search results the next page is asked for, in pixels.
+pub const CATALOG_MORE_MARGIN: f32 = 480.0;
 /// Height of a top/bottom spacer for `missing` virtual rows. Because spacers
 /// live in a spacing-0 inner column, the height is exactly `missing * pitch`
 /// with no extra column gap.

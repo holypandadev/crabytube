@@ -708,7 +708,15 @@ impl App {
         // rectangle is opaque, so rows stay visible on both sides of it.
         let results = scrollable(content)
             .id("search-content")
-            .on_scroll(|viewport| Message::SearchScrolled(viewport.absolute_offset()))
+            .on_scroll(|viewport| {
+                let below = viewport.content_bounds().height
+                    - viewport.absolute_offset().y
+                    - viewport.bounds().height;
+                Message::SearchScrolled {
+                    offset: viewport.absolute_offset(),
+                    near_end: below < super::layout::CATALOG_MORE_MARGIN,
+                }
+            })
             .direction(theme::vbar())
             .style(theme::scroll_style)
             .width(Length::Fill)

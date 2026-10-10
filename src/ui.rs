@@ -291,7 +291,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::CopyNoticeExpired(_)
         | Message::LyricsScrolled(_)
         | Message::HomeScrolled(_)
-        | Message::SearchScrolled(_)
+        | Message::SearchScrolled { .. }
         | Message::LibraryScrolled(_)
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
@@ -649,7 +649,9 @@ impl App {
                         for (video_id, duration) in learned {
                             self.remember_duration(video_id, duration);
                         }
-                        self.catalog_continuation = None;
+                        self.catalog_continuation = page.continuation.filter(|_| {
+                            self.catalog_results.len() < crate::music::MAX_CATALOG_ITEMS
+                        });
                         self.catalog_more_loading = false;
                         self.catalog_more_error = None;
                         self.search_error = None;
@@ -1334,9 +1336,14 @@ impl App {
                 self.home_scroll = offset;
                 return self.scroll_preload_task();
             }
-            Message::SearchScrolled(offset) => {
+            Message::SearchScrolled { offset, near_end } => {
                 self.search_scroll = offset;
-                return self.scroll_preload_task();
+                let more = if near_end {
+                    self.load_more_catalog_task()
+                } else {
+                    Task::none()
+                };
+                return Task::batch([self.scroll_preload_task(), more]);
             }
             Message::LibraryScrolled(offset) => {
                 self.library_scroll = offset;
@@ -4585,6 +4592,50 @@ mod tests {
         assert_eq!(app.recent.len(), 1);
         drop(app.update(Message::ClearHistory));
         assert!(app.recent.is_empty());
+    }
+
+    #[test]
+    fn search_keeps_the_first_page_continuation_and_asks_for_more_near_the_end() {
+        use crate::music::{CatalogPage, Continuation, HomeItem, HomeItemKind};
+        let item = |id: &str| HomeItem {
+            title: format!("Title {id}"),
+            subtitle: "Artist".into(),
+            thumbnail_url: None,
+            kind: HomeItemKind::Song,
+            browse_id: None,
+            browse_target: None,
+            track: Some(fixture_track(id)),
+            duration: None,
+        };
+        let mut app = App {
+            page: Page::Search,
+            search_committed: true,
+            search_query: "artist".into(),
+            search_request_id: 7,
+            search_loading: true,
+            ..App::default()
+        };
+        drop(app.update(Message::CatalogCompleted {
+            request_id: 7,
+            result: Some(Ok(CatalogPage {
+                items: vec![item("first")],
+                continuation: Some(Continuation {
+                    token: "next".into(),
+                }),
+            })),
+        }));
+        assert!(app.catalog_continuation.is_some());
+
+        drop(app.update(Message::SearchScrolled {
+            offset: AbsoluteOffset::default(),
+            near_end: false,
+        }));
+        assert!(!app.catalog_more_loading);
+        drop(app.update(Message::SearchScrolled {
+            offset: AbsoluteOffset::default(),
+            near_end: true,
+        }));
+        assert!(app.catalog_more_loading);
     }
 
     #[test]

@@ -142,7 +142,11 @@ pub(super) enum Message {
     },
     CollectionScrolled(f32),
     HomeScrolled(AbsoluteOffset),
-    SearchScrolled(AbsoluteOffset),
+    SearchScrolled {
+        offset: AbsoluteOffset,
+        /// The list is close enough to its end to ask for the next page of results.
+        near_end: bool,
+    },
     LibraryScrolled(AbsoluteOffset),
     QueueScrolled(AbsoluteOffset),
     TogglePlayback,
