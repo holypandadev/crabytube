@@ -621,7 +621,10 @@ mod tests {
         let app = App {
             page: Page::NowPlaying,
             area: iced::Size::new(1270.0, 1440.0),
-            queue: (0..200).map(|index| track(&index.to_string())).collect(),
+            queue: (0..200)
+                .map(|index| track(&index.to_string()))
+                .collect::<Vec<_>>()
+                .into(),
             queue_scroll: AbsoluteOffset {
                 x: 0.0,
                 y: 81.0 * 60.0,

@@ -42,9 +42,9 @@ impl App {
             _ => RecentPlay::Track(track),
         };
         let key = play.key();
-        self.recent.retain(|past| past.key() != key);
-        self.recent.insert(0, play);
-        self.recent.truncate(MAX_RECENT_PLAYS);
+        Arc::make_mut(&mut self.recent).retain(|past| past.key() != key);
+        Arc::make_mut(&mut self.recent).insert(0, play);
+        Arc::make_mut(&mut self.recent).truncate(MAX_RECENT_PLAYS);
         self.persist();
     }
 
@@ -184,16 +184,14 @@ impl App {
     /// Gives a favorite or queue entry without an artist the artist of its video.
     fn fill_artist_of(&mut self, video_id: &str, artist: &str) {
         let mut favorites_changed = false;
-        for favorite in self
-            .favorites
+        for favorite in Arc::make_mut(&mut self.favorites)
             .iter_mut()
             .filter(|track| track.video_id == video_id && track.artist.trim().is_empty())
         {
             favorite.artist = artist.to_owned();
             favorites_changed = true;
         }
-        for entry in self
-            .queue
+        for entry in Arc::make_mut(&mut self.queue)
             .iter_mut()
             .filter(|track| track.video_id == video_id && track.artist.trim().is_empty())
         {
@@ -227,7 +225,7 @@ impl App {
         }
         tracing::debug!(video_id = %current.video_id, "track metadata resolved");
         if let Some(index) = self.queue_index
-            && let Some(entry) = self.queue.get_mut(index)
+            && let Some(entry) = Arc::make_mut(&mut self.queue).get_mut(index)
             && entry.video_id == current.video_id
         {
             *entry = current.clone();
@@ -275,7 +273,7 @@ impl App {
             (true, Some(current)) => (current + 1).min(self.queue.len()),
             _ => self.queue.len(),
         };
-        self.queue.insert(position, track);
+        Arc::make_mut(&mut self.queue).insert(position, track);
         if let Some(current) = self.queue_index
             && position <= current
         {
@@ -363,8 +361,8 @@ impl App {
         if from >= self.queue.len() || to >= self.queue.len() || from == to {
             return;
         }
-        let item = self.queue.remove(from);
-        self.queue.insert(to, item);
+        let item = Arc::make_mut(&mut self.queue).remove(from);
+        Arc::make_mut(&mut self.queue).insert(to, item);
         self.queue_index = self.queue_index.map(|i| {
             if i == from {
                 to
@@ -384,7 +382,7 @@ impl App {
         if index >= self.queue.len() || self.queue_index == Some(index) {
             return;
         }
-        self.queue.remove(index);
+        Arc::make_mut(&mut self.queue).remove(index);
         self.queue_index = self.queue_index.map(|current| {
             if index < current {
                 current - 1
@@ -403,7 +401,7 @@ impl App {
         if keep >= self.queue.len() {
             return;
         }
-        self.queue.truncate(keep);
+        Arc::make_mut(&mut self.queue).truncate(keep);
         self.queue_source = None;
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.persist();
@@ -417,7 +415,7 @@ impl App {
             current.map_or(0, |i| i + 1)
         };
         if start < self.queue.len() {
-            self.queue[start..].shuffle(&mut rand::thread_rng());
+            Arc::make_mut(&mut self.queue)[start..].shuffle(&mut rand::thread_rng());
         }
         self.persist();
     }
@@ -687,7 +685,7 @@ impl App {
                             else {
                                 break;
                             };
-                            let removed = self.queue.remove(index);
+                            let removed = Arc::make_mut(&mut self.queue).remove(index);
                             self.radio_track_ids.remove(&removed.video_id);
                             if let Some(current) = self.queue_index.as_mut()
                                 && index < *current
@@ -709,7 +707,7 @@ impl App {
                                 added.push(track);
                             }
                         }
-                        self.queue.extend(added);
+                        Arc::make_mut(&mut self.queue).extend(added);
                         self.persist();
                         if self.playback_status.state == PlaybackState::Finished
                             && self.autoplay
@@ -833,7 +831,7 @@ impl App {
                     rest.truncate(crate::preferences::MAX_QUEUE_TRACKS.saturating_sub(1));
                     let mut ordered = vec![track.clone()];
                     ordered.extend(rest);
-                    self.queue = ordered;
+                    self.queue = Arc::new(ordered);
                     self.queue_generation = self.queue_generation.wrapping_add(1);
                     let play = self.play_queued_track(track, 0);
                     return Task::batch([
@@ -843,7 +841,7 @@ impl App {
                 }
                 let (queue, queue_index) =
                     bounded_queue_context(&tracks, index, crate::preferences::MAX_QUEUE_TRACKS);
-                self.queue = queue;
+                self.queue = Arc::new(queue);
                 self.queue_generation = self.queue_generation.wrapping_add(1);
                 let play = self.play_queued_track(track, queue_index);
                 return Task::batch([
@@ -897,7 +895,7 @@ impl App {
                 self.queue_scroll = AbsoluteOffset::default();
                 self.queue_notice = None;
                 self.queue_source = None;
-                self.queue = vec![track.clone()];
+                self.queue = Arc::new(vec![track.clone()]);
                 self.queue_generation = self.queue_generation.wrapping_add(1);
                 let play = self.play_queued_track(track, 0);
                 return Task::batch([

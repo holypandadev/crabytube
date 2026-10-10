@@ -308,12 +308,12 @@ impl RecentPlay {
 pub struct Snapshot {
     pub version: u32,
     pub preferences: Preferences,
-    pub queue: Vec<Track>,
+    pub queue: Arc<Vec<Track>>,
     pub queue_index: Option<usize>,
-    pub history: Vec<String>,
-    pub favorites: Vec<Track>,
+    pub history: Arc<Vec<String>>,
+    pub favorites: Arc<Vec<Track>>,
     /// Newest first, without repeats.
-    pub recent: Vec<RecentPlay>,
+    pub recent: Arc<Vec<RecentPlay>>,
 }
 impl Snapshot {
     pub fn normalize(&mut self) {
@@ -339,24 +339,27 @@ impl Snapshot {
             self.preferences.audio_output_device_id = None;
         }
         self.preferences.normalize_lyrics_offsets();
-        self.queue.truncate(MAX_QUEUE_TRACKS);
-        for track in self.queue.iter_mut().chain(self.favorites.iter_mut()) {
+        Arc::make_mut(&mut self.queue).truncate(MAX_QUEUE_TRACKS);
+        for track in Arc::make_mut(&mut self.queue)
+            .iter_mut()
+            .chain(Arc::make_mut(&mut self.favorites).iter_mut())
+        {
             cap_track(track);
         }
         self.queue_index = self.queue_index.filter(|index| *index < self.queue.len());
         if !self.preferences.remember_queue {
-            self.queue.clear();
+            Arc::make_mut(&mut self.queue).clear();
             self.queue_index = None;
         }
         if !self.preferences.remember_history {
-            self.history.clear();
-            self.recent.clear();
+            Arc::make_mut(&mut self.history).clear();
+            Arc::make_mut(&mut self.recent).clear();
         }
-        self.history.truncate(30);
+        Arc::make_mut(&mut self.history).truncate(30);
         let mut keys = HashSet::new();
-        self.recent.retain(|play| keys.insert(play.key()));
-        self.recent.truncate(MAX_RECENT_PLAYS);
-        for play in &mut self.recent {
+        Arc::make_mut(&mut self.recent).retain(|play| keys.insert(play.key()));
+        Arc::make_mut(&mut self.recent).truncate(MAX_RECENT_PLAYS);
+        for play in Arc::make_mut(&mut self.recent).iter_mut() {
             match play {
                 RecentPlay::Track(track) => cap_track(track),
                 RecentPlay::Collection(collection) => {
@@ -365,13 +368,12 @@ impl Snapshot {
                 }
             }
         }
-        for item in &mut self.history {
+        for item in Arc::make_mut(&mut self.history).iter_mut() {
             cap_string(item, 256);
         }
         let mut seen = HashSet::new();
-        self.favorites
-            .retain(|track| seen.insert(track.video_id.clone()));
-        self.favorites.truncate(MAX_LOCAL_FAVORITES);
+        Arc::make_mut(&mut self.favorites).retain(|track| seen.insert(track.video_id.clone()));
+        Arc::make_mut(&mut self.favorites).truncate(MAX_LOCAL_FAVORITES);
     }
 }
 pub fn state_path() -> PathBuf {
@@ -719,18 +721,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("state.json");
         let first = Snapshot {
-            history: vec!["first".into()],
+            history: vec!["first".into()].into(),
             ..Snapshot::default()
         };
         let second = Snapshot {
-            history: vec!["second".into()],
+            history: vec!["second".into()].into(),
             ..Snapshot::default()
         };
         write(&path, &first).unwrap();
         write(&path, &second).unwrap();
-        assert_eq!(load(&path).unwrap().history, vec!["second".to_string()]);
+        assert_eq!(*load(&path).unwrap().history, vec!["second".to_string()]);
         std::fs::write(&path, b"{ not json").unwrap();
-        assert_eq!(load(&path).unwrap().history, vec!["first".to_string()]);
+        assert_eq!(*load(&path).unwrap().history, vec!["first".to_string()]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -760,12 +762,12 @@ mod tests {
                 RecentPlay::Track(track("a")),
                 RecentPlay::Collection(collection),
                 RecentPlay::Track(track("a")),
-            ],
+            ]
+            .into(),
             ..Snapshot::default()
         };
         for index in 0..20 {
-            s.recent
-                .push(RecentPlay::Track(track(&format!("v{index}"))));
+            Arc::make_mut(&mut s.recent).push(RecentPlay::Track(track(&format!("v{index}"))));
         }
         s.normalize();
         assert_eq!(s.recent.len(), MAX_RECENT_PLAYS);
@@ -787,7 +789,7 @@ mod tests {
     fn restore_rejects_invalid_cursor_and_respects_privacy_toggles() {
         let mut s = Snapshot {
             queue_index: Some(10),
-            history: vec!["query".into()],
+            history: vec!["query".into()].into(),
             ..Snapshot::default()
         };
         s.preferences.remember_history = false;
@@ -994,7 +996,8 @@ mod tests {
                     album: None,
                     thumbnail_url: Some("x".repeat(3_000)),
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
             favorites: (0..MAX_LOCAL_FAVORITES + 10)
                 .map(|index| Track {
                     duration_secs: None,
@@ -1004,7 +1007,8 @@ mod tests {
                     album: None,
                     thumbnail_url: None,
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
             ..Snapshot::default()
         };
         snapshot.normalize();
@@ -1045,7 +1049,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let snapshot = snapshot.unwrap();
         assert_eq!(snapshot.preferences.volume, 0.5);
-        assert_eq!(snapshot.history, ["query"]);
+        assert_eq!(*snapshot.history, ["query"]);
         let written = String::from_utf8(serde_json::to_vec(&snapshot).unwrap()).unwrap();
         assert!(!written.contains("experimental_google"));
     }
@@ -1061,7 +1065,7 @@ mod tests {
     #[test]
     fn round_trip_preserves_queue_without_autostart() {
         let mut s = Snapshot::default();
-        s.queue.push(Track {
+        Arc::make_mut(&mut s.queue).push(Track {
             duration_secs: None,
             video_id: "fixture".into(),
             title: "Song".into(),
@@ -1110,15 +1114,15 @@ mod tests {
         ));
         let persistence = Persistence::start(path.clone());
         persistence.save(Snapshot {
-            history: vec!["old".into()],
+            history: vec!["old".into()].into(),
             ..Snapshot::default()
         });
         persistence.save(Snapshot {
-            history: vec!["latest".into()],
+            history: vec!["latest".into()].into(),
             ..Snapshot::default()
         });
         drop(persistence);
-        assert_eq!(load(&path).unwrap().history, vec!["latest"]);
+        assert_eq!(*load(&path).unwrap().history, vec!["latest"]);
         let _ = std::fs::remove_file(path);
     }
 }

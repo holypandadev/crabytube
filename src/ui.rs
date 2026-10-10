@@ -88,7 +88,7 @@ struct App {
     /// Path the unreadable saved state was moved to at startup, shown in Storage.
     state_recovery: Option<String>,
     youtube_session: YouTubeSession,
-    favorites: Vec<Track>,
+    favorites: Arc<Vec<Track>>,
     favorites_context: Arc<[Track]>,
     library_notice: Option<String>,
     page: Page,
@@ -103,7 +103,7 @@ struct App {
     search_scroll: AbsoluteOffset,
     library_scroll: AbsoluteOffset,
     queue_scroll: AbsoluteOffset,
-    queue: Vec<Track>,
+    queue: Arc<Vec<Track>>,
     queue_index: Option<usize>,
     queue_source: Option<QueueSource>,
     radio_track_ids: HashSet<String>,
@@ -132,7 +132,7 @@ struct App {
     search_loading: bool,
     search_request_id: u64,
     search_cancel: Option<CancellationToken>,
-    search_history: Vec<String>,
+    search_history: Arc<Vec<String>>,
     suggestions: Vec<String>,
     suggest_loading: bool,
     suggest_request_id: u64,
@@ -155,7 +155,7 @@ struct App {
     clock: crate::local_clock::LocalClock,
     process_reading: Option<crate::process_stats::ProcessReading>,
     /// "Jump back in": tracks and collections the user started, newest first.
-    recent: Vec<crate::preferences::RecentPlay>,
+    recent: Arc<Vec<crate::preferences::RecentPlay>>,
     /// The track whose start was last recorded in `recent`.
     recent_track_id: Option<String>,
     discord_presence_key: Option<(String, bool)>,
@@ -721,8 +721,8 @@ impl App {
                     Preference::History(v) => {
                         self.preferences.remember_history = v;
                         if !v {
-                            self.search_history.clear();
-                            self.recent.clear();
+                            Arc::make_mut(&mut self.search_history).clear();
+                            Arc::make_mut(&mut self.recent).clear();
                         }
                     }
                     Preference::ShuffleAll(v) => self.preferences.shuffle_all = v,
@@ -834,8 +834,8 @@ impl App {
                 }
             }
             Message::ClearHistory => {
-                self.search_history.clear();
-                self.recent.clear();
+                Arc::make_mut(&mut self.search_history).clear();
+                Arc::make_mut(&mut self.recent).clear();
                 self.persist();
             }
 
@@ -901,8 +901,8 @@ impl App {
                 self.library_notice = None;
                 if self.liked.contains(&video_id) {
                     self.liked.remove(&video_id);
-                    self.favorites.retain(|t| t.video_id != video_id);
-                    self.favorites_context = Arc::from(self.favorites.clone());
+                    Arc::make_mut(&mut self.favorites).retain(|t| t.video_id != video_id);
+                    self.favorites_context = Arc::from(self.favorites.as_slice());
                 } else {
                     let track = self
                         .queue
@@ -911,8 +911,8 @@ impl App {
                         .find(|t| t.video_id == video_id)
                         .cloned();
                     if let Some(track) = track {
-                        self.favorites.push(track);
-                        self.favorites_context = Arc::from(self.favorites.clone());
+                        Arc::make_mut(&mut self.favorites).push(track);
+                        self.favorites_context = Arc::from(self.favorites.as_slice());
                         self.liked.insert(video_id);
                     }
                 }
@@ -954,7 +954,7 @@ impl App {
                 }
             }
             Message::RemoveSearchHistoryItem(item) => {
-                self.search_history.retain(|past| past != &item);
+                Arc::make_mut(&mut self.search_history).retain(|past| past != &item);
                 self.persist();
             }
             Message::ClearArtworkCache => {
@@ -1455,7 +1455,7 @@ impl App {
                     let query = self.search_query.trim().to_owned();
                     let query_lower = query.to_lowercase();
                     let mut merged = suggestions;
-                    for past in &self.search_history.clone() {
+                    for past in self.search_history.clone().iter() {
                         if !query_lower.is_empty()
                             && past.to_lowercase().contains(&query_lower)
                             && !merged.iter().any(|s| s == past)
@@ -1647,8 +1647,8 @@ impl App {
                     .duration_secs
                     .or_else(|| self.stored_duration_secs(&track.video_id));
                 self.liked.insert(track.video_id.clone());
-                self.favorites.push(track);
-                self.favorites_context = Arc::from(self.favorites.clone());
+                Arc::make_mut(&mut self.favorites).push(track);
+                self.favorites_context = Arc::from(self.favorites.as_slice());
                 self.persist();
             }
             Message::ResetSettings => {
@@ -1727,7 +1727,7 @@ impl App {
             volume_save_generation: 0,
             state_recovery: None,
             youtube_session: session,
-            favorites: Vec::new(),
+            favorites: Arc::default(),
             favorites_context: Arc::from([]),
             library_notice: None,
             page: Page::Home,
@@ -1740,7 +1740,7 @@ impl App {
             home_scroll: AbsoluteOffset::default(),
             search_scroll: AbsoluteOffset::default(),
             library_scroll: AbsoluteOffset::default(),
-            queue: Vec::new(),
+            queue: Arc::default(),
             queue_index: None,
             queue_source: None,
             radio_track_ids: HashSet::new(),
@@ -1769,7 +1769,7 @@ impl App {
             search_loading: false,
             search_request_id: 0,
             search_cancel: None,
-            search_history: Vec::new(),
+            search_history: Arc::default(),
             suggestions: Vec::new(),
             suggest_loading: false,
             suggest_request_id: 0,
@@ -1788,7 +1788,7 @@ impl App {
             window_minimized: false,
             clock: crate::local_clock::LocalClock::now(),
             process_reading: None,
-            recent: Vec::new(),
+            recent: Arc::default(),
             recent_track_id: None,
             discord_presence_key: None,
             discord_presence_position: Duration::ZERO,
@@ -1843,7 +1843,7 @@ impl App {
                 app.search_history = saved.history.clone();
                 app.recent = saved.recent.clone();
                 app.favorites = saved.favorites.clone();
-                app.favorites_context = Arc::from(app.favorites.clone());
+                app.favorites_context = Arc::from(app.favorites.as_slice());
                 app.liked = app.favorites.iter().map(|t| t.video_id.clone()).collect();
                 app.autoplay = app.preferences.autoplay;
                 app.shuffle = app.preferences.shuffle;
@@ -1921,17 +1921,7 @@ impl App {
 
     fn persist(&self) {
         if let Some(writer) = &self.persistence {
-            let mut preferences = self.preferences.clone();
-            preferences.autoplay = self.autoplay;
-            writer.save(Snapshot {
-                version: 1,
-                preferences,
-                queue: self.queue.clone(),
-                queue_index: self.queue_index,
-                history: self.search_history.clone(),
-                favorites: self.favorites.clone(),
-                recent: self.recent.clone(),
-            });
+            writer.save(self.snapshot());
         }
     }
 
@@ -1951,17 +1941,19 @@ impl App {
         }
     }
 
+    /// The saved state. The lists are shared with the App, so building it copies no tracks. A later
+    /// change copies a list once, and only while the saved state still holds it.
     fn snapshot(&self) -> Snapshot {
         let mut preferences = self.preferences.clone();
         preferences.autoplay = self.autoplay;
         Snapshot {
             version: 1,
             preferences,
-            queue: self.queue.clone(),
+            queue: Arc::clone(&self.queue),
             queue_index: self.queue_index,
-            history: self.search_history.clone(),
-            favorites: self.favorites.clone(),
-            recent: self.recent.clone(),
+            history: Arc::clone(&self.search_history),
+            favorites: Arc::clone(&self.favorites),
+            recent: Arc::clone(&self.recent),
         }
     }
 
@@ -1987,7 +1979,7 @@ impl App {
         self.search_history = snapshot.history;
         self.recent = snapshot.recent;
         self.favorites = snapshot.favorites;
-        self.favorites_context = Arc::from(self.favorites.clone());
+        self.favorites_context = Arc::from(self.favorites.as_slice());
         self.library_notice = None;
         self.liked = self.favorites.iter().map(|t| t.video_id.clone()).collect();
         self.persist();
@@ -2234,9 +2226,9 @@ impl App {
         if query.is_empty() || !self.preferences.remember_history {
             return;
         }
-        self.search_history.retain(|past| past != &query);
-        self.search_history.insert(0, query);
-        self.search_history.truncate(30);
+        Arc::make_mut(&mut self.search_history).retain(|past| past != &query);
+        Arc::make_mut(&mut self.search_history).insert(0, query);
+        Arc::make_mut(&mut self.search_history).truncate(30);
         self.persist();
     }
 
@@ -3115,7 +3107,7 @@ mod tests {
         let mut saved = song("Saved");
         saved.video_id = "abc".into();
         saved.artist = String::new();
-        app.favorites = vec![saved.clone()];
+        app.favorites = vec![saved.clone()].into();
         app.playback_status.track = Some(saved.clone());
         let mut resolved = saved.clone();
         resolved.artist = "Resolved Artist".into();
@@ -4004,6 +3996,21 @@ mod tests {
     }
 
     #[test]
+    fn a_save_shares_the_lists_and_a_later_change_leaves_the_save_as_it_was() {
+        let mut app = App {
+            queue: vec![fixture_track("a")].into(),
+            favorites: vec![fixture_track("b")].into(),
+            ..App::default()
+        };
+        let saved = app.snapshot();
+        assert!(Arc::ptr_eq(&saved.queue, &app.queue));
+        assert!(Arc::ptr_eq(&saved.favorites, &app.favorites));
+        Arc::make_mut(&mut app.queue).push(fixture_track("c"));
+        assert_eq!(saved.queue.len(), 1);
+        assert_eq!(app.queue.len(), 2);
+    }
+
+    #[test]
     fn each_track_change_releases_only_the_previous_large_cover() {
         let mut app = App::default();
         let tracks: Vec<crate::music::Track> = (0..4)
@@ -4109,7 +4116,7 @@ mod tests {
     #[test]
     fn reorder_queue_preserves_current_track_and_repeat_one_does_not_block_manual_next() {
         let mut app = App {
-            queue: vec![fixture_track("a"), fixture_track("b"), fixture_track("c")],
+            queue: vec![fixture_track("a"), fixture_track("b"), fixture_track("c")].into(),
             queue_index: Some(1),
             repeat: super::RepeatMode::One,
             autoplay: false,
@@ -4160,7 +4167,7 @@ mod tests {
     fn a_duplicate_queue_row_plays_the_row_that_was_clicked() {
         let mut app = App::default();
         let first = fixture_track("twice");
-        app.queue = vec![first.clone(), fixture_track("other"), first.clone()];
+        app.queue = vec![first.clone(), fixture_track("other"), first.clone()].into();
         app.queue_index = Some(0);
         let _ = app.update(Message::PlayQueueIndex(2));
         assert_eq!(
@@ -4206,7 +4213,8 @@ mod tests {
                 fixture_track("b"),
                 fixture_track("c"),
                 fixture_track("d"),
-            ],
+            ]
+            .into(),
             queue_index: Some(1),
             ..App::default()
         };
@@ -4363,7 +4371,7 @@ mod tests {
         let _ = app.update(Message::MoveQueue(0, 2));
         assert!(app.queue.iter().any(|t| t.video_id == "b"));
         // A click on the reordered Arc snapshot still resolves by index.
-        let reordered: Arc<[crate::music::Track]> = app.queue.clone().into();
+        let reordered: Arc<[crate::music::Track]> = Arc::from(app.queue.as_slice());
         let pos = reordered.iter().position(|t| t.video_id == "c").unwrap();
         let _ = app.update(Message::PlayContext(reordered, pos));
         assert_eq!(app.playback_status.track.as_ref().unwrap().video_id, "c");
@@ -4483,11 +4491,11 @@ mod tests {
     #[test]
     fn history_chips_support_independent_removal() {
         let mut app = App {
-            search_history: vec!["a".into(), "b".into()],
+            search_history: vec!["a".into(), "b".into()].into(),
             ..App::default()
         };
         let _ = app.update(Message::RemoveSearchHistoryItem("a".into()));
-        assert_eq!(app.search_history, vec!["b".to_string()]);
+        assert_eq!(*app.search_history, vec!["b".to_string()]);
     }
 
     #[test]
