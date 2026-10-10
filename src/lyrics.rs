@@ -4,7 +4,7 @@ use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::info;
 
 /// Parser version: bump invalidates old disk entries.
@@ -19,6 +19,8 @@ pub const LYRICS_DEADLINE: Duration = Duration::from_secs(10);
 const NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
 /// After a line-timed result, word-timed sources get this long to answer.
 const LINE_GRACE: Duration = Duration::from_millis(1500);
+/// A result from a source that does not name its track waits this long for LRCLIB, which wins if it answers.
+const UNVERIFIED_GRACE: Duration = Duration::from_millis(1500);
 const NOT_FOUND: &str = "No matching lyrics available from the enabled sources. Try again later.";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -615,9 +617,118 @@ enum Found {
     /// Line-level timing (LRC).
     Line(Lyrics),
     Plain(Lyrics),
+    /// A result from a source whose match does not name the track it answered for. It is used only
+    /// when LRCLIB has nothing within `UNVERIFIED_GRACE`.
+    Unverified(Lyrics),
     Instrumental,
     Missing,
     Unreachable,
+}
+
+/// How a provider's match compares with the track that was asked for.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// The match names the requested title and artist.
+    Verified,
+    /// The match names no track to compare.
+    Unverified,
+    /// The match names another track.
+    Mismatch,
+}
+
+/// The value of a `[key:value]` tag in a provider's lyric text, such as `[ti:…]` or `[ar:…]`.
+fn tag_value(text: &str, key: &str) -> Option<String> {
+    text.split('[').find_map(|segment| {
+        let (header, _) = segment.split_once(']')?;
+        let (name, value) = header.split_once(':')?;
+        (name.trim() == key && !value.trim().is_empty()).then(|| value.trim().to_owned())
+    })
+}
+
+/// A title or artist with case, punctuation, spacing and bracketed edition notes removed.
+fn name_key(name: &str) -> String {
+    let mut key = String::new();
+    let mut depth = 0_u32;
+    for c in name.chars() {
+        match c {
+            '(' | '[' | '（' | '【' => depth += 1,
+            ')' | ']' | '）' | '】' => depth = depth.saturating_sub(1),
+            _ if depth == 0 && c.is_alphanumeric() => key.extend(c.to_lowercase()),
+            _ => {}
+        }
+    }
+    key
+}
+
+fn same_title(matched: &str, requested: &str) -> bool {
+    let (matched, requested) = (name_key(matched), name_key(requested));
+    !matched.is_empty() && matched == requested
+}
+
+/// Artists are often credited together ("A & B"), so one name containing the other also matches.
+fn same_artist(matched: &str, requested: &str) -> bool {
+    let (matched, requested) = (name_key(matched), name_key(requested));
+    if matched.is_empty() || requested.is_empty() {
+        return false;
+    }
+    let (shorter, longer) = if matched.chars().count() <= requested.chars().count() {
+        (&matched, &requested)
+    } else {
+        (&requested, &matched)
+    };
+    matched == requested || (shorter.chars().count() >= 3 && longer.contains(shorter.as_str()))
+}
+
+/// Compares a provider's match with the requested track. Both the title and the artist must be
+/// named and agree; a named track that differs is a mismatch; a match that names nothing is unverified.
+fn verdict(text: &str, title: &str, artist: &str) -> Verdict {
+    let (Some(matched_title), Some(matched_artist)) =
+        (tag_value(text, "ti"), tag_value(text, "ar"))
+    else {
+        return Verdict::Unverified;
+    };
+    if same_title(&matched_title, title) && same_artist(&matched_artist, artist) {
+        Verdict::Verified
+    } else {
+        Verdict::Mismatch
+    }
+}
+
+/// The title and artist a request asked for.
+fn requested_names(params: &[(&str, String)]) -> (String, String) {
+    let value = |key: &str| {
+        params
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default()
+    };
+    (value("s"), value("a"))
+}
+
+/// What a QQ answer means for the track asked for. Its word-timed lyrics name the match in `[ti:]` and `[ar:]`.
+fn qq_found(text: &str, title: &str, artist: &str) -> Found {
+    let Some(lyrics) = qrc(text) else {
+        return Found::Missing;
+    };
+    match verdict(text, title, artist) {
+        Verdict::Verified => Found::Word(lyrics),
+        Verdict::Unverified => Found::Unverified(lyrics),
+        Verdict::Mismatch => Found::Missing,
+    }
+}
+
+/// What a Kugou answer means. Its lyrics name no track, so they are unverified; without line timing
+/// they are plain text, which is unverified too.
+fn kugou_found(text: &str) -> Found {
+    let parsed = lrc(text, "Kugou via Better Lyrics");
+    if !parsed.lines.is_empty() {
+        return Found::Unverified(parsed);
+    }
+    match plain_found("Kugou via Better Lyrics", text) {
+        Found::Plain(lyrics) => Found::Unverified(lyrics),
+        other => other,
+    }
 }
 
 /// Labels that open a credit line in lyric sources, in English and Chinese. A credit has one of
@@ -778,8 +889,9 @@ async fn better_lyrics_qq_provider(client: &reqwest::Client, params: &[(&str, St
     let Some(v) = json(client, "https://api.betterlyrics.org/qq/getLyrics", params).await else {
         return Found::Unreachable;
     };
-    match v.get("lyrics").and_then(Value::as_str).and_then(qrc) {
-        Some(lyrics) => Found::Word(lyrics),
+    let (title, artist) = requested_names(params);
+    match v.get("lyrics").and_then(Value::as_str) {
+        Some(text) => qq_found(text, &title, &artist),
         None => Found::Missing,
     }
 }
@@ -797,14 +909,9 @@ async fn better_lyrics_kugou_provider(
     else {
         return Found::Unreachable;
     };
-    let Some(s) = v.get("lyrics").and_then(Value::as_str) else {
-        return Found::Missing;
-    };
-    let parsed = lrc(s, "Kugou via Better Lyrics");
-    if !parsed.lines.is_empty() {
-        Found::Line(parsed)
-    } else {
-        plain_found("Kugou via Better Lyrics", s)
+    match v.get("lyrics").and_then(Value::as_str) {
+        Some(text) => kugou_found(text),
+        None => Found::Missing,
     }
 }
 
@@ -840,12 +947,21 @@ where
     }
     let mut best_line: Option<Lyrics> = None;
     let mut best_plain: Option<Lyrics> = None;
+    // The first result that does not name its track, and when it arrived.
+    let mut unverified: Option<(Lyrics, Instant)> = None;
     let mut instrumental = false;
     let mut unreachable = 0_usize;
     loop {
-        // Once a line-timed result exists, a word-timed one may still arrive shortly.
+        // Once a line-timed result exists, a word-timed one may still arrive shortly. An unverified
+        // result gives LRCLIB its grace period, and is accepted when that period ends without one.
         let next = if best_line.is_some() {
             match tokio::time::timeout(LINE_GRACE, running.next()).await {
+                Ok(next) => next,
+                Err(_) => break,
+            }
+        } else if let Some((_, since)) = &unverified {
+            let deadline = tokio::time::Instant::from_std(*since + UNVERIFIED_GRACE);
+            match tokio::time::timeout_at(deadline, running.next()).await {
                 Ok(next) => next,
                 Err(_) => break,
             }
@@ -867,6 +983,9 @@ where
                     best_plain = Some(lyrics);
                 }
             }
+            Found::Unverified(lyrics) => {
+                unverified.get_or_insert((lyrics, Instant::now()));
+            }
             Found::Instrumental => instrumental = true,
             Found::Unreachable => unreachable += 1,
             Found::Missing => {}
@@ -881,6 +1000,9 @@ where
     }
     if instrumental {
         return Err("Instrumental track — no lyrics to display.".into());
+    }
+    if let Some((lyrics, _)) = unverified {
+        return Ok(lyrics);
     }
     if unreachable == started {
         return Err(
@@ -1041,6 +1163,75 @@ mod tests {
         assert_eq!(l.lines[1].start, 2.5);
         assert_eq!(l.lines[1].words[1].end, 3.5);
     }
+    /// An invented QQ answer with the shape of the real one: an XML wrapper whose `LyricContent`
+    /// names the match in `[ti:]` and `[ar:]` tags before its word-timed lines. The words are placeholders.
+    fn qq_answer(title: &str, artist: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><QrcInfos><LyricInfo><Lyric_1 LyricType=\"1\" LyricContent=\"[ti:{title}]\n[ar:{artist}]\n[al:Invented Album]\n[by:]\n[offset:0]\n[1000,1500]aaa(1000,500) bbb(1500,1000)\n[2500,1200]ccc(2500,600) ddd(3100,600)\"/></LyricInfo></QrcInfos>"
+        )
+    }
+
+    #[test]
+    fn a_qq_match_is_verified_only_when_it_names_the_requested_title_and_artist() {
+        let text = qq_answer("Example Song", "Example Artist");
+        assert!(matches!(
+            super::qq_found(&text, "Example Song", "Example Artist"),
+            super::Found::Word(_)
+        ));
+        // Letter case and edition notes do not make a different track.
+        assert!(matches!(
+            super::qq_found(&text, "example song (Remastered)", "EXAMPLE ARTIST"),
+            super::Found::Word(_)
+        ));
+        assert!(matches!(
+            super::qq_found(&text, "Example Song", "Someone Else"),
+            super::Found::Missing
+        ));
+        assert!(matches!(
+            super::qq_found(
+                &qq_answer("Other Song", "Example Artist"),
+                "Example Song",
+                "Example Artist"
+            ),
+            super::Found::Missing
+        ));
+    }
+
+    #[test]
+    fn a_qq_answer_that_names_no_track_is_unverified() {
+        let unnamed = "<?xml version=\"1.0\"?><QrcInfos><LyricInfo><Lyric_1 LyricType=\"1\" LyricContent=\"[1000,1500]aaa(1000,500) bbb(1500,1000)\"/></LyricInfo></QrcInfos>";
+        assert!(matches!(
+            super::qq_found(unnamed, "Example Song", "Example Artist"),
+            super::Found::Unverified(_)
+        ));
+        // An empty tag names nothing either.
+        assert_eq!(super::tag_value("[ti:]", "ti"), None);
+    }
+
+    #[test]
+    fn kugou_lines_are_unverified_because_the_answer_names_no_track() {
+        match super::kugou_found("[00:01.00]aaa bbb\n[00:03.50]ccc ddd\n") {
+            super::Found::Unverified(lyrics) => assert_eq!(lyrics.lines.len(), 2),
+            _ => panic!("timed Kugou lyrics are unverified"),
+        }
+    }
+
+    #[test]
+    fn names_compare_without_case_punctuation_or_edition_notes() {
+        assert!(super::same_title(
+            "Example Song (2011 Remaster)",
+            "example song"
+        ));
+        assert!(!super::same_title("Example Song", "Example Song Two"));
+        assert!(super::same_artist(
+            "Example Artist & Guest",
+            "Example Artist"
+        ));
+        assert!(!super::same_artist("Example", "Other"));
+        // A one-letter name is too short to match by containment.
+        assert!(!super::same_artist("A", "Ax Band"));
+    }
+
     #[test]
     fn text_salvaged_at_the_deadline_is_shown_but_never_stored() {
         let salvaged: Result<Lyrics, String> = Ok(Lyrics {
