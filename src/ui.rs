@@ -1701,28 +1701,13 @@ impl App {
             }
             Message::ResetSettings => {
                 let current = std::mem::take(&mut self.preferences);
-                let mut defaults = Preferences {
-                    window_width: current.window_width,
-                    window_height: current.window_height,
-                    ui_language: current.ui_language,
-                    lyrics_offsets: current.lyrics_offsets,
-                    lyrics_offset_order: current.lyrics_offset_order,
-                    ..Preferences::default()
-                };
+                let mut defaults = Self::reset_preferences(&current);
                 if current.startup && crate::preferences::set_startup(false).is_err() {
                     defaults.startup = true;
                 }
                 self.preferences = defaults;
-                self.autoplay = self.preferences.autoplay;
-                self.shuffle = self.preferences.shuffle;
-                self.repeat = self.preferences.repeat;
-                crate::i18n::set_current_language(self.preferences.ui_language);
-                self.playback
-                    .set_volume(self.preferences.effective_volume());
-                self.playback
-                    .set_output_device(self.preferences.audio_output_device_id.clone());
+                self.apply_preferences();
                 self.sync_discord_presence(true);
-                self.rebuild_lyrics_heights();
                 self.persist();
             }
             Message::ReloadHome => {
@@ -1899,12 +1884,6 @@ impl App {
                 app.favorites = saved.favorites.clone();
                 app.favorites_context = Arc::from(app.favorites.as_slice());
                 app.liked = app.favorites.iter().map(|t| t.video_id.clone()).collect();
-                app.autoplay = app.preferences.autoplay;
-                app.shuffle = app.preferences.shuffle;
-                app.repeat = app.preferences.repeat;
-                app.playback.set_volume(app.preferences.effective_volume());
-                app.playback
-                    .set_output_device(app.preferences.audio_output_device_id.clone());
                 app.persistence = Some(Persistence::start(path));
             }
             Err(error) => {
@@ -1921,7 +1900,7 @@ impl App {
                 }
             }
         }
-        crate::i18n::set_current_language(app.preferences.ui_language);
+        app.apply_preferences();
         if let Some(shelves) = crate::home_cache::load() {
             app.home_shelves = shelves;
             app.home_picks.rebuild(&app.home_shelves);
@@ -2024,10 +2003,38 @@ impl App {
         }
     }
 
+    /// Copies the preference values into the state that uses them: the playback toggles, the volume
+    /// and output device, the language and the lyrics layout. Boot, Reset and Import all go through
+    /// here. Discord presence is left out so that starting the app never connects to it; the paths
+    /// that change the setting sync it themselves.
+    fn apply_preferences(&mut self) {
+        crate::i18n::set_current_language(self.preferences.ui_language);
+        self.autoplay = self.preferences.autoplay;
+        self.shuffle = self.preferences.shuffle;
+        self.repeat = self.preferences.repeat;
+        self.playback
+            .set_volume(self.preferences.effective_volume());
+        self.playback
+            .set_output_device(self.preferences.audio_output_device_id.clone());
+        self.rebuild_lyrics_heights();
+    }
+
+    /// The preferences Reset returns to: the defaults, except that the window size, the language and
+    /// the lyrics offsets stay.
+    fn reset_preferences(current: &Preferences) -> Preferences {
+        Preferences {
+            window_width: current.window_width,
+            window_height: current.window_height,
+            ui_language: current.ui_language,
+            lyrics_offsets: current.lyrics_offsets.clone(),
+            lyrics_offset_order: current.lyrics_offset_order.clone(),
+            ..Preferences::default()
+        }
+    }
+
     fn apply_snapshot(&mut self, mut snapshot: Snapshot) -> Task<Message> {
         snapshot.normalize();
         self.preferences = snapshot.preferences.clone();
-        crate::i18n::set_current_language(self.preferences.ui_language);
         let (window_width, window_height) = layout::clamped_window(
             self.preferences.window_width,
             self.preferences.window_height,
@@ -2037,7 +2044,8 @@ impl App {
         self.window_width = window_width;
         self.window_height = window_height;
         self.window_geometry_generation = self.window_geometry_generation.wrapping_add(1);
-        self.autoplay = self.preferences.autoplay;
+        self.apply_preferences();
+        self.sync_discord_presence(true);
         self.queue = snapshot.queue;
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.queue_index = snapshot.queue_index;
@@ -4297,6 +4305,33 @@ mod tests {
         assert_eq!(app.now_playing_tab, NowPlayingTab::Lyrics);
         assert!(app.playback_status.track.is_none());
         assert!(app.lyrics.is_none() && !app.lyrics_loading);
+    }
+
+    #[test]
+    fn an_imported_snapshot_applies_its_toggles_at_once() {
+        let mut app = App::default();
+        let mut snapshot = Snapshot::default();
+        snapshot.preferences.shuffle = true;
+        snapshot.preferences.repeat = RepeatMode::All;
+        snapshot.preferences.autoplay = false;
+        let _ = app.apply_snapshot(snapshot);
+        assert!(app.shuffle);
+        assert_eq!(app.repeat, RepeatMode::All);
+        assert!(!app.autoplay);
+    }
+
+    #[test]
+    fn reset_keeps_the_language_and_the_window_size() {
+        let current = Preferences {
+            ui_language: crate::preferences::UiLanguage::Spanish,
+            window_width: 900.0,
+            shuffle: true,
+            ..Preferences::default()
+        };
+        let reset = App::reset_preferences(&current);
+        assert_eq!(reset.ui_language, crate::preferences::UiLanguage::Spanish);
+        assert_eq!(reset.window_width, current.window_width);
+        assert!(!reset.shuffle);
     }
 
     #[test]
