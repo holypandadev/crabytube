@@ -1819,14 +1819,14 @@ impl App {
     fn boot() -> (Self, Task<Message>) {
         let mut app = Self::default();
         let path = crate::preferences::state_path();
-        match crate::preferences::load(&path) {
+        match startup_state() {
             Ok(saved) => {
-                app.preferences = saved.preferences;
-                app.queue = saved.queue;
+                app.preferences = saved.preferences.clone();
+                app.queue = saved.queue.clone();
                 app.queue_index = saved.queue_index;
-                app.search_history = saved.history;
-                app.recent = saved.recent;
-                app.favorites = saved.favorites;
+                app.search_history = saved.history.clone();
+                app.recent = saved.recent.clone();
+                app.favorites = saved.favorites.clone();
                 app.favorites_context = Arc::from(app.favorites.clone());
                 app.liked = app.favorites.iter().map(|t| t.video_id.clone()).collect();
                 app.autoplay = app.preferences.autoplay;
@@ -2637,6 +2637,14 @@ async fn fetch_player_artwork(
     crate::artwork::fetch_player(url, cancellation, max_dim).await
 }
 
+/// The saved state, read once at startup. The window size and the boot state both come from it, so
+/// the state file is parsed a single time.
+fn startup_state() -> &'static Result<crate::preferences::Snapshot, String> {
+    static STATE: std::sync::OnceLock<Result<crate::preferences::Snapshot, String>> =
+        std::sync::OnceLock::new();
+    STATE.get_or_init(|| crate::preferences::load(&crate::preferences::state_path()))
+}
+
 /// The saved window size, so the window opens at it instead of being resized
 /// after mapping (Wayland compositors may ignore a later resize request).
 fn initial_window_size() -> iced::Size {
@@ -2648,14 +2656,12 @@ fn initial_window_size() -> iced::Size {
     }) {
         return iced::Size::new(width, height);
     }
-    let saved = crate::preferences::load(&crate::preferences::state_path())
-        .ok()
-        .map(|snapshot| {
-            (
-                snapshot.preferences.window_width,
-                snapshot.preferences.window_height,
-            )
-        });
+    let saved = startup_state().as_ref().ok().map(|snapshot| {
+        (
+            snapshot.preferences.window_width,
+            snapshot.preferences.window_height,
+        )
+    });
     let (width, height) = match saved {
         Some((width, height)) => layout::clamped_window(width, height),
         None => layout::default_window_size(),
