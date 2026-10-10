@@ -567,7 +567,14 @@ async fn fetch_in_lane(
 }
 fn cached_handle_sized(path: std::path::PathBuf, max_dim: u32) -> Option<image::Handle> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path).ok()?;
+    // Write access lets the modification time be updated below; Windows refuses it on a
+    // read-only handle. A file that can only be read is still used.
+    let mut file = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .or_else(|_| std::fs::File::open(&path))
+        .ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
     // Trimming removes the least recently modified files first, so a file that was just read counts as used now.
