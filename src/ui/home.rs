@@ -19,6 +19,9 @@ pub(super) const NARROW_W: f32 = 600.0;
 /// Smallest and largest card edge.
 const CARD_MIN: f32 = 104.0;
 const CARD_MAX: f32 = 400.0;
+/// The covers shrink to these before any panel is hidden: 130 px on desktop, 110 px on phones.
+const CARD_FLOOR: f32 = 130.0;
+const CARD_FLOOR_NARROW: f32 = 110.0;
 /// Share of the page height the search field and carousel aim to fill.
 const BLOCK_SHARE: f32 = 0.74;
 const SEARCH_H: f32 = 54.0;
@@ -172,20 +175,20 @@ pub(super) struct HomeLayout {
 pub(super) const GREETING_GAP: f32 = 24.0;
 pub(super) const GREETING_SUBLINE_GAP: f32 = 6.0;
 const GREETING_SUBLINE_H: f32 = 18.0;
-const SMALL_GREETING_H: f32 = 20.0;
+const SMALL_GREETING_H: f32 = 18.0;
 /// Space between the search field and the chips, and the chips' height.
-pub(super) const CHIPS_GAP: f32 = 12.0;
+pub(super) const CHIPS_GAP: f32 = 8.0;
 pub(super) const CHIPS_H: f32 = 30.0;
 pub(super) const MAX_CHIPS: usize = 5;
 /// Space above "Jump back in", its heading, and each row of entries.
-pub(super) const JUMP_GAP: f32 = 28.0;
-const JUMP_HEADING_H: f32 = 24.0;
-pub(super) const JUMP_HEADING_GAP: f32 = 12.0;
+pub(super) const JUMP_GAP: f32 = 16.0;
+const JUMP_HEADING_H: f32 = 22.0;
+pub(super) const JUMP_HEADING_GAP: f32 = 8.0;
 pub(super) const JUMP_ROW_H: f32 = 40.0;
 pub(super) const JUMP_ROW_GAP: f32 = 4.0;
 pub(super) const MAX_JUMP: usize = 4;
 /// Height of the status line at the foot of the page, rule included.
-pub(super) const STATUS_H: f32 = 36.0;
+pub(super) const STATUS_H: f32 = 34.0;
 /// Clear space kept above and below the Home block.
 const EDGE_GAP: f32 = 8.0;
 
@@ -215,9 +218,9 @@ impl HomeLayout {
     /// The greeting, the search field, the chips, the carousel and "Jump back in" form one
     /// block, centered on the page (a little above the middle). Cards grow with the height
     /// until the block fills about three quarters of the page, then as many as fit across
-    /// share the width exactly, so neither axis is left mostly empty. The search field and
-    /// the carousel keep this geometry; on a short page "Jump back in" goes first, then the
-    /// chips, and only then does the greeting shrink to one line.
+    /// share the width exactly, so neither axis is left mostly empty. On a short page the
+    /// covers shrink first, down to their floor. Then the greeting takes one line, and only
+    /// then do "Jump back in" and the chips go. The search field is never resized.
     pub fn new(area: Size, items: usize, extras: HomeExtras) -> Self {
         let width = area.width.max(CARD_MIN);
         let page_h = (area.height - STATUS_H).max(0.0);
@@ -240,7 +243,6 @@ impl HomeLayout {
             across -= 1.0;
             card = ((width - card_gap * (across - 1.0)) / across).min(tallest);
         }
-        // Very short windows: shrink the cards so the block still fits.
         card = card
             .min((page_h - fixed - 32.0).max(CARD_MIN * 0.75))
             .floor();
@@ -249,27 +251,48 @@ impl HomeLayout {
             .min(page_h * 0.06)
             .max(20.0)
             .floor();
-        let carousel = fixed + card;
-        let block = |greeting: GreetingSize, chips: usize, jump: usize| {
+        let chips_n = extras.chips.min(MAX_CHIPS);
+        let jump_n = extras.jump.min(MAX_JUMP);
+        let budget = page_h - 2.0 * EDGE_GAP;
+        let block = |greeting: GreetingSize, chips: usize, jump: usize, card: f32| {
             greeting_height(greeting, greeting_font)
                 + chips_height(chips)
-                + carousel
+                + fixed
+                + card
                 + jump_height(jump, narrow)
         };
-        let budget = page_h - 2.0 * EDGE_GAP;
-        let mut chips = extras.chips.min(MAX_CHIPS);
-        let mut jump = extras.jump.min(MAX_JUMP);
+        // 1. The covers give room, down to their floor, while the greeting keeps two lines.
+        let floor = if narrow {
+            CARD_FLOOR_NARROW
+        } else {
+            CARD_FLOOR
+        }
+        .min(card);
+        let full = block(GreetingSize::Full, chips_n, jump_n, card);
+        if full > budget {
+            card = (card - (full - budget)).max(floor).floor();
+        }
+        // 2. Then the greeting takes one line.
         let mut greeting = GreetingSize::Full;
-        if block(greeting, chips, jump) > budget {
-            jump = 0;
-        }
-        if block(greeting, chips, jump) > budget {
-            chips = 0;
-        }
-        if block(greeting, chips, jump) > budget {
+        if block(greeting, chips_n, jump_n, card) > budget {
             greeting = GreetingSize::Small;
         }
-        let total = block(greeting, chips, jump);
+        // 3. Then "Jump back in", and only then the chips.
+        let (mut chips, mut jump) = (chips_n, jump_n);
+        if block(greeting, chips, jump, card) > budget {
+            jump = 0;
+        }
+        if block(greeting, chips, jump, card) > budget {
+            chips = 0;
+        }
+        // 4. Only when even the bare block does not fit (very short windows) do the covers go
+        // below their floor.
+        let last_resort = (CARD_MIN * 0.75).min(card);
+        let total = block(greeting, chips, jump, card);
+        if total > budget {
+            card = (card - (total - budget)).max(last_resort).floor();
+        }
+        let total = block(greeting, chips, jump, card);
         let top = ((page_h - total) / 2.0 * 0.9).max(EDGE_GAP).floor();
         Self {
             visible: across as usize,
@@ -1017,47 +1040,93 @@ mod tests {
             let below = page_h - layout.block_bottom();
             assert!(below + 1.0 >= layout.top, "{width}x{height}: {layout:?}");
             assert!(layout.top <= page_h, "{width}x{height}: {layout:?}");
-            // The cards span the width unless the height caps them.
-            assert!(
-                layout.row_width >= width - layout.card - layout.card_gap,
-                "{width}x{height}: {layout:?}"
-            );
+            // The cards span the width unless the height caps them, which is the case at or
+            // below the cover floor.
+            if layout.card > CARD_FLOOR + 0.5 {
+                assert!(
+                    layout.row_width >= width - layout.card - layout.card_gap,
+                    "{width}x{height}: {layout:?}"
+                );
+            }
         }
         // Phone width: at least two cards, so the row reads as a carousel.
         assert!(HomeLayout::new(Size::new(326.0, 650.0), 12, HomeExtras::default()).visible >= 2);
     }
 
     #[test]
-    fn short_pages_drop_jump_back_in_then_the_chips_then_shrink_the_greeting() {
-        for width in [360.0, 390.0, 1270.0] {
+    fn short_pages_shrink_covers_then_the_greeting_then_hide_jump_then_chips() {
+        for width in [360.0, 390.0, 1206.0, 1354.0, 1856.0] {
+            let narrow = width < NARROW_W;
+            let floor = if narrow {
+                CARD_FLOOR_NARROW
+            } else {
+                CARD_FLOOR
+            };
             for height in (560..=1100).step_by(4) {
-                let size = Size::new(width, height as f32);
-                let layout = HomeLayout::new(size, 12, HomeExtras { chips: 5, jump: 4 });
-                let page_h = height as f32 - STATUS_H;
-                assert!(
-                    layout.block_bottom() <= page_h + 0.5,
-                    "{width}x{height}: {layout:?}"
-                );
-                if layout.greeting == GreetingSize::Small {
-                    assert_eq!((layout.chips, layout.jump), (0, 0), "{width}x{height}");
-                }
+                // The page area is the window minus the title bar, the navigation row, the
+                // player bar and the status line's rule.
+                let area = Size::new(width, height as f32 - 195.0);
+                let layout = HomeLayout::new(area, 12, HomeExtras { chips: 5, jump: 4 });
+                let page_h = area.height - STATUS_H;
+                let label = format!("{width}x{height}: {layout:?}");
+                assert!(layout.block_bottom() <= page_h + 0.5, "{label}");
                 if layout.chips == 0 {
-                    assert_eq!(layout.jump, 0, "{width}x{height}: {layout:?}");
+                    assert_eq!(layout.jump, 0, "{label}");
+                }
+                if layout.jump == 0 {
+                    assert!(layout.card <= floor + 0.5, "{label}");
+                }
+                if layout.greeting == GreetingSize::Small {
+                    assert!(layout.card <= floor + 0.5, "{label}");
                 }
             }
         }
     }
 
     #[test]
-    fn the_extra_panels_never_resize_the_search_field_or_the_carousel() {
-        for (width, height) in [(390.0, 844.0), (1270.0, 720.0), (1920.0, 1080.0)] {
-            let size = Size::new(width, height);
-            let bare = HomeLayout::new(size, 12, HomeExtras::default());
-            let full = HomeLayout::new(size, 12, HomeExtras { chips: 5, jump: 4 });
-            assert_eq!(bare.card, full.card, "{width}x{height}");
-            assert_eq!(bare.visible, full.visible, "{width}x{height}");
+    fn the_panels_only_shrink_the_covers_down_to_their_floor() {
+        for (width, height) in [(390.0, 649.0), (1206.0, 525.0), (1354.0, 602.0)] {
+            let area = Size::new(width, height);
+            let bare = HomeLayout::new(area, 12, HomeExtras::default());
+            let full = HomeLayout::new(area, 12, HomeExtras { chips: 5, jump: 4 });
+            let floor = if width < NARROW_W {
+                CARD_FLOOR_NARROW
+            } else {
+                CARD_FLOOR
+            };
             assert_eq!(bare.gap, full.gap, "{width}x{height}");
             assert_eq!(bare.search_width, full.search_width, "{width}x{height}");
+            assert!(full.card <= bare.card, "{width}x{height}: {full:?}");
+            assert!(
+                full.card >= floor.min(bare.card),
+                "{width}x{height}: {full:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reference_windows_show_chips_and_jump_back_in_with_history() {
+        // Page areas: the window minus the chrome, for the sizes the owner uses.
+        for (width, height) in [
+            (1206.0, 525.0),
+            (1354.0, 602.0),
+            (1856.0, 885.0),
+            (358.0, 649.0),
+        ] {
+            let area = Size::new(width, height);
+            let layout = HomeLayout::new(area, 12, HomeExtras { chips: 1, jump: 1 });
+            let floor = if width < NARROW_W {
+                CARD_FLOOR_NARROW
+            } else {
+                CARD_FLOOR
+            };
+            let label = format!("{width}x{height}: {layout:?}");
+            assert_eq!((layout.chips, layout.jump), (1, 1), "{label}");
+            assert!(layout.card >= floor, "{label}");
+            assert!(
+                layout.block_bottom() <= area.height - STATUS_H + 0.5,
+                "{label}"
+            );
         }
     }
 
