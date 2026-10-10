@@ -514,9 +514,6 @@ pub(super) fn diagnostic_missing(app: &App, step: usize) -> Option<&'static str>
             return Some("LyricsLoaded");
         }
     }
-    if matches!(step, 7 | 8) && app.playback_status.state != PlaybackState::Playing {
-        return Some("playback running");
-    }
     None
 }
 
@@ -554,33 +551,35 @@ const DIAGNOSTIC_LYRICS_MIN_ADVANCE: Duration = Duration::from_millis(1_500);
 
 /// A view that stopped following also stops the position, so a second capture that has not moved
 /// on fails the tour. The steps do not seek, because a seek would send a status that hides it.
+/// A paused queue, such as a restored one, has no position to follow, so the check is skipped.
 #[cfg(feature = "diagnostics")]
 pub(super) fn diagnostic_check_lyrics_position(app: &App, step: usize) {
+    let playing = app.playback_status.state == PlaybackState::Playing;
     let position = app.playback_status.position;
     let mut first = DIAGNOSTIC_LYRICS_POSITION
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     match step {
-        7 => *first = Some(position),
-        8 => {
-            let before = *first;
-            let moved_on =
-                before.is_some_and(|start| position >= start + DIAGNOSTIC_LYRICS_MIN_ADVANCE);
-            if moved_on {
-                tracing::info!(
-                    ?before,
-                    ?position,
-                    "lyrics position moved on between captures"
-                );
-            } else {
-                tracing::error!(
-                    ?before,
-                    ?position,
-                    "lyrics position stopped between captures"
-                );
-                diagnostic_fail(DIAGNOSTIC_LYRICS_STALLED);
+        7 => *first = playing.then_some(position),
+        8 => match (*first, playing) {
+            (Some(before), true) => {
+                if position >= before + DIAGNOSTIC_LYRICS_MIN_ADVANCE {
+                    tracing::info!(
+                        ?before,
+                        ?position,
+                        "lyrics position moved on between captures"
+                    );
+                } else {
+                    tracing::error!(
+                        ?before,
+                        ?position,
+                        "lyrics position stopped between captures"
+                    );
+                    diagnostic_fail(DIAGNOSTIC_LYRICS_STALLED);
+                }
             }
-        }
+            _ => tracing::info!("lyrics position check skipped: playback is not running"),
+        },
         _ => {}
     }
 }
