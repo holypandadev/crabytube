@@ -511,6 +511,17 @@ fn negative_is_fresh(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+/// What a lookup leaves on disk: complete lyrics and a verified "not found". Plain text salvaged at the
+/// deadline is shown but never stored, because a later lookup may still find timed lyrics.
+fn stored_form(result: &Result<Lyrics, String>, salvaged: bool) -> Option<Vec<u8>> {
+    match result {
+        Ok(lyrics) if !salvaged => serde_json::to_vec(lyrics).ok(),
+        Ok(_) => None,
+        Err(error) if error == NOT_FOUND => serde_json::to_vec(&NotFound { not_found: true }).ok(),
+        Err(_) => None,
+    }
+}
+
 pub async fn load_with_progress<F>(
     track: Track,
     duration: Option<Duration>,
@@ -551,12 +562,17 @@ where
         on_progress(lyrics);
     };
     // Global deadline for the whole chain; providers share one client.
+    // Plain text kept when the deadline passed is shown, but it is not stored as a positive result.
+    let mut salvaged = false;
     let result = match tokio::time::timeout(LYRICS_DEADLINE, load_inner(track, duration, progress))
         .await
     {
         Ok(result) => result,
         Err(_) => match latest_plain.lock().ok().and_then(|slot| slot.clone()) {
-            Some(plain) => Ok(plain),
+            Some(plain) => {
+                salvaged = true;
+                Ok(plain)
+            }
             None => Err("Lyrics request timed out. Check your connection and try again.".into()),
         },
     };
@@ -577,11 +593,7 @@ where
             info!(elapsed_ms = started.elapsed().as_millis(), %error, "lyrics not loaded")
         }
     }
-    let to_store = match &result {
-        Ok(lyrics) => serde_json::to_vec(lyrics).ok(),
-        Err(error) if error == NOT_FOUND => serde_json::to_vec(&NotFound { not_found: true }).ok(),
-        Err(_) => None,
-    };
+    let to_store = stored_form(&result, salvaged);
     if let Some(data) = to_store
         && let Some(parent) = path.parent()
     {
@@ -1029,6 +1041,21 @@ mod tests {
         assert_eq!(l.lines[1].start, 2.5);
         assert_eq!(l.lines[1].words[1].end, 3.5);
     }
+    #[test]
+    fn text_salvaged_at_the_deadline_is_shown_but_never_stored() {
+        let salvaged: Result<Lyrics, String> = Ok(Lyrics {
+            source: "fixture".into(),
+            lines: Vec::new(),
+            plain: Some("words".into()),
+        });
+        assert!(super::stored_form(&salvaged, true).is_none());
+        assert!(super::stored_form(&salvaged, false).is_some());
+        let not_found: Result<Lyrics, String> = Err(super::NOT_FOUND.into());
+        assert!(super::stored_form(&not_found, false).is_some());
+        let timed_out: Result<Lyrics, String> = Err("timed out".into());
+        assert!(super::stored_form(&timed_out, false).is_none());
+    }
+
     #[test]
     fn plain_has_no_invented_timings() {
         let l = lrc("Hello world", "fixture");
