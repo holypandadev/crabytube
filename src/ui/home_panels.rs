@@ -11,6 +11,7 @@ use super::{App, Message, format_duration};
 use crate::local_clock::LocalClock;
 use crate::preferences::RecentPlay;
 use crate::process_stats::{self, ProcessReading};
+use futures_util::{SinkExt, Stream};
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 use std::sync::Arc;
@@ -268,40 +269,52 @@ impl App {
         match self.process_reading {
             Some(reading) => {
                 let cpu = match reading.cpu_percent {
-                    Some(cpu) => format!("CPU {cpu:.1}%"),
+                    Some(cpu) => format!("CPU {cpu}%"),
                     None => "CPU --".to_owned(),
                 };
-                format!("RAM {} MB · {cpu} · {favorites}", reading.pss_kib / 1024)
+                format!("RAM {} MB · {cpu} · {favorites}", reading.mib)
             }
             None => favorites,
         }
     }
 
-    /// Opens Home: the clock is read now, and the process baseline restarts so the first CPU
-    /// figure covers only time spent on Home.
+    /// Opens Home: the clock is read now.
     pub(super) fn enter_home(&mut self) {
         self.clock = LocalClock::now();
-        self.process_sample = None;
-        self.refresh_process_status();
     }
+}
 
-    /// Reads the process memory and CPU for the status line. The CPU figure covers the time
-    /// since the previous reading, so the first reading after `enter_home` shows memory only.
-    pub(super) fn refresh_process_status(&mut self) {
-        let Some(sample) = process_stats::sample() else {
-            self.process_reading = None;
-            self.process_sample = None;
-            return;
-        };
-        let cpu_percent = self
-            .process_sample
-            .and_then(|previous| process_stats::cpu_percent(&previous, &sample));
-        self.process_reading = Some(ProcessReading {
-            pss_kib: sample.pss_kib,
-            cpu_percent,
-        });
-        self.process_sample = Some(sample);
+/// How often the status line reads the process.
+const STATUS_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Reads memory and CPU every few seconds. It reports only when a figure the status line shows
+/// changes, so an idle Home gets no messages and does not redraw.
+pub(super) fn status_stream() -> impl Stream<Item = Message> {
+    iced::stream::channel(1, async |mut output| {
+        let mut previous: Option<process_stats::ProcessSample> = None;
+        let mut shown: Option<ProcessReading> = None;
+        loop {
+            if let Some(sample) = process_stats::sample() {
+                let reading = ProcessReading::from_samples(&sample, previous.as_ref());
+                if changed(&mut shown, reading)
+                    && output.send(Message::StatusReading(reading)).await.is_err()
+                {
+                    break;
+                }
+                previous = Some(sample);
+            }
+            tokio::time::sleep(STATUS_INTERVAL).await;
+        }
+    })
+}
+
+/// Whether `reading` differs from the figures last reported. Records it when it does.
+fn changed(shown: &mut Option<ProcessReading>, reading: ProcessReading) -> bool {
+    if *shown == Some(reading) {
+        return false;
     }
+    *shown = Some(reading);
+    true
 }
 
 #[cfg(test)]
@@ -342,6 +355,17 @@ mod tests {
             clock_line(clock, "THURSDAY", "OCT"),
             "21:04 — THURSDAY 09 OCT"
         );
+    }
+
+    #[test]
+    fn the_status_stream_reports_only_changed_figures() {
+        let reading = |mib, cpu_percent| ProcessReading { mib, cpu_percent };
+        let mut shown = None;
+        assert!(changed(&mut shown, reading(70, None)));
+        assert!(!changed(&mut shown, reading(70, None)));
+        assert!(changed(&mut shown, reading(70, Some(0))));
+        assert!(!changed(&mut shown, reading(70, Some(0))));
+        assert!(changed(&mut shown, reading(71, Some(0))));
     }
 
     #[test]

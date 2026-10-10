@@ -2,10 +2,9 @@
 
 use super::*;
 
-/// Home's greeting changes once a minute at most, and the status line reads the process every
-/// five seconds. Both run only while Home is on screen.
+/// Home's greeting changes once a minute at most. The status line has its own stream, which
+/// reads the process every few seconds. Both run only while Home is on screen.
 const HOME_CLOCK_TICK: std::time::Duration = std::time::Duration::from_secs(60);
-const HOME_STATUS_TICK: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl App {
     pub(super) fn subscription(&self) -> Subscription<Message> {
@@ -48,8 +47,8 @@ impl App {
         } else {
             Subscription::none()
         };
-        let status = if home_visible {
-            iced::time::every(HOME_STATUS_TICK).map(|_| Message::StatusTick)
+        let status = if home_visible && crate::process_stats::AVAILABLE {
+            Subscription::run(super::home_panels::status_stream)
         } else {
             Subscription::none()
         };

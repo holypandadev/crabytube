@@ -16,12 +16,28 @@ pub struct ProcessSample {
     pub taken: Instant,
 }
 
-/// What the status line shows: memory, and CPU since the previous sample.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Whether the readings exist here. Elsewhere the status line shows no memory or CPU, and no
+/// reader needs to run.
+pub const AVAILABLE: bool = cfg!(target_os = "linux");
+
+/// What the status line shows: whole mebibytes of memory, and whole percent of one core since
+/// the previous sample. Rounding keeps the figure still while the process is idle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProcessReading {
-    pub pss_kib: u64,
+    pub mib: u64,
     /// `None` until a second sample exists.
-    pub cpu_percent: Option<f32>,
+    pub cpu_percent: Option<u32>,
+}
+
+impl ProcessReading {
+    pub fn from_samples(sample: &ProcessSample, previous: Option<&ProcessSample>) -> Self {
+        Self {
+            mib: sample.pss_kib / 1024,
+            cpu_percent: previous
+                .and_then(|previous| cpu_percent(previous, sample))
+                .map(|percent| percent.round() as u32),
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -114,5 +130,35 @@ mod tests {
         let percent = cpu_percent(&first, &second).expect("two samples");
         assert!((percent - 2.0).abs() < 0.001, "{percent}");
         assert_eq!(cpu_percent(&second, &first), None, "time must move forward");
+    }
+
+    #[test]
+    fn the_status_figures_are_whole_mebibytes_and_percent() {
+        let start = Instant::now();
+        let first = ProcessSample {
+            pss_kib: 71_680,
+            cpu_ticks: 1_000,
+            taken: start,
+        };
+        // Three ticks in five seconds is 0.6 % of one core, which shows as 1.
+        let second = ProcessSample {
+            pss_kib: 71_900,
+            cpu_ticks: 1_003,
+            taken: start + Duration::from_secs(5),
+        };
+        assert_eq!(
+            ProcessReading::from_samples(&first, None),
+            ProcessReading {
+                mib: 70,
+                cpu_percent: None,
+            }
+        );
+        assert_eq!(
+            ProcessReading::from_samples(&second, Some(&first)),
+            ProcessReading {
+                mib: 70,
+                cpu_percent: Some(1),
+            }
+        );
     }
 }

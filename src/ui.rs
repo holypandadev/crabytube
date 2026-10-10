@@ -154,7 +154,6 @@ struct App {
     window_minimized: bool,
     /// The local time the Home greeting shows.
     clock: crate::local_clock::LocalClock,
-    process_sample: Option<crate::process_stats::ProcessSample>,
     process_reading: Option<crate::process_stats::ProcessReading>,
     /// "Jump back in": tracks and collections the user started, newest first.
     recent: Vec<crate::preferences::RecentPlay>,
@@ -1546,8 +1545,8 @@ impl App {
             Message::ClockTick => {
                 self.clock = crate::local_clock::LocalClock::now();
             }
-            Message::StatusTick => {
-                self.refresh_process_status();
+            Message::StatusReading(reading) => {
+                self.process_reading = Some(reading);
             }
             Message::TrackNotificationSent(id) => {
                 if id != 0 {
@@ -1764,7 +1763,6 @@ impl App {
             window_hidden_to_tray: false,
             window_minimized: false,
             clock: crate::local_clock::LocalClock::now(),
-            process_sample: None,
             process_reading: None,
             recent: Vec::new(),
             recent_track_id: None,

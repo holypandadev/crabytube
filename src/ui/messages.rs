@@ -242,8 +242,8 @@ pub(super) enum Message {
     WindowMinimizedChecked(bool),
     /// A minute passed while Home is visible, so the greeting may have changed.
     ClockTick,
-    /// Time to read the memory and CPU the Home status line shows.
-    StatusTick,
+    /// Memory and CPU for the Home status line, sent only when the figures shown change.
+    StatusReading(crate::process_stats::ProcessReading),
     /// A track notification was sent; zero when it was not.
     TrackNotificationSent(u32),
     /// Scrolls the Home carousel by one screen.
