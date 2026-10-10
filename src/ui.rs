@@ -46,7 +46,6 @@ use messages::{Message, NowPlayingTab, Page, Preference};
 
 #[allow(dead_code)]
 struct App {
-    quality_setting: crate::playback_policy::QualitySetting,
     lyrics: Option<crate::lyrics::Lyrics>,
     lyrics_error: Option<String>,
     lyrics_loading: bool,
@@ -312,7 +311,6 @@ impl App {
                 .resolved_format
                 .as_ref()
                 .map(crate::playback::ResolvedAudioFormat::label),
-            "quality": format!("{:?}", self.preferences.quality),
             "window": [self.window_width, self.window_height],
         });
         let path = dirs::cache_dir()
@@ -752,10 +750,6 @@ impl App {
                     Preference::DiscordPresence(v) => {
                         self.preferences.discord_presence = v;
                         self.sync_discord_presence(true);
-                    }
-                    Preference::Quality(v) => {
-                        self.preferences.quality = v;
-                        self.quality_setting.set(v);
                     }
                     Preference::OutputDevice(device_id) => {
                         self.preferences.audio_output_device_id = device_id.clone();
@@ -1655,7 +1649,6 @@ impl App {
                     defaults.startup = true;
                 }
                 self.preferences = defaults;
-                self.quality_setting.set(self.preferences.quality);
                 self.autoplay = self.preferences.autoplay;
                 self.shuffle = self.preferences.shuffle;
                 self.repeat = self.preferences.repeat;
@@ -1677,16 +1670,11 @@ impl App {
     }
 
     fn new(music_service: Arc<dyn MusicService>, session: YouTubeSession) -> Self {
-        let quality_setting = crate::playback_policy::QualitySetting::default();
-        let playback = PlaybackHandle::new(Arc::new(crate::playback_policy::ConfiguredResolver {
-            inner: Arc::new(YouTubeStreamResolver::new(session.clone())),
-            quality: quality_setting.clone(),
-        }));
+        let playback = PlaybackHandle::new(Arc::new(YouTubeStreamResolver::new(session.clone())));
         let discord_presence = crate::discord::DiscordPresence::start();
         let mpris = crate::mpris::MprisRemote::start();
         let tray = crate::tray::TrayRemote::start();
         Self {
-            quality_setting,
             lyrics: None,
             lyrics_error: None,
             lyrics_loading: false,
@@ -1834,7 +1822,6 @@ impl App {
         match crate::preferences::load(&path) {
             Ok(saved) => {
                 app.preferences = saved.preferences;
-                app.quality_setting.set(app.preferences.quality);
                 app.queue = saved.queue;
                 app.queue_index = saved.queue_index;
                 app.search_history = saved.history;

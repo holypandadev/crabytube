@@ -28,4 +28,3 @@ pub mod tray;
 pub mod tray;
 
 pub mod discord;
-pub mod playback_policy;

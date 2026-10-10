@@ -25,7 +25,6 @@ pub(super) enum Preference {
     RestoreQueue(bool),
     History(bool),
     ShuffleAll(bool),
-    Quality(crate::preferences::Quality),
     ReducedMotion(bool),
     Startup(bool),
     CloseToTray(bool),

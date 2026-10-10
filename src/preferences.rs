@@ -20,14 +20,6 @@ const MAX_WINDOW_WIDTH: f32 = 7_680.0;
 const MAX_WINDOW_HEIGHT: f32 = 4_320.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Quality {
-    #[default]
-    Auto,
-    Normal,
-    High,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiFontFamily {
     #[default]
     SansSerif,
@@ -120,20 +112,9 @@ impl std::fmt::Display for UiDensity {
     }
 }
 
-impl std::fmt::Display for Quality {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let label = match self {
-            Self::Auto => "Auto (AAC)",
-            Self::Normal => "Normal (AAC 96–160 kbps)",
-            Self::High => "High (AAC ≥128 kbps)",
-        };
-        f.write_str(crate::i18n::translate(crate::i18n::current_language(), label).as_ref())
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
-    pub quality: Quality,
     pub autoplay: bool,
     pub shuffle_all: bool,
     pub remember_queue: bool,
@@ -186,7 +167,6 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            quality: Quality::Auto,
             autoplay: true,
             shuffle_all: false,
             remember_queue: true,
@@ -753,7 +733,6 @@ mod tests {
     fn old_settings_receive_safe_defaults() {
         let p: Preferences = serde_json::from_str("{}").unwrap();
         assert!(p.remember_queue);
-        assert_eq!(p.quality, Quality::Auto);
         assert_eq!(p.window_width, Preferences::default().window_width);
         assert_eq!(p.window_height, Preferences::default().window_height);
         assert_eq!(p.ui_language, UiLanguage::English);
@@ -763,11 +742,12 @@ mod tests {
     #[test]
     fn obsolete_preference_keys_load_but_are_not_written_back() {
         let legacy: Preferences = serde_json::from_str(
-            r#"{"sidebar_collapsed":true,"artwork_background":false,"background_opacity":0.3,"ui_font_family":"Monospace"}"#,
+            r#"{"quality":"High","sidebar_collapsed":true,"artwork_background":false,"background_opacity":0.3,"ui_font_family":"Monospace"}"#,
         )
         .unwrap();
         assert_eq!(legacy.background_opacity, 0.3);
         let written = String::from_utf8(serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert!(!written.contains("quality"));
         assert!(!written.contains("sidebar_collapsed"));
         assert!(!written.contains("artwork_background"));
         assert!(!written.contains("ui_font_family"));

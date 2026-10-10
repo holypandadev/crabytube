@@ -210,8 +210,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Choose how CrabyTube plays music on this device." => {
             "Elige cómo reproduce música CrabyTube en este dispositivo."
         }
-        "Audio quality" => "Calidad de audio",
-        "AAC quality, when the source provides it" => "Calidad AAC cuando la fuente la ofrece",
         "Audio output" => "Salida de audio",
         "Loading available output devices…" => "Cargando dispositivos de salida…",
         "Device changes take effect on the next track. If a saved device disconnects, switch to System default and restart playback." => {
@@ -348,9 +346,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "System media controls are unavailable on this platform" => {
             "Los controles multimedia del sistema no están disponibles en esta plataforma"
         }
-        "Normal (AAC 96–160 kbps)" => "Normal (AAC 96–160 kbps)",
-        "High (AAC ≥128 kbps)" => "Alta (AAC ≥128 kbps)",
-        "Auto (AAC)" => "Automática (AAC)",
         "Playback output is unavailable." => "La salida de audio no está disponible.",
         "YouTube requires sign-in for this track; it can't be played without an account." => {
             "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
@@ -443,7 +438,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Space play/pause · ←/→ seek · Ctrl+K search · Esc back" => {
             "Espacio reproducir/pausar · ←/→ avanzar · Ctrl+K buscar · Esc volver"
         }
-        "Streaming Quality" => "Calidad de streaming",
         "Tap the heart on any song to save it here." => {
             "Pulsa el corazón de una canción para guardarla aquí."
         }

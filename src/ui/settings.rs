@@ -5,7 +5,7 @@ use super::shell::fit;
 use super::theme::{self, ALERT, DIM, FADED, INK, MONO, RULE, hrule, icon, label, toggle};
 use super::{App, Message, Preference};
 use crate::playback::PlaybackState;
-use crate::preferences::{Quality, UiDensity, UiLanguage};
+use crate::preferences::{UiDensity, UiLanguage};
 use iced::widget::{Space, button, column, container, pick_list, row, scrollable, slider, text};
 use iced::{Alignment, Element, Length, Size};
 
@@ -296,11 +296,6 @@ impl App {
         } else {
             "Changes apply to the next track.".to_owned()
         };
-        let quality_hint = self
-            .playback_status
-            .resolved_format
-            .as_ref()
-            .map(|format| format!("Last stream: {}", format.label()));
         let device_picker = row![
             pick_list(
                 self.output_devices.clone(),
@@ -327,24 +322,12 @@ impl App {
         self.settings_box(
             "Audio",
             width,
-            vec![
-                self.setting(
-                    "Streaming Quality",
-                    quality_hint,
-                    self.picker(
-                        vec![Quality::Auto, Quality::Normal, Quality::High],
-                        Some(p.quality),
-                        |value| Message::Preference(Preference::Quality(value)),
-                    ),
-                    width,
-                ),
-                self.setting(
-                    "Output Device",
-                    Some(device_hint),
-                    device_picker.into(),
-                    width,
-                ),
-            ],
+            vec![self.setting(
+                "Output Device",
+                Some(device_hint),
+                device_picker.into(),
+                width,
+            )],
         )
     }
 
