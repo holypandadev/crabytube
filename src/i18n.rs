@@ -26,6 +26,8 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
     // rebuilt from the "Lyrics " prefix.
     let translated = match source {
         "General" => "General",
+        "#" => "#",
+        "BotGuard" => "BotGuard",
         "Appearance" => "Apariencia",
         "Playback" => "Reproducción",
         "System" => "Sistema",
@@ -654,6 +656,66 @@ mod tests {
         assert_eq!(
             translate(UiLanguage::Spanish, "A user supplied title"),
             "A user supplied title"
+        );
+    }
+
+    /// The first string argument of each call that shows text in one source file.
+    fn shown_literals(source: &str) -> Vec<String> {
+        const CALLS: [&str; 6] = [
+            "tr(\"",
+            "tr_static(\"",
+            "tr_string(\"",
+            "setting(\"",
+            "tab(\"",
+            "action(\"",
+        ];
+        let mut found = Vec::new();
+        for call in CALLS {
+            for (start, _) in source.match_indices(call) {
+                // `write_str("` and similar calls end in the same letters but show nothing.
+                let before = source[..start].chars().next_back();
+                if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
+                let mut literal = String::new();
+                let mut chars = source[start + call.len()..].chars();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '\\' => {
+                            literal.push(c);
+                            literal.extend(chars.next());
+                        }
+                        '"' => break,
+                        _ => literal.push(c),
+                    }
+                }
+                found.push(literal);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_string_the_interface_shows_has_a_spanish_entry() {
+        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui");
+        let mut sources = vec![std::fs::read_to_string(ui.with_extension("rs")).unwrap()];
+        for entry in std::fs::read_dir(&ui).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                sources.push(std::fs::read_to_string(path).unwrap());
+            }
+        }
+        let table = include_str!("i18n.rs");
+        let mut missing: Vec<String> = sources
+            .iter()
+            .flat_map(|source| shown_literals(source))
+            .filter(|literal| !table.contains(&format!("\"{literal}\" =>")))
+            .collect();
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "interface strings without a Spanish entry: {missing:?}"
         );
     }
 }
