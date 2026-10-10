@@ -281,8 +281,9 @@ pub fn lrc(input: &str, source: &str) -> Lyrics {
             });
         }
     }
+    // A positive [offset:] shows lyrics sooner, so it moves every timestamp back.
     for line in &mut lines {
-        line.start = (line.start + offset).max(0.0);
+        line.start = (line.start - offset).max(0.0);
     }
     lines.sort_by(|a, b| a.start.total_cmp(&b.start));
     for i in 0..lines.len().saturating_sub(1) {
@@ -994,9 +995,18 @@ mod tests {
             "fixture",
         );
         assert_eq!(l.lines.len(), 3);
-        assert_eq!(l.lines[0].start, 1.3);
+        assert_eq!(l.lines[0].start, 1.7);
         assert_eq!(l.active(4.0), Some(1));
         assert_eq!(l.active(0.1), None);
+    }
+    #[test]
+    fn a_positive_offset_shows_lyrics_sooner_and_never_before_zero() {
+        let sooner = lrc("[offset:+500]\n[00:10.00]Line", "fixture");
+        assert_eq!(sooner.lines[0].start, 9.5);
+        let later = lrc("[offset:-500]\n[00:10.00]Line", "fixture");
+        assert_eq!(later.lines[0].start, 10.5);
+        let clamped = lrc("[offset:+2000]\n[00:01.00]Line", "fixture");
+        assert_eq!(clamped.lines[0].start, 0.0);
     }
     #[test]
     fn qq_qrc_has_word_level_timing_from_provider_data() {
