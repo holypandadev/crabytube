@@ -1571,6 +1571,7 @@ impl App {
                 self.window_focused = Some(focused);
                 if focused {
                     self.window_minimized = false;
+                    return self.arm_karaoke_wake().unwrap_or_else(Task::none);
                 } else {
                     // Minimizing takes the focus away too, so ask the window what happened.
                     return iced::window::latest()
@@ -1582,6 +1583,9 @@ impl App {
             }
             Message::WindowMinimizedChecked(minimized) => {
                 self.window_minimized = minimized;
+                if !minimized {
+                    return self.arm_karaoke_wake().unwrap_or_else(Task::none);
+                }
             }
             Message::ClockTick => {
                 self.clock = crate::local_clock::LocalClock::now();
@@ -4018,6 +4022,48 @@ mod tests {
             album: None,
             thumbnail_url: None,
         }
+    }
+
+    #[test]
+    fn synced_lyrics_wake_the_app_only_while_the_window_is_shown() {
+        let word = |start: f64| crate::lyrics::Word {
+            start,
+            end: start + 0.4,
+            text: "word".into(),
+        };
+        let synced = crate::lyrics::Lyrics {
+            source: "fixture".into(),
+            lines: vec![crate::lyrics::Line {
+                start: 10.0,
+                end: None,
+                text: "word word".into(),
+                words: vec![word(10.0), word(10.5)],
+                translation: None,
+                romanization: None,
+                background: None,
+            }],
+            plain: None,
+        };
+        let mut app = App {
+            page: Page::NowPlaying,
+            now_playing_tab: super::NowPlayingTab::Lyrics,
+            lyrics: Some(synced),
+            window_minimized: true,
+            ..App::default()
+        };
+        let status = PlaybackStatus {
+            track: Some(song("Track")),
+            position: Duration::from_secs_f64(10.2),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        };
+        drop(app.update_playback_status(status));
+        assert!(!app.karaoke_tick_pending, "no wake-up while minimized");
+        drop(app.update(Message::WindowMinimizedChecked(false)));
+        assert!(
+            app.karaoke_tick_pending,
+            "restoring the window schedules the wake-up again"
+        );
     }
 
     #[test]

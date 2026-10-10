@@ -29,6 +29,7 @@ impl App {
         // arrive through `playback_status`, so the tick can stop while the window is in the tray.
         // Synced lyrics schedule their own wake-ups at each word (see `karaoke_wait`).
         let playback = if !self.window_hidden_to_tray
+            && !self.window_minimized
             && !self.karaoke_active()
             && matches!(
                 self.playback_status.state,

@@ -103,16 +103,8 @@ impl App {
         {
             tasks.push(task);
         }
-        // Synced lyrics wake the app at the next word, not on a fixed tick.
-        if self.karaoke_active()
-            && !self.karaoke_tick_pending
-            && let Some(wait) = self.karaoke_wait()
-        {
-            self.karaoke_tick_pending = true;
-            tasks.push(Task::perform(
-                async move { tokio::time::sleep(wait).await },
-                |()| Message::PlaybackTick,
-            ));
+        if let Some(wake) = self.arm_karaoke_wake() {
+            tasks.push(wake);
         }
         if self.autoplay
             && self
@@ -127,6 +119,20 @@ impl App {
             tasks.push(self.load_radio());
         }
         Task::batch(tasks)
+    }
+
+    /// The next wake-up for synced lyrics: at the next word, not on a fixed tick. Nothing is
+    /// scheduled while the window is minimized; restoring it schedules the wake-up again.
+    pub(super) fn arm_karaoke_wake(&mut self) -> Option<Task<Message>> {
+        if self.window_minimized || self.karaoke_tick_pending || !self.karaoke_active() {
+            return None;
+        }
+        let wait = self.karaoke_wait()?;
+        self.karaoke_tick_pending = true;
+        Some(Task::perform(
+            async move { tokio::time::sleep(wait).await },
+            |()| Message::PlaybackTick,
+        ))
     }
 
     /// Timed lyrics are on screen and followed while the track plays: at each word when the
