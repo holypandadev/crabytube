@@ -12,16 +12,28 @@ use iced::widget::{
     Space, button, column, container, image, mouse_area, responsive, row, sensor, slider, svg, text,
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Size};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
-/// Shortens `value` to fit `width` pixels at `size`. JetBrains Mono advances
-/// 0.6 em per glyph, so a character budget is exact for Latin text.
+/// Shortens `value` to fit `width` pixels at `size`. JetBrains Mono advances 0.6 em per cell, so a
+/// cell budget is exact for Latin text. Wide characters take two cells, and a grapheme cluster (an
+/// accented letter, an emoji sequence) is never split, so the ellipsis follows a whole character.
 pub(super) fn fit(value: &str, width: f32, size: f32) -> String {
     let budget = (width / (size * 0.6)).floor().max(1.0) as usize;
-    let count = value.chars().count();
-    if count <= budget {
+    if value.width() <= budget {
         return value.to_owned();
     }
-    let mut out: String = value.chars().take(budget.saturating_sub(1)).collect();
+    let keep = budget.saturating_sub(1);
+    let mut out = String::new();
+    let mut used = 0;
+    for grapheme in value.graphemes(true) {
+        let cells = grapheme.width();
+        if used + cells > keep {
+            break;
+        }
+        out.push_str(grapheme);
+        used += cells;
+    }
     out.push('…');
     out
 }
@@ -803,4 +815,28 @@ pub(super) fn section_heading<'a>(
 #[allow(dead_code)]
 pub(super) fn spacer<'a>(height: f32) -> Element<'a, Message> {
     Space::new().height(height).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit;
+
+    #[test]
+    fn latin_text_is_cut_by_characters_with_an_ellipsis() {
+        // 72 px at 12 px is ten cells of 7.2 px: nine characters and the ellipsis.
+        assert_eq!(fit("Never Gonna Give You Up", 72.0, 12.0), "Never Gon…");
+        assert_eq!(fit("Short", 72.0, 12.0), "Short");
+    }
+
+    #[test]
+    fn wide_characters_take_two_cells() {
+        // 73 px is ten cells: four of the eight wide characters fit beside the ellipsis.
+        assert_eq!(fit("日本語の曲名です", 73.0, 12.0), "日本語の…");
+    }
+
+    #[test]
+    fn a_grapheme_cluster_is_kept_whole() {
+        // "e" with a combining accent is one character of one cell, so it is kept with its accent.
+        assert_eq!(fit("cafe\u{301} au lait", 36.0, 12.0), "cafe\u{301}…");
+    }
 }

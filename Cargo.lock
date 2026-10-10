@@ -1265,6 +1265,8 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
+ "unicode-width",
  "windows-sys 0.61.2",
  "winresource",
  "zbus",
