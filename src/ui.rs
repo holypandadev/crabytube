@@ -241,8 +241,9 @@ fn cache_cleared_notice(kind: crate::storage::CacheKind, cleared: &Result<u64, S
 /// same tick: at 100 ms the Now Playing view alone costs about 9 % of a core.
 const PLAYBACK_TICK: Duration = Duration::from_millis(250);
 
-/// Messages the app sends itself: timers, loads, scrolling, frames and window state. They leave a
-/// pending confirmation in place. Every other message counts as a press.
+/// Messages the app sends itself: timers, loads, scrolling, frames and window state, and keyboard
+/// events that press nothing: releases and modifier changes. They leave a pending confirmation in
+/// place. Every other message counts as a press.
 fn keeps_confirmation(message: &Message) -> bool {
     match message {
         Message::ConfirmImport
@@ -297,6 +298,9 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
         | Message::CarouselScrolled(_) => true,
+        Message::KeyPressed(
+            iced::keyboard::Event::KeyReleased { .. } | iced::keyboard::Event::ModifiersChanged(_),
+        ) => true,
         #[cfg(feature = "diagnostics")]
         Message::DiagnosticFrame(_)
         | Message::DiagnosticShot(_)
@@ -4620,6 +4624,56 @@ mod tests {
         );
         drop(app.update(Message::Preference(Preference::ShuffleAll(false))));
         assert!(app.confirmation.is_none(), "another press drops it");
+    }
+
+    #[test]
+    fn releasing_a_key_or_changing_modifiers_keeps_the_confirmation() {
+        use iced::keyboard::{Event as KeyEvent, Key, Location, Modifiers, key::Named};
+        let key_event = |key: Key, modifiers: Modifiers, released: bool| {
+            let physical_key = iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            );
+            if released {
+                KeyEvent::KeyReleased {
+                    key: key.clone(),
+                    modified_key: key,
+                    physical_key,
+                    location: Location::Standard,
+                    modifiers,
+                }
+            } else {
+                KeyEvent::KeyPressed {
+                    key: key.clone(),
+                    modified_key: key,
+                    physical_key,
+                    location: Location::Standard,
+                    modifiers,
+                    text: None,
+                    repeat: false,
+                }
+            }
+        };
+        let mut app = App::default();
+        drop(app.update(Message::AskResetSettings));
+        drop(app.update(Message::KeyPressed(KeyEvent::ModifiersChanged(
+            Modifiers::SHIFT,
+        ))));
+        drop(app.update(Message::KeyPressed(key_event(
+            Key::Named(Named::Shift),
+            Modifiers::empty(),
+            true,
+        ))));
+        assert!(
+            app.confirmation.is_some(),
+            "releasing a key and changing modifiers press nothing"
+        );
+        // A key going down is a press, so it drops the confirmation.
+        drop(app.update(Message::KeyPressed(key_event(
+            Key::Named(Named::ArrowDown),
+            Modifiers::empty(),
+            false,
+        ))));
+        assert!(app.confirmation.is_none());
     }
 
     #[test]
