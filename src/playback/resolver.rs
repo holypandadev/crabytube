@@ -1838,6 +1838,7 @@ async fn run_js_helper_once(
     let mut child = command
         .spawn()
         .map_err(|error| StreamError::Decoder(format!("JS helper could not start: {error}")))?;
+    super::process_job::join_helpers(&child);
     let request = serde_json::to_vec(&Request {
         protocol_version: 2,
         player_js_path: input.player_js_path.clone(),

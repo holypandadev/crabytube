@@ -2,6 +2,7 @@ mod engine;
 mod live;
 pub mod output;
 pub(crate) mod pot;
+mod process_job;
 mod resolver;
 
 pub use engine::{

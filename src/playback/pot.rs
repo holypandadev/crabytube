@@ -354,6 +354,7 @@ impl BotguardHelper {
         let mut child = command
             .spawn()
             .map_err(|error| PoTokenError::Helper(error.to_string()))?;
+        super::process_job::join_helpers(&child);
         let batch: Vec<&str> = if need_content {
             video_ids.iter().map(String::as_str).collect()
         } else {
