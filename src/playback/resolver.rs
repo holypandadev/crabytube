@@ -44,8 +44,17 @@ struct PlayerClient {
     requires_gvs_po_token: bool,
 }
 
+/// A player page older than this is fetched again, so a stale challenge or cipher cannot stay for days.
+const PLAYER_RUNTIME_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// Whether a cached player runtime, fetched at `fetched_at`, may still be used at `now`.
+fn runtime_is_fresh(fetched_at: std::time::Instant, now: std::time::Instant) -> bool {
+    now.saturating_duration_since(fetched_at) < PLAYER_RUNTIME_TTL
+}
+
 #[derive(Clone)]
 struct PlayerRuntime {
+    fetched_at: std::time::Instant,
     profile: PlayerClient,
     endpoint: String,
     origin: String,
@@ -735,6 +744,7 @@ impl YouTubeStreamResolver {
             "Innertube client config loaded"
         );
         Ok(PlayerRuntime {
+            fetched_at: std::time::Instant::now(),
             profile,
             endpoint,
             origin,
@@ -858,13 +868,16 @@ impl YouTubeStreamResolver {
         &self,
         cancellation: &CancellationToken,
     ) -> Result<PlayerRuntime, StreamError> {
-        let mut runtime = self.runtime.lock().await;
-        if let Some(runtime) = runtime.as_ref() {
-            return Ok(runtime.clone());
+        // The lock covers only the lookup and the store, never the page fetch, so callers do not queue behind it.
+        let cached = self.runtime.lock().await.clone();
+        if let Some(runtime) =
+            cached.filter(|runtime| runtime_is_fresh(runtime.fetched_at, std::time::Instant::now()))
+        {
+            return Ok(runtime);
         }
         let mut loaded = Self::fetch_player_runtime(self.profile.config(), cancellation).await?;
         adopt_visitor(&mut loaded);
-        *runtime = Some(loaded.clone());
+        *self.runtime.lock().await = Some(loaded.clone());
         Ok(loaded)
     }
 
@@ -2138,6 +2151,18 @@ fn quality_allows(quality: AudioQuality, bitrate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_player_runtime_is_reused_for_six_hours_only() {
+        use super::{PLAYER_RUNTIME_TTL, runtime_is_fresh};
+        let fetched = std::time::Instant::now();
+        assert!(runtime_is_fresh(fetched, fetched));
+        assert!(runtime_is_fresh(
+            fetched,
+            fetched + PLAYER_RUNTIME_TTL - std::time::Duration::from_secs(1)
+        ));
+        assert!(!runtime_is_fresh(fetched, fetched + PLAYER_RUNTIME_TTL));
+    }
+
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
 
