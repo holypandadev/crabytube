@@ -274,14 +274,15 @@ fn client() -> Option<&'static reqwest::Client> {
 }
 
 /// Persistent cache keyed by (URL, variant, version) so 128/192/320px
-/// thumbs survive RAM eviction without forcing a 640px download per row.
-/// Legacy v4 master files (single file per URL) are still readable as a
-/// fallback and are downsampled to the requested variant.
+/// thumbs survive RAM eviction without forcing a 640px download per row. Each
+/// file holds the bytes that were downloaded for its variant, so nothing is
+/// re-encoded when it is saved. Legacy v4 master files (single file per URL)
+/// are still readable as a fallback and are downsampled to the requested variant.
 fn variant_cache_path(url: &str, max_dim: u32) -> std::path::PathBuf {
     let dim = max_dim.clamp(64, LARGE_MAX);
     artwork_cache_root().join(format!(
-        "{:x}.png",
-        Sha256::digest(format!("v5:{url}:{dim}").as_bytes())
+        "{:x}.img",
+        Sha256::digest(format!("v6:{url}:{dim}").as_bytes())
     ))
 }
 
@@ -313,28 +314,24 @@ fn legacy_cache_path(url: &str) -> std::path::PathBuf {
     ))
 }
 
-/// Atomic PNG persist: write to a unique temp file in the same directory,
-/// then rename so readers never see a partial file.
-fn atomic_save_png(path: &std::path::Path, image: &::image::RgbaImage) -> bool {
+/// Atomic write of a cache file: the bytes go to a unique temp file in the same directory, which is
+/// then renamed, so readers never see a partial file. The folder is trimmed once the file is in place.
+fn atomic_save_bytes(path: &std::path::Path, bytes: &[u8]) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
     if crate::storage::create_private_dir_all(parent).is_err() {
         return false;
     }
-    trim_cache(parent, Some(path));
     let tmp = parent.join(format!(
-        ".tmp-{}-{}.png",
+        ".tmp-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    let saved = image
-        .save_with_format(&tmp, ::image::ImageFormat::Png)
-        .is_ok();
-    if !saved {
+    if std::fs::write(&tmp, bytes).is_err() {
         let _ = std::fs::remove_file(&tmp);
         return false;
     }
@@ -556,13 +553,12 @@ async fn fetch_in_lane(
         return None;
     }
     tokio::task::spawn_blocking(move || {
+        // The download is decoded first, so a response that is not an image is never kept. The bytes
+        // are then saved as they arrived. Each variant has its own file, so small thumbs are reused
+        // after RAM eviction without forcing a 640px download for each row.
         let image = thumbnail_sized(&bytes, max_dim)?;
-        // Persist every variant under its own (URL, variant) key with an
-        // atomic write. Small thumbs are reused after RAM eviction without
-        // forcing a 640px download for each row; resolution can still be
-        // upgraded later because each variant has an independent file.
         let path = variant_cache_path(&url, max_dim);
-        atomic_save_png(&path, &image);
+        atomic_save_bytes(&path, &bytes);
         Some(rgba_handle(image))
     })
     .await
@@ -671,7 +667,11 @@ fn trim_cache_to(
     let mut entries: Vec<_> = entries
         .flatten()
         .filter_map(|entry| {
-            if !entry.path().extension().is_some_and(|ext| ext == "png") {
+            if !entry
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "png" || ext == "img")
+            {
                 return None;
             }
             let metadata = entry.metadata().ok()?;
@@ -1173,8 +1173,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("thumb.png");
         let fixture = ::image::RgbaImage::from_pixel(256, 256, ::image::Rgba([9, 9, 9, 255]));
-        assert!(atomic_save_png(&path, &fixture));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        fixture
+            .write_to(&mut encoded, ::image::ImageFormat::Png)
+            .unwrap();
+        assert!(atomic_save_bytes(&path, encoded.get_ref()));
         assert!(path.is_file());
+        // The file holds the bytes as they were given: nothing is re-encoded on the way to disk.
+        assert_eq!(std::fs::read(&path).unwrap(), encoded.get_ref().as_slice());
         // No stray temp files remain.
         let tmps = std::fs::read_dir(&dir)
             .unwrap()
