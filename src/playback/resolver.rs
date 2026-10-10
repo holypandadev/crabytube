@@ -25,13 +25,11 @@ impl GvsPoBinding {
         }
     }
 }
-const TV_UA: &str = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientProfile {
     Mweb,
     WebMusic,
-    Tv,
 }
 
 #[derive(Clone, Copy)]
@@ -90,14 +88,6 @@ impl ClientProfile {
                 api_host: "music.youtube.com",
                 requires_gvs_po_token: true,
             },
-            Self::Tv => PlayerClient {
-                name: "TVHTML5",
-                version: "7.20260707.07.00",
-                user_agent: TV_UA,
-                config_url: "https://www.youtube.com/tv",
-                api_host: "www.youtube.com",
-                requires_gvs_po_token: false,
-            },
         }
     }
 }
@@ -107,7 +97,6 @@ impl PlayerClient {
         match self.name {
             "MWEB" => "2",
             "WEB_REMIX" => "67",
-            "TVHTML5" => "7",
             _ => "0",
         }
     }
@@ -2168,7 +2157,7 @@ mod tests {
 
     use super::{
         AudioCodec, AudioQuality, AudioStream, AudioStreamDiagnostics, ClientProfile, GvsPoBinding,
-        MWEB_UA, StreamError, StreamResolver, TV_UA, TrackId, ValidatedPlaybackResolution,
+        MWEB_UA, StreamError, StreamResolver, TrackId, ValidatedPlaybackResolution,
         YouTubeStreamResolver, choose_aac_format, has_video_id_gvs_binding, is_live_content,
         is_live_media_url, parse_signature_timestamp, parse_yt_at_n, parse_ytcfg,
         persisted_player_js_ready, player_js_url, player_request, retryable_config_status,
@@ -2307,30 +2296,6 @@ mod tests {
         );
         assert!(request.get("serviceIntegrityDimensions").is_none());
         assert!(request.get("cookies").is_none());
-    }
-
-    #[test]
-    fn tv_control_uses_the_current_client_without_po_token() {
-        let profile = ClientProfile::Tv.config();
-        let request = player_request(
-            "video-id",
-            json!({"client":{"clientName":"TVHTML5","clientVersion":"7.20260707.07.00","visitorData":"visitor-id","userAgent":TV_UA}}),
-            None,
-        );
-        assert_eq!(
-            request.pointer("/context/client/clientName"),
-            Some(&json!("TVHTML5"))
-        );
-        assert_eq!(
-            request.pointer("/context/client/clientVersion"),
-            Some(&json!("7.20260707.07.00"))
-        );
-        assert_eq!(
-            request.pointer("/context/client/userAgent"),
-            Some(&json!(TV_UA))
-        );
-        assert_eq!(profile.fallback_client_id(), "7");
-        assert!(!profile.requires_gvs_po_token);
     }
 
     #[test]
