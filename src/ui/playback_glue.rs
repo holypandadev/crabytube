@@ -66,7 +66,8 @@ impl App {
         {
             self.resync_lyrics();
         }
-        self.release_previous_cover(previous_track.as_ref());
+        let current_track = self.playback_status.track.clone();
+        self.release_previous_cover(previous_track.as_ref(), current_track.as_ref());
         let mut metadata_tasks = self.adopt_resolved_metadata(previous_track);
         metadata_tasks.extend(self.track_notice_task());
         self.request_prefetch_near_end();
@@ -340,8 +341,10 @@ impl App {
         self.lyrics_waiting_for_duration = false;
         self.lyric_active = None;
         self.playback.play(track.clone());
+        let previous = self.playback_status.track.clone();
         self.playback_status.state = PlaybackState::Resolving;
         self.playback_status.track = Some(track.clone());
+        self.release_previous_cover(previous.as_ref(), Some(&track));
         self.playback_status.position = Duration::ZERO;
         self.playback_status.duration = None;
         self.playback_status.error = None;

@@ -2073,12 +2073,11 @@ impl App {
     /// The large cover is only shown on Now Playing. When the track changes, the cover of the track
     /// that stopped is dropped: otherwise each track leaves a 640 px image (about 1.6 MiB) in the
     /// cache until the byte budget evicts it, and the process keeps growing through a session.
-    fn release_previous_cover(&mut self, previous: Option<&Track>) {
-        let current = self
-            .playback_status
-            .track
-            .as_ref()
-            .and_then(|track| track.thumbnail_url.as_deref());
+    /// Drops the large cover of the track that played before a change, unless the new track
+    /// shows the same cover. The caller passes both tracks, because the playback status may
+    /// already hold the new one when this runs.
+    fn release_previous_cover(&mut self, previous: Option<&Track>, current: Option<&Track>) {
+        let current = current.and_then(|track| track.thumbnail_url.as_deref());
         let Some(url) = previous.and_then(|track| track.thumbnail_url.as_deref()) else {
             return;
         };
@@ -3842,6 +3841,45 @@ mod tests {
             album: None,
             thumbnail_url: None,
         }
+    }
+
+    #[test]
+    fn each_track_change_releases_only_the_previous_large_cover() {
+        let mut app = App::default();
+        let tracks: Vec<crate::music::Track> = (0..4)
+            .map(|index| {
+                let mut track = fixture_track(&format!("cover-{index}"));
+                track.thumbnail_url = Some(format!(
+                    "https://i.ytimg.com/vi/cover-{index}/hqdefault.jpg"
+                ));
+                track
+            })
+            .collect();
+        let queue: Arc<[crate::music::Track]> = Arc::from(tracks.clone());
+        let side = crate::artwork::LARGE_MAX;
+        for (index, track) in tracks.iter().enumerate() {
+            let _ = app.update(Message::PlayContext(Arc::clone(&queue), index));
+            for earlier in &tracks[..index] {
+                let url = earlier.thumbnail_url.as_deref().unwrap_or_default();
+                assert!(
+                    app.artwork_cache.get_exact(url, side).is_none(),
+                    "after track {index} the cover of {url} is still cached"
+                );
+            }
+            // The cover of the track that just started is cached when it loads.
+            let url = track.thumbnail_url.clone().unwrap_or_default();
+            let pixels = vec![0; (side * side * 4) as usize];
+            app.artwork_cache
+                .insert(url, side, image::Handle::from_rgba(side, side, pixels));
+        }
+        let last = tracks
+            .last()
+            .and_then(|track| track.thumbnail_url.as_deref());
+        assert!(
+            app.artwork_cache
+                .get_exact(last.unwrap_or_default(), side)
+                .is_some()
+        );
     }
 
     #[test]
