@@ -76,7 +76,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "GOOD MORNING." => "BUENOS DÍAS.",
         "GOOD AFTERNOON." => "BUENAS TARDES.",
         "GOOD EVENING." => "BUENAS NOCHES.",
-        "GOOD NIGHT." => "BUENAS NOCHES.",
+        "STILL UP?" => "BUENAS NOCHES.",
         "JUMP BACK IN" => "SEGUIR ESCUCHANDO",
         "FAVORITES" => "FAVORITOS",
         "SUNDAY" => "DOMINGO",
@@ -760,6 +760,11 @@ mod tests {
             translate(UiLanguage::English, "JUMP BACK IN"),
             "JUMP BACK IN"
         );
+        assert_eq!(
+            translate(UiLanguage::Spanish, "STILL UP?"),
+            "BUENAS NOCHES."
+        );
+        assert_eq!(translate(UiLanguage::English, "STILL UP?"), "STILL UP?");
     }
 
     #[test]

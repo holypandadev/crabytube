@@ -42,7 +42,7 @@ const MONTHS: [&str; 12] = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ];
 
-/// The part of the day the greeting names. Night runs from 22:00 to 04:59.
+/// The part of the day the greeting names. Night runs from 00:00 to 04:59; evening runs to midnight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DayPart {
     Morning,
@@ -53,10 +53,10 @@ pub(super) enum DayPart {
 
 pub(super) fn day_part(hour: u8) -> DayPart {
     match hour {
+        0..=4 => DayPart::Night,
         5..=11 => DayPart::Morning,
         12..=17 => DayPart::Afternoon,
-        18..=21 => DayPart::Evening,
-        _ => DayPart::Night,
+        _ => DayPart::Evening,
     }
 }
 
@@ -65,7 +65,7 @@ fn greeting_for(part: DayPart) -> &'static str {
         DayPart::Morning => "GOOD MORNING.",
         DayPart::Afternoon => "GOOD AFTERNOON.",
         DayPart::Evening => "GOOD EVENING.",
-        DayPart::Night => "GOOD NIGHT.",
+        DayPart::Night => "STILL UP?",
     }
 }
 
@@ -332,14 +332,15 @@ mod tests {
             (17, DayPart::Afternoon),
             (18, DayPart::Evening),
             (21, DayPart::Evening),
-            (22, DayPart::Night),
-            (23, DayPart::Night),
+            (22, DayPart::Evening),
+            (23, DayPart::Evening),
         ];
         for (hour, part) in cases {
             assert_eq!(day_part(hour), part, "hour {hour}");
         }
         assert_eq!(greeting_for(DayPart::Afternoon), "GOOD AFTERNOON.");
-        assert_eq!(greeting_for(DayPart::Night), "GOOD NIGHT.");
+        assert_eq!(greeting_for(DayPart::Evening), "GOOD EVENING.");
+        assert_eq!(greeting_for(DayPart::Night), "STILL UP?");
     }
 
     #[test]
