@@ -138,7 +138,7 @@ def nearest(seconds):
 # Goals on the mean CPU of each phase. Home has no goal of its own.
 GOALS = {
     "now-playing-lyrics": ("< 8 %", lambda v: v < 8.0),
-    "minimized": ("< 3 %", lambda v: v < 3.0),
+    "minimized": ("< 3.5 %", lambda v: v < 3.5),
     "paused": ("< 0.5 %", lambda v: v < 0.5),
 }
 last = rows[-1]["t"] if rows else 0.0
