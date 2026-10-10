@@ -38,6 +38,31 @@ impl UiLanguage {
     pub const ALL: [Self; 2] = [Self::English, Self::Spanish];
 }
 
+/// The language for a system locale such as `es_ES.UTF-8` or `es-MX`: Spanish for any Spanish
+/// locale, English for the rest.
+pub fn language_for_locale(locale: &str) -> UiLanguage {
+    let language = locale
+        .trim()
+        .split(['_', '-', '.', '@'])
+        .next()
+        .unwrap_or_default();
+    if language.eq_ignore_ascii_case("es") {
+        UiLanguage::Spanish
+    } else {
+        UiLanguage::English
+    }
+}
+
+/// The language of the system, from the locale variables that POSIX programs read. Other systems
+/// have none of these here, so they start in English.
+pub fn detected_ui_language() -> UiLanguage {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.trim().is_empty())
+        .map_or(UiLanguage::English, |locale| language_for_locale(&locale))
+}
+
 impl std::fmt::Display for UiLanguage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -798,6 +823,18 @@ mod tests {
         assert!(!written.contains("sidebar_collapsed"));
         assert!(!written.contains("artwork_background"));
         assert!(!written.contains("ui_font_family"));
+    }
+
+    #[test]
+    fn a_spanish_locale_starts_in_spanish_and_other_locales_in_english() {
+        assert_eq!(language_for_locale("es_ES.UTF-8"), UiLanguage::Spanish);
+        assert_eq!(language_for_locale("es-MX"), UiLanguage::Spanish);
+        assert_eq!(language_for_locale("ES_AR"), UiLanguage::Spanish);
+        assert_eq!(language_for_locale("es"), UiLanguage::Spanish);
+        assert_eq!(language_for_locale("en_US.UTF-8"), UiLanguage::English);
+        assert_eq!(language_for_locale("C"), UiLanguage::English);
+        // A language whose code only starts with "es" is not Spanish.
+        assert_eq!(language_for_locale("estonian"), UiLanguage::English);
     }
 
     #[test]

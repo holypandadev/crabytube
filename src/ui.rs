@@ -1854,6 +1854,10 @@ impl App {
         match startup_state() {
             Ok(saved) => {
                 app.preferences = saved.preferences.clone();
+                // A first run, with no saved state, follows the system language.
+                if !path.exists() {
+                    app.preferences.ui_language = crate::preferences::detected_ui_language();
+                }
                 app.queue = saved.queue.clone();
                 app.queue_index = saved.queue_index;
                 app.search_history = saved.history.clone();
