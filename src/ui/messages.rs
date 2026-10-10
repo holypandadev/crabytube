@@ -203,6 +203,8 @@ pub(super) enum Message {
         selected: bool,
     },
     SearchChanged(String),
+    /// Escape was pressed on Home or Search; the flag says whether the search field had focus.
+    SearchEscape(bool),
     SearchSubmitted,
     SearchFor(String),
     LoadMoreCatalog,

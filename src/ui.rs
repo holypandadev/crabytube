@@ -1272,6 +1272,18 @@ impl App {
                     }
                 }
             },
+            Message::SearchEscape(focused) => {
+                if !focused {
+                    return self.escape_outside_search();
+                }
+                if self.search_query.is_empty() {
+                    // An empty field gives up the focus; the field itself stays.
+                    return iced::advanced::widget::operate(
+                        iced::advanced::widget::operation::focusable::unfocus(),
+                    );
+                }
+                return self.update(Message::SearchChanged(String::new()));
+            }
             Message::SearchChanged(query) => {
                 // Typing again leaves suggestion browsing.
                 self.typed_query = None;
@@ -1356,21 +1368,21 @@ impl App {
                     if repeat && !(suggestion_arrow && self.show_suggestions) {
                         return Task::none();
                     }
-                    // Escape priority: suggestions > row menu > Now Playing > Settings.
+                    // Escape priority: suggestions > search field > row menu > Now Playing > Settings.
                     if matches!(key, Key::Named(Named::Escape)) {
                         if self.show_suggestions {
                             if let Some(typed) = self.typed_query.take() {
                                 self.search_query = typed;
                             }
                             self.invalidate_suggestions();
-                        } else if self.row_menu.is_some() {
-                            self.row_menu = None;
-                        } else if matches!(self.page, Page::NowPlaying) {
-                            return self.update(Message::CloseNowPlaying);
-                        } else if matches!(self.page, Page::Settings | Page::CollectionDetail(_)) {
-                            return self.update(Message::Back);
+                            return Task::none();
                         }
-                        return Task::none();
+                        if matches!(self.page, Page::Home | Page::Search) {
+                            // Only the focus of the field tells whether Escape is meant for it.
+                            return operation::is_focused("search-field")
+                                .map(Message::SearchEscape);
+                        }
+                        return self.escape_outside_search();
                     }
                     if self.show_suggestions && !self.suggestions.is_empty() {
                         if matches!(key, Key::Named(Named::ArrowDown)) {
@@ -1917,6 +1929,19 @@ impl App {
                 diagnostic_exit,
             ]),
         )
+    }
+
+    /// Escape when the search field does not have the focus: closes the row menu, leaves Now
+    /// Playing, leaves Settings and leaves a collection.
+    fn escape_outside_search(&mut self) -> Task<Message> {
+        if self.row_menu.is_some() {
+            self.row_menu = None;
+        } else if matches!(self.page, Page::NowPlaying) {
+            return self.update(Message::CloseNowPlaying);
+        } else if matches!(self.page, Page::Settings | Page::CollectionDetail(_)) {
+            return self.update(Message::Back);
+        }
+        Task::none()
     }
 
     fn persist(&self) {
@@ -3993,6 +4018,29 @@ mod tests {
             album: None,
             thumbnail_url: None,
         }
+    }
+
+    #[test]
+    fn escape_clears_a_focused_search_field_and_otherwise_leaves_the_query() {
+        let mut app = App {
+            search_query: "daft punk".into(),
+            ..App::default()
+        };
+        let _ = app.update(Message::SearchEscape(true));
+        assert!(app.search_query.is_empty());
+        app.search_query = "kept".into();
+        let _ = app.update(Message::SearchEscape(false));
+        assert_eq!(app.search_query, "kept");
+    }
+
+    #[test]
+    fn escape_outside_the_search_field_still_leaves_now_playing() {
+        let mut app = App {
+            page: Page::NowPlaying,
+            ..App::default()
+        };
+        let _ = app.update(Message::SearchEscape(false));
+        assert_ne!(app.page, Page::NowPlaying);
     }
 
     #[test]

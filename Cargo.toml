@@ -66,12 +66,12 @@ discord-rich-presence = "1.1.0"
 # vendor/iced_tiny_skia) is the default; the "GPU rendering" preference makes
 # Iced try wgpu first and fall back to tiny-skia (see
 # `ui::configure_renderer_from_preferences`).
-iced = { version = "0.14", default-features = false, features = ["image-without-codecs", "svg", "tokio", "tiny-skia", "wgpu", "crisp", "thread-pool", "linux-theme-detection", "x11", "wayland"] }
+iced = { version = "0.14", default-features = false, features = ["advanced", "image-without-codecs", "svg", "tokio", "tiny-skia", "wgpu", "crisp", "thread-pool", "linux-theme-detection", "x11", "wayland"] }
 zbus = "5.19"
 ksni = "0.3.6"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-iced = { version = "0.14", features = ["image-without-codecs", "svg", "tokio"] }
+iced = { version = "0.14", features = ["advanced", "image-without-codecs", "svg", "tokio"] }
 
 [profile.dev]
 # Line tables only: full debug info for this dependency tree (V8, wgpu, OXC)
