@@ -96,6 +96,8 @@ struct App {
     forward: Vec<Page>,
     collection: CollectionState,
     collection_cache: VecDeque<(BrowseTarget, Arc<crate::music::Collection>)>,
+    /// The scroll position last seen in each recently shown collection, most recent first.
+    collection_scrolls: VecDeque<(BrowseTarget, f32)>,
     /// Video ID of the last track whose successor was prefetched.
     prefetch_requested: Option<String>,
     collection_scroll: f32,
@@ -1127,7 +1129,23 @@ impl App {
                             "collection loaded"
                         );
                     }
-                    return self.preload_current_page_artwork();
+                    // Content arrives after the page is laid out, so the remembered position is set here.
+                    let restored = self
+                        .collection
+                        .target
+                        .clone()
+                        .map_or(0.0, |target| self.collection_scroll_for(&target));
+                    self.collection_scroll = restored;
+                    return Task::batch([
+                        operation::scroll_to(
+                            "collection-content",
+                            AbsoluteOffset {
+                                x: 0.0,
+                                y: restored,
+                            },
+                        ),
+                        self.preload_current_page_artwork(),
+                    ]);
                 }
             }
             Message::CollectionMoreLoaded { generation, result } => {
@@ -1183,6 +1201,9 @@ impl App {
             }
             Message::CollectionScrolled(y) => {
                 self.collection_scroll = y;
+                if let Page::CollectionDetail(target) = self.page.clone() {
+                    self.remember_collection_scroll(target, y);
+                }
                 let rows_top = self.collection_rows_offset();
                 let pitch = layout::COLLECTION_ROW_PITCH;
                 let artwork = self.scroll_preload_task();
@@ -1762,6 +1783,7 @@ impl App {
             forward: Vec::new(),
             collection: CollectionState::default(),
             collection_cache: VecDeque::new(),
+            collection_scrolls: VecDeque::new(),
             prefetch_requested: None,
             collection_scroll: 0.0,
             home_scroll: AbsoluteOffset::default(),
@@ -2267,6 +2289,21 @@ impl App {
         self.suggestion_index = None;
     }
 
+    /// The scroll position last seen in a collection, or the top when it was never scrolled.
+    fn collection_scroll_for(&self, target: &BrowseTarget) -> f32 {
+        self.collection_scrolls
+            .iter()
+            .find(|(remembered, _)| remembered == target)
+            .map_or(0.0, |(_, y)| *y)
+    }
+
+    fn remember_collection_scroll(&mut self, target: BrowseTarget, y: f32) {
+        self.collection_scrolls
+            .retain(|(remembered, _)| remembered != &target);
+        self.collection_scrolls.push_front((target, y));
+        self.collection_scrolls.truncate(MAX_REMEMBERED_COLLECTIONS);
+    }
+
     fn push_history(&mut self, query: String) {
         let query = query.trim().to_owned();
         if query.is_empty() || !self.preferences.remember_history {
@@ -2727,6 +2764,8 @@ fn initial_window_size() -> iced::Size {
 
 /// Collections kept in memory for instant back navigation.
 const MAX_CACHED_COLLECTIONS: usize = 4;
+/// Scroll positions kept for collections that were shown recently.
+const MAX_REMEMBERED_COLLECTIONS: usize = 16;
 
 /// Size the layout is designed at. Larger windows zoom the whole interface so
 /// it keeps these proportions instead of spreading out.
@@ -4564,6 +4603,29 @@ mod tests {
         let _ = app.update(Message::ToggleRowMenu(first));
         let _ = app.update(Message::Navigate(Page::Library));
         assert!(app.row_menu.is_none(), "leaving the page closes the menu");
+    }
+
+    #[test]
+    fn each_collection_keeps_its_own_scroll_position() {
+        let mut app = App::default();
+        let album = BrowseTarget {
+            browse_id: "MPREb_album".into(),
+            params: None,
+            page_type: None,
+        };
+        let playlist = BrowseTarget {
+            browse_id: "VLPL1".into(),
+            params: None,
+            page_type: None,
+        };
+        app.page = Page::CollectionDetail(album.clone());
+        let _ = app.update(Message::CollectionScrolled(320.0));
+        assert_eq!(app.collection_scroll_for(&album), 320.0);
+        assert_eq!(app.collection_scroll_for(&playlist), 0.0);
+        app.page = Page::CollectionDetail(playlist.clone());
+        let _ = app.update(Message::CollectionScrolled(80.0));
+        assert_eq!(app.collection_scroll_for(&album), 320.0);
+        assert_eq!(app.collection_scroll_for(&playlist), 80.0);
     }
 
     #[test]

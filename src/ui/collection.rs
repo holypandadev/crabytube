@@ -149,8 +149,16 @@ impl App {
         {
             cancellation.cancel();
             let _ = self.collection.complete_cached(generation, cached);
+            let restored = self.collection_scroll_for(&target);
+            self.collection_scroll = restored;
             return Task::batch([
-                operation::scroll_to("collection-content", AbsoluteOffset::<f32>::default()),
+                operation::scroll_to(
+                    "collection-content",
+                    AbsoluteOffset {
+                        x: 0.0,
+                        y: restored,
+                    },
+                ),
                 self.preload_current_page_artwork(),
             ]);
         }
