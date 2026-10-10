@@ -10,6 +10,9 @@ use iced::{Alignment, Color, Element, Length, Size};
 const PANEL_PADDING: f32 = 16.0;
 const COLUMN_GAP: f32 = 40.0;
 const STACK_BELOW: f32 = 760.0;
+/// Room beside the clear button's label for its padding (12 px each side), its border and the gap
+/// before it, so a queue notice never runs under the button.
+const CLEAR_BUTTON_EXTRA: f32 = 30.0;
 
 /// Widths of the artwork column and the side panel, or `None` when stacked.
 fn now_playing_columns(content: f32) -> Option<(f32, f32)> {
@@ -320,7 +323,7 @@ impl App {
         // The notice takes the room left of the button and is cut short, never wrapped, so the list
         // below keeps its place. The room follows the translated label's width.
         let clear_label = self.tr("Clear up next").into_owned();
-        let clear_width = clear_label.chars().count() as f32 * 12.0 * 0.6 + 30.0;
+        let clear_width = clear_label.chars().count() as f32 * 12.0 * 0.6 + CLEAR_BUTTON_EXTRA;
         let notice: Element<'_, Message> = match self.queue_notice {
             Some(notice) => container(label(
                 fit(&self.queue_notice_text(notice), width - clear_width, 12.0),
