@@ -60,7 +60,16 @@ struct Failure {
     error: String,
 }
 
+/// Limits this process puts on itself, before it reads the request. The app's timeout for a request
+/// is 15 seconds, so the deadline only ends a helper whose app has gone.
+const LIMITS: helper_guard::Limits = helper_guard::Limits {
+    deadline: std::time::Duration::from_secs(60),
+    committed_bytes: 1 << 30,
+    cpu_seconds: 60,
+};
+
 fn main() {
+    helper_guard::confine(LIMITS);
     let result = std::thread::Builder::new()
         .name("js-challenge-oxc".into())
         .stack_size(32 * 1024 * 1024)

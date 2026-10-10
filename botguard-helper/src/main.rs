@@ -48,8 +48,17 @@ struct Failure {
     error: String,
 }
 
+/// Limits this process puts on itself, before it reads the request. The app's timeout for a request
+/// is 20 seconds, so the deadline only ends a helper whose app has gone.
+const LIMITS: helper_guard::Limits = helper_guard::Limits {
+    deadline: std::time::Duration::from_secs(60),
+    committed_bytes: 1 << 30,
+    cpu_seconds: 60,
+};
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    helper_guard::confine(LIMITS);
     if let Err(message) = run().await {
         let _ = serde_json::to_writer(io::stdout().lock(), &Failure { error: message });
         println!();

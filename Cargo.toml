@@ -24,8 +24,8 @@ default = []
 diagnostics = ["iced/debug"]
 
 [workspace]
-members = ["botguard-helper", "js-challenge-helper"]
-default-members = [".", "botguard-helper", "js-challenge-helper"]
+members = ["botguard-helper", "helper-guard", "js-challenge-helper"]
+default-members = [".", "botguard-helper", "helper-guard", "js-challenge-helper"]
 resolver = "3"
 
 [patch.crates-io]
