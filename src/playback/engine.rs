@@ -376,6 +376,7 @@ struct ActiveAudio {
     worker: Sender<WorkerCommand>,
     first_sample_output: Arc<AtomicBool>,
     underruns: Arc<AtomicU64>,
+    drained: Sender<()>,
     selected_at: Instant,
 }
 
@@ -384,6 +385,7 @@ impl ActiveAudio {
     fn source(&self) -> AudioSource {
         AudioSource {
             samples: self.samples.clone(),
+            drained: self.drained.clone(),
             current: Vec::new(),
             index: 0,
             cursor: Arc::clone(&self.cursor),
@@ -399,6 +401,8 @@ impl ActiveAudio {
 
 struct AudioSource {
     samples: Receiver<Vec<f32>>,
+    /// Signalled each time a chunk is taken, so a decoder waiting for room can refill.
+    drained: Sender<()>,
     /// The chunk being played, and the index of its next sample.
     current: Vec<f32>,
     index: usize,
@@ -418,6 +422,8 @@ impl Iterator for AudioSource {
         while self.index == self.current.len() {
             match self.samples.try_recv() {
                 Ok(chunk) => {
+                    // A signal already waiting is enough: the decoder re-checks the buffer when it wakes.
+                    let _ = self.drained.try_send(());
                     self.current = chunk;
                     self.index = 0;
                 }
@@ -917,6 +923,7 @@ async fn actor(
                         }
                         let rodio_source = AudioSource {
                             samples: active_audio.samples.clone(),
+                            drained: active_audio.drained.clone(),
                             current: Vec::new(),
                             index: 0,
                             cursor: Arc::clone(&active_audio.cursor),
@@ -927,7 +934,7 @@ async fn actor(
                             underruns: Arc::clone(&active_audio.underruns),
                             in_underrun: false,
                         };
-                        active = Some(ActiveAudio { samples: active_audio.samples, produced: active_audio.produced, cursor: active_audio.cursor, rate: active_audio.rate.get(), channels: active_audio.channels.get(), duration, worker: active_audio.worker, first_sample_output: active_audio.first_sample_output, underruns: active_audio.underruns, selected_at });
+                        active = Some(ActiveAudio { samples: active_audio.samples, produced: active_audio.produced, cursor: active_audio.cursor, rate: active_audio.rate.get(), channels: active_audio.channels.get(), duration, worker: active_audio.worker, first_sample_output: active_audio.first_sample_output, underruns: active_audio.underruns, drained: active_audio.drained, selected_at });
                         if let Some(position) = resume_at.take() {
                             // The new decoder seeks to where playback stopped first; the Seeked event then starts the output.
                             seek_generation = seek_generation.wrapping_add(1);
@@ -1303,6 +1310,7 @@ struct PreparedAudio {
     worker: Sender<WorkerCommand>,
     first_sample_output: Arc<AtomicBool>,
     underruns: Arc<AtomicU64>,
+    drained: Sender<()>,
     live: bool,
 }
 
@@ -1655,6 +1663,9 @@ where
                 + 2,
         );
         let pump_samples = samples_rx.clone();
+        // The output signals each chunk it takes, so a decoder waiting for room wakes without polling.
+        let (drained_tx, drained_rx) = bounded::<()>(1);
+        let drained_keepalive = drained_tx.clone();
         // The decoder waits once about half a second of chunks is waiting for the output.
         let pump_threshold =
             (rate_u32 as usize * channels_u16 as usize / 2).min(48_000) / AUDIO_CHUNK_SAMPLES;
@@ -1672,6 +1683,7 @@ where
             worker: worker_tx,
             first_sample_output: Arc::clone(&first_sample_output),
             underruns: Arc::clone(&underruns),
+            drained: drained_tx,
             live,
         };
         let mut decoder = decoder;
@@ -1709,6 +1721,8 @@ where
             .name("crabytube-decoder".into())
             .spawn(move || {
                 info!("first audio frame decoded");
+                // Holding a sender keeps the signal channel open for as long as this thread runs.
+                let _drained_open = drained_keepalive;
                 // A chunk that is decoded but not accepted by the channel yet, and whether the
                 // decoder has reached the end of the stream.
                 let mut pending: Option<Vec<f32>> = None;
@@ -1717,14 +1731,16 @@ where
                     if worker_cancellation.is_cancelled() {
                         break;
                     }
-                    // A full output makes the decoder wait for a command instead of spinning.
+                    // A full output parks the decoder until a command arrives or the output takes a chunk.
                     let waiting_for_output =
                         pending.is_none() && !ended && pump_samples.len() > pump_threshold;
                     let command = if waiting_for_output {
-                        match worker_rx.recv_timeout(Duration::from_millis(50)) {
-                            Ok(command) => Some(command),
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => None,
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                        crossbeam_channel::select! {
+                            recv(worker_rx) -> message => match message {
+                                Ok(command) => Some(command),
+                                Err(_) => break,
+                            },
+                            recv(drained_rx) -> _ => None,
                         }
                     } else {
                         match worker_rx.try_recv() {
@@ -1901,6 +1917,7 @@ mod tests {
             duration: None,
             first_sample_output: Arc::clone(&first_sample_output),
             underruns: Arc::clone(&underruns),
+            drained: bounded::<()>(1).0,
             in_underrun: false,
         };
 
@@ -1935,6 +1952,7 @@ mod tests {
             duration: None,
             first_sample_output: Arc::new(AtomicBool::new(false)),
             underruns: Arc::clone(&underruns),
+            drained: bounded::<()>(1).0,
             in_underrun: false,
         };
 
@@ -2154,6 +2172,30 @@ mod tests {
         assert_eq!(super::play_plan(Some("b"), Some("a"), "a"), Awaited);
         assert_eq!(super::play_plan(Some("a"), None, "b"), Resolve);
         assert_eq!(super::play_plan(None, None, "a"), Resolve);
+    }
+
+    #[test]
+    fn taking_a_chunk_signals_the_decoder_that_waits_for_room() {
+        let (sample_tx, samples) = bounded(4);
+        let (drained, signalled) = bounded::<()>(1);
+        sample_tx.send(vec![0.5, 0.5]).unwrap();
+        let mut source = AudioSource {
+            samples,
+            drained,
+            current: Vec::new(),
+            index: 0,
+            cursor: Arc::new(AtomicU64::new(0)),
+            rate: NonZeroU32::new(48_000).unwrap(),
+            channels: NonZeroU16::new(2).unwrap(),
+            duration: None,
+            first_sample_output: Arc::new(AtomicBool::new(false)),
+            underruns: Arc::new(AtomicU64::new(0)),
+            in_underrun: false,
+        };
+        // Nothing is taken yet, so nothing wakes the decoder.
+        assert!(signalled.try_recv().is_err());
+        assert_eq!(source.next(), Some(0.5));
+        assert!(signalled.try_recv().is_ok());
     }
 
     #[test]
