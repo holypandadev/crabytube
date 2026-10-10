@@ -43,8 +43,13 @@ fn masonry_columns(heights: &[f32]) -> Vec<usize> {
         .collect()
 }
 
-fn mib(bytes: u64) -> String {
-    format!("{:.1} MiB", bytes as f64 / 1_048_576.0)
+/// A size in MiB with one decimal place; Spanish writes the decimal separator as a comma.
+fn mib(bytes: u64, language: UiLanguage) -> String {
+    let value = format!("{:.1}", bytes as f64 / 1_048_576.0);
+    match language {
+        UiLanguage::English => format!("{value} MiB"),
+        UiLanguage::Spanish => format!("{} MiB", value.replace('.', ",")),
+    }
 }
 
 impl App {
@@ -567,6 +572,7 @@ impl App {
     fn storage_box(&self, width: f32) -> Section<'_> {
         let usage = self.storage_cache_usage;
         let busy = self.storage_loading;
+        let language = self.preferences.ui_language;
         let action = |title: &'static str, message: Message| -> Element<'_, Message> {
             button(label(self.tr(title).into_owned(), 12.0))
                 .on_press_maybe((!busy).then_some(message))
@@ -579,26 +585,26 @@ impl App {
                 "Artwork Cache",
                 Some(
                     self.tr_static("{} on disk · {} in memory")
-                        .replacen("{}", &mib(usage.artwork_bytes), 1)
-                        .replacen("{}", &mib(self.artwork_cache.bytes() as u64), 1),
+                        .replacen("{}", &mib(usage.artwork_bytes, language), 1)
+                        .replacen("{}", &mib(self.artwork_cache.bytes() as u64, language), 1),
                 ),
                 action("Clear", Message::ClearArtworkCache),
                 width,
             ),
             self.setting(
                 "Lyrics Cache",
-                Some(mib(usage.lyrics_bytes)),
+                Some(mib(usage.lyrics_bytes, language)),
                 action("Clear", Message::ClearLyricsCache),
                 width,
             ),
             self.setting(
                 "Playback Helpers",
-                Some(format!(
-                    "Player {} · BotGuard {} · Home {}",
-                    mib(usage.player_js_bytes),
-                    mib(usage.botguard_bytes),
-                    mib(usage.home_bytes)
-                )),
+                Some(
+                    self.tr_static("Player {} · BotGuard {} · Home {}")
+                        .replacen("{}", &mib(usage.player_js_bytes, language), 1)
+                        .replacen("{}", &mib(usage.botguard_bytes, language), 1)
+                        .replacen("{}", &mib(usage.home_bytes, language), 1),
+                ),
                 row![
                     action("Player", Message::ClearPlayerJsCache),
                     action("BotGuard", Message::ClearBotGuardCache),
@@ -686,7 +692,14 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::masonry_columns;
+    use super::{UiLanguage, masonry_columns, mib};
+
+    #[test]
+    fn storage_sizes_use_a_decimal_comma_only_in_spanish() {
+        assert_eq!(mib(2_306_867, UiLanguage::English), "2.2 MiB");
+        assert_eq!(mib(2_306_867, UiLanguage::Spanish), "2,2 MiB");
+        assert_eq!(mib(0, UiLanguage::Spanish), "0,0 MiB");
+    }
 
     #[test]
     fn each_box_goes_to_the_shorter_column_and_ties_go_left() {
