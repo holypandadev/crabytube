@@ -190,6 +190,8 @@ pub(super) enum Message {
     TrayServiceStarted(Result<bool, String>),
     TrayCommand(crate::tray::TrayCommand),
     SelectTrack(Track),
+    /// Plays the queue entry at this position. A queue row names its place, so a duplicate plays the row clicked.
+    PlayQueueIndex(usize),
     PlayContext(std::sync::Arc<[Track]>, usize),
     PlayCollection(std::sync::Arc<[Track]>, usize, QueueSource),
     ShuffleContext(std::sync::Arc<[Track]>),

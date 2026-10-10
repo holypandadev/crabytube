@@ -250,7 +250,7 @@ impl App {
                 .spacing(20)
                 .align_y(Alignment::Center),
             )
-            .on_press(Message::SelectTrack(entry.clone()))
+            .on_press(Message::PlayQueueIndex(index))
             .width(Length::Fill)
             .padding([8, 8])
             .style(if current {

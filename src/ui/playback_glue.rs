@@ -879,6 +879,12 @@ impl App {
             Message::MprisCommand(command) => {
                 return self.apply_mpris_command(command);
             }
+            Message::PlayQueueIndex(index) => {
+                if let Some(track) = self.queue.get(index).cloned() {
+                    return self.play_queued_track(track, index);
+                }
+                return Task::none();
+            }
             Message::SelectTrack(track) => {
                 // Preserve single-track behaviour for callers without context,
                 // but keep the queue consistent so Prev/Next keep working.

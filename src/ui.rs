@@ -535,6 +535,7 @@ impl App {
             | Message::PlaybackStatusChanged(..)
             | Message::MprisCommand(..)
             | Message::SelectTrack(..)
+            | Message::PlayQueueIndex(..)
             | Message::PlayNext(..)
             | Message::AddToQueue(..) => return self.update_playback(message),
             Message::CatalogCompleted { request_id, result } => {
@@ -4108,6 +4109,26 @@ mod tests {
         assert_eq!(app.queue.len(), 1);
         assert_eq!(app.queue_index, Some(0));
         assert_eq!(app.playback_status.track.as_ref().unwrap().video_id, "solo");
+    }
+
+    #[test]
+    fn a_duplicate_queue_row_plays_the_row_that_was_clicked() {
+        let mut app = App::default();
+        let first = fixture_track("twice");
+        app.queue = vec![first.clone(), fixture_track("other"), first.clone()];
+        app.queue_index = Some(0);
+        let _ = app.update(Message::PlayQueueIndex(2));
+        assert_eq!(
+            app.queue_index,
+            Some(2),
+            "the second copy plays from its own row"
+        );
+        let _ = app.update(Message::PlayQueueIndex(9));
+        assert_eq!(
+            app.queue_index,
+            Some(2),
+            "an index past the queue changes nothing"
+        );
     }
 
     #[test]
