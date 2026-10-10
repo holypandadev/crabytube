@@ -282,9 +282,22 @@ fn write_preprocessed_cache(path: &Path, source_fp: &str, code: &str) -> Result<
         preprocessed: code.to_owned(),
     })
     .map_err(|error| error.to_string())?;
-    let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
-    std::fs::rename(&temporary, path).map_err(|error| error.to_string())
+    let temporary = temporary_beside(path);
+    if let Err(error) = std::fs::write(&temporary, bytes) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.to_string());
+    }
+    std::fs::rename(&temporary, path).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        error.to_string()
+    })
+}
+
+/// A temporary name beside `path` that only this process uses, so two writers never share one.
+fn temporary_beside(path: &Path) -> std::path::PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.tmp", std::process::id()));
+    path.with_file_name(name)
 }
 
 fn read_bounded<R: Read>(reader: R, max_bytes: usize) -> Result<Vec<u8>, String> {
@@ -331,8 +344,21 @@ fn current_rss_kib() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Request, read_bounded, response_value, solve};
+    use super::{Request, read_bounded, response_value, solve, temporary_beside};
     use std::collections::HashMap;
+
+    #[test]
+    fn a_temporary_file_is_named_for_its_writer_beside_the_target() {
+        let target = std::path::Path::new("/cache/player-abc.json");
+        let temporary = temporary_beside(target);
+        assert_eq!(temporary.parent(), target.parent());
+        assert_ne!(temporary, target);
+        assert!(
+            temporary
+                .to_string_lossy()
+                .contains(&std::process::id().to_string())
+        );
+    }
     use std::io::Cursor;
     use ytdlp_ejs::JsChallengeResponse;
 

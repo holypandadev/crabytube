@@ -615,6 +615,22 @@ fn write_snapshot_file(path: &Path, info: &SnapshotInfo, data: &[u8]) -> Result<
     let info =
         serde_json::to_string(info).map_err(|e| Error::InvalidSnapshot(e.to_string().into()))?;
 
+    // Written beside the target and renamed over it, so a crash mid-write keeps the previous snapshot.
+    // The name carries the process id, so two writers never share a temporary file.
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.tmp", std::process::id()));
+    let temporary = path.with_file_name(name);
+    if let Err(error) = write_snapshot_contents(&temporary, &info, data) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
+    }
+    std::fs::rename(&temporary, path).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        Error::from(error)
+    })
+}
+
+fn write_snapshot_contents(path: &Path, info: &str, data: &[u8]) -> Result<(), Error> {
     let mut writer = File::create(path)?;
     writer.write_u32::<BigEndian>(SNAPSHOT_MAGIC)?;
     writer.write_u32::<BigEndian>(
@@ -629,6 +645,7 @@ fn write_snapshot_file(path: &Path, info: &SnapshotInfo, data: &[u8]) -> Result<
             .map_err(|_| Error::InvalidSnapshot("snapshot too long".into()))?,
     )?;
     writer.write_all(data)?;
+    writer.sync_all()?;
     Ok(())
 }
 

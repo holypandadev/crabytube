@@ -51,3 +51,8 @@ crate's `CHANGELOG.md` is not included.
   `WebPoMinter` classes from bgutils-js 4.0.3 (MIT, Copyright (c) 2024 LuanRT), exposed as
   `globalThis.__CRABYTUBE_BgUtils`. `runBotguard` and `newMinter` use these classes (with the
   `globalObject` option of the 4.x API) instead of the bundle's bgutils-js 3.1.3 copies.
+
+### `src/lib.rs`
+
+- `write_snapshot_file` writes beside the target and renames it into place, so a crash mid-write keeps
+  the previous snapshot. The temporary name carries the process id, so writers never share one.
