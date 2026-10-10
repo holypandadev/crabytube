@@ -37,3 +37,8 @@ Everything not listed below is unchanged from the published crate.
    When the `CRABYTUBE_RENDER_STATS` environment variable is set, each presented frame prints its
    damage rectangle count, layer count and draw time to stderr. Without the variable nothing is
    printed.
+
+6. **Image measuring** (`src/raster.rs`, `dimensions`).
+   Upstream measures an image by decoding it into the raster cache, and the cache is trimmed only at
+   the end of a draw. An RGBA handle already carries its width and height, so it is returned as is.
+   Without this, a window that is not drawn (minimized) keeps one decoded copy of every cover laid out.

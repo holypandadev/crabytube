@@ -32,6 +32,13 @@ impl Pipeline {
     }
 
     pub fn dimensions(&self, handle: &raster::Handle) -> Option<Size<u32>> {
+        // Local change 6 (see PATCHES.md): an RGBA handle already carries its size. Decoding it here
+        // would keep a decoded copy in the cache, which is trimmed only while drawing, so a window that
+        // is not drawn (minimized) would keep one copy for every image laid out.
+        if let raster::Handle::Rgba { width, height, .. } = handle {
+            return Some(Size::new(*width, *height));
+        }
+
         let mut cache = self.cache.borrow_mut();
         let image = cache.allocate(handle).ok()?;
 
