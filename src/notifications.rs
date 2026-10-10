@@ -37,12 +37,36 @@ pub async fn show(_notice: TrackNotice) -> u32 {
     0
 }
 
+/// The session bus connection, opened on the first notification and reused for the rest.
+#[cfg(target_os = "linux")]
+static SESSION: std::sync::Mutex<Option<zbus::Connection>> = std::sync::Mutex::new(None);
+
+#[cfg(target_os = "linux")]
+async fn session() -> zbus::Result<zbus::Connection> {
+    if let Some(connection) = SESSION.lock().ok().and_then(|slot| slot.clone()) {
+        return Ok(connection);
+    }
+    let connection = zbus::Connection::session().await?;
+    if let Ok(mut slot) = SESSION.lock() {
+        *slot = Some(connection.clone());
+    }
+    Ok(connection)
+}
+
+/// Drops the cached connection after a failed call, so the next notification connects again.
+#[cfg(target_os = "linux")]
+fn forget_session() {
+    if let Ok(mut slot) = SESSION.lock() {
+        *slot = None;
+    }
+}
+
 #[cfg(target_os = "linux")]
 async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
     use std::collections::HashMap;
     use zbus::zvariant::Value;
 
-    let connection = zbus::Connection::session().await?;
+    let connection = session().await?;
     let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
     // Lets the server match the notification to `crabytube.desktop`.
     hints.insert("desktop-entry", Value::from("crabytube"));
@@ -72,7 +96,8 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
                 EXPIRE_MS,
             ),
         )
-        .await?;
+        .await
+        .inspect_err(|_| forget_session())?;
     reply.body().deserialize::<u32>()
 }
 
