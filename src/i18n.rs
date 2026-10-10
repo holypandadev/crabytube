@@ -198,7 +198,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "About" => "Acerca de",
         "Add to queue" => "Añadir a la cola",
         "Remove from queue" => "Quitar de la cola",
-        "Clear queue" => "Limpiar cola",
+        "Clear up next" => "Vaciar a continuación",
         "Artwork Cache" => "Caché de carátulas",
         "Audio" => "Audio",
         "Changes save automatically" => "Los cambios se guardan solos",

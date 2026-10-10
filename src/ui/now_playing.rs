@@ -320,10 +320,12 @@ impl App {
             .len()
             .saturating_sub(self.queue_index.map_or(0, |current| current + 1));
         // The notice takes the room left of the button and is cut short, never wrapped, so the list
-        // below keeps its place.
+        // below keeps its place. The room follows the translated label's width.
+        let clear_label = self.tr("Clear up next").into_owned();
+        let clear_width = clear_label.chars().count() as f32 * 12.0 * 0.6 + 30.0;
         let notice: Element<'_, Message> = match self.queue_notice {
             Some(notice) => container(label(
-                fit(&self.queue_notice_text(notice), width - 130.0, 12.0),
+                fit(&self.queue_notice_text(notice), width - clear_width, 12.0),
                 12.0,
             ))
             .width(Length::Fill)
@@ -332,7 +334,7 @@ impl App {
         };
         let header = row![
             notice,
-            button(label(self.tr("Clear queue").into_owned(), 12.0))
+            button(label(clear_label, 12.0))
                 .on_press_maybe((upcoming > 0).then_some(Message::ClearUpcomingQueue))
                 .padding([6, 12])
                 .style(theme::outline_button),
