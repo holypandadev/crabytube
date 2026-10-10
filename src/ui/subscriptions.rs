@@ -2,9 +2,6 @@
 
 use super::*;
 
-/// Home's greeting changes once a minute at most. The status line has its own stream, which
-/// reads the process every few seconds. Both run only while Home is on screen.
-const HOME_CLOCK_TICK: std::time::Duration = std::time::Duration::from_secs(60);
 /// Now Playing redraws the lyrics and the queue on every progress tick, so it ticks once a
 /// second when no karaoke wake-up drives it. Elsewhere the progress bar ticks 4 times a second.
 const NOW_PLAYING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
@@ -56,7 +53,7 @@ impl App {
         let home_visible =
             self.page == Page::Home && !self.window_minimized && !self.window_hidden_to_tray;
         let clock = if home_visible {
-            iced::time::every(HOME_CLOCK_TICK).map(|_| Message::ClockTick)
+            Subscription::run(super::home_panels::clock_stream)
         } else {
             Subscription::none()
         };

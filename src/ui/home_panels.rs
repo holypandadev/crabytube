@@ -317,9 +317,48 @@ fn changed(shown: &mut Option<ProcessReading>, reading: ProcessReading) -> bool 
     true
 }
 
+/// The Home clock wakes just after each minute begins, so the minute on screen is never out of
+/// date for long. Minute boundaries are the same in every time zone.
+pub(super) fn clock_stream() -> impl Stream<Item = Message> {
+    iced::stream::channel(1, async |mut output| {
+        loop {
+            tokio::time::sleep(time_to_next_minute(std::time::SystemTime::now())).await;
+            if output.send(Message::ClockTick).await.is_err() {
+                break;
+            }
+        }
+    })
+}
+
+/// The time from `now` until just after the next minute begins. The margin keeps the wake-up on the
+/// new minute when the timer fires a little early.
+fn time_to_next_minute(now: std::time::SystemTime) -> Duration {
+    let since_epoch = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let into_minute = (since_epoch.as_millis() % 60_000) as u64;
+    Duration::from_millis(60_000 - into_minute + 50)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clock_wakes_just_after_each_minute_begins() {
+        let at = |millis: u64| std::time::UNIX_EPOCH + Duration::from_millis(millis);
+        // A minute begins 120 s after the epoch, so the next one is a whole minute away.
+        assert_eq!(
+            time_to_next_minute(at(120_000)),
+            Duration::from_millis(60_050)
+        );
+        // Half a second before the next minute, the wake-up follows in half a second.
+        assert_eq!(time_to_next_minute(at(179_500)), Duration::from_millis(550));
+        assert_eq!(
+            time_to_next_minute(at(150_000)),
+            Duration::from_millis(30_050)
+        );
+    }
 
     #[test]
     fn the_greeting_follows_the_local_hour() {
