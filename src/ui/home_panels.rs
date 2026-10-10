@@ -28,6 +28,8 @@ const CHIP_TEXT_SIZE: f32 = 12.0;
 const CHIP_CHAR_W: f32 = 8.0;
 const CHIP_PADDING: f32 = 26.0;
 const CHIP_GAP: f32 = 8.0;
+/// Button padding (12 px each side), its border and the gap before it, beside the failed-refresh text.
+const REFRESH_RETRY_EXTRA: f32 = 38.0;
 
 const WEEKDAYS: [&str; 7] = [
     "SUNDAY",
@@ -130,6 +132,45 @@ impl App {
                 ..Padding::ZERO
             })
             .into()
+    }
+
+    /// The error of a refresh that failed while shelves from before are still shown. Without shelves
+    /// the empty state reports the same error with its own Retry button.
+    pub(super) fn refresh_error(&self) -> Option<&str> {
+        if self.home_picks.items.is_empty() {
+            return None;
+        }
+        self.home_error.as_deref()
+    }
+
+    /// The line under the greeting that reports a failed refresh and offers to try it again.
+    pub(super) fn refresh_failure_line(&self, layout: &HomeLayout) -> Option<Element<'_, Message>> {
+        let error = self.refresh_error()?;
+        let text = self
+            .tr_static("Could not refresh Home: {}")
+            .replacen("{}", error, 1);
+        let retry = self.tr("Retry").into_owned();
+        // The button is as wide as its label, plus its padding and border, and the gap before it.
+        let retry_room = retry.chars().count() as f32 * 12.0 * 0.6 + REFRESH_RETRY_EXTRA;
+        let line = row![
+            label(fit(&text, layout.search_width - retry_room, 12.0), 12.0).color(DIM),
+            button(label(retry, 12.0))
+                .on_press(Message::ReloadHome)
+                .padding([5, 12])
+                .style(theme::outline_button),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        Some(
+            container(container(line).width(layout.search_width))
+                .width(Length::Fill)
+                .center_x(Length::Fill)
+                .padding(Padding {
+                    bottom: 12.0,
+                    ..Padding::ZERO
+                })
+                .into(),
+        )
     }
 
     /// The recent searches as outlined chips. A click searches for that query again.

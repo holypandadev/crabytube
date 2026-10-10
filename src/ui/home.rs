@@ -499,9 +499,11 @@ impl App {
                 .center_x(Length::Fill)
                 .into()
         };
-        let mut page = column![Space::new().height(layout.top), self.greeting_view(&layout)]
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let mut head = column![Space::new().height(layout.top), self.greeting_view(&layout)];
+        if let Some(line) = self.refresh_failure_line(&layout) {
+            head = head.push(line);
+        }
+        let mut page = head.width(Length::Fill).height(Length::Fill);
         page = page
             .push(container(self.search_field(layout.search_width, true)).center_x(Length::Fill));
         if layout.chips > 0 {

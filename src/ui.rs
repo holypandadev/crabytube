@@ -4639,6 +4639,34 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_refresh_is_reported_only_while_shelves_are_still_shown() {
+        use crate::music::{HomeItem, HomeItemKind};
+        let mut app = App {
+            home_error: Some("offline".into()),
+            ..App::default()
+        };
+        assert_eq!(
+            app.refresh_error(),
+            None,
+            "the empty state reports the error instead"
+        );
+        app.home_picks = home::HomePicks {
+            items: vec![HomeItem {
+                title: "Title".into(),
+                subtitle: "Artist".into(),
+                thumbnail_url: None,
+                kind: HomeItemKind::Song,
+                browse_id: None,
+                browse_target: None,
+                track: Some(fixture_track("a")),
+                duration: None,
+            }],
+            ..home::HomePicks::default()
+        };
+        assert_eq!(app.refresh_error(), Some("offline"));
+    }
+
+    #[test]
     fn reorder_queue_preserves_current_track_and_repeat_one_does_not_block_manual_next() {
         let mut app = App {
             queue: vec![fixture_track("a"), fixture_track("b"), fixture_track("c")].into(),

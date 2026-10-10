@@ -115,6 +115,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Playback failed" => "Falló la reproducción",
         "Ready" => "Listo",
         "Retry" => "Reintentar",
+        "Could not refresh Home: {}" => "No se pudo actualizar Inicio: {}",
         "This collection type is not supported yet." => {
             "Este tipo de colección todavía no es compatible."
         }
