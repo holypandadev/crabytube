@@ -606,13 +606,13 @@ pub fn set_startup(enabled: bool) -> Result<(), String> {
                 Err(e) => Err(e.to_string()),
             };
         }
-        let exe = std::env::current_exe()
-            .map_err(|e| e.to_string())?
-            .to_string_lossy()
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"");
+        let program = autostart_program(
+            std::env::var_os("APPIMAGE"),
+            std::env::current_exe().map_err(|e| e.to_string())?,
+        );
         let content = format!(
-            "[Desktop Entry]\nType=Application\nName=CrabyTube\nExec=\"{exe}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+            "[Desktop Entry]\nType=Application\nName=CrabyTube\nExec={}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+            desktop_exec(&program.to_string_lossy())
         );
         let parent = path.parent().ok_or("Missing autostart directory")?;
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -627,9 +627,75 @@ pub fn set_startup(enabled: bool) -> Result<(), String> {
     }
 }
 
+/// The program that starts at login. From an AppImage that is the image file: the executable inside its
+/// mount disappears when the app exits.
+#[cfg(target_os = "linux")]
+fn autostart_program(
+    appimage: Option<std::ffi::OsString>,
+    exe: std::path::PathBuf,
+) -> std::path::PathBuf {
+    appimage
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or(exe)
+}
+
+/// The value of `Exec=` for `program`. The argument is quoted, with the characters the spec reserves
+/// inside quotes escaped and `%` doubled so no field code is read from the path. The desktop file
+/// format then escapes each backslash of the value.
+#[cfg(target_os = "linux")]
+fn desktop_exec(program: &str) -> String {
+    let mut exec = String::from("\"");
+    for c in program.chars() {
+        match c {
+            '"' | '`' | '$' | '\\' => {
+                exec.push('\\');
+                exec.push(c);
+            }
+            '%' => exec.push_str("%%"),
+            other => exec.push(other),
+        }
+    }
+    exec.push('"');
+    exec.replace('\\', "\\\\")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_exec_value_quotes_the_path_and_escapes_what_the_spec_reserves() {
+        assert_eq!(
+            desktop_exec("/opt/app/CrabyTube"),
+            r#""/opt/app/CrabyTube""#
+        );
+        // A percent sign is a field code unless doubled.
+        assert_eq!(desktop_exec("/x/100%/bin"), r#""/x/100%%/bin""#);
+        // Inside quotes a dollar sign, a backtick, a quote and a backslash are escaped; the file
+        // format then doubles the backslash that escape adds.
+        assert_eq!(desktop_exec("/a$b"), r#""/a\\$b""#);
+        assert_eq!(desktop_exec("/a\"b"), r#""/a\\"b""#);
+        assert_eq!(desktop_exec("/a`b"), r#""/a\\`b""#);
+        assert_eq!(desktop_exec(r"/a\b"), r#""/a\\\\b""#);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_appimage_registers_the_image_rather_than_its_mount() {
+        let exe = std::path::PathBuf::from("/tmp/.mount_CrabyX/usr/bin/crabytube");
+        let image = std::ffi::OsString::from("/home/user/CrabyTube.AppImage");
+        assert_eq!(
+            autostart_program(Some(image), exe.clone()),
+            std::path::PathBuf::from("/home/user/CrabyTube.AppImage")
+        );
+        assert_eq!(autostart_program(None, exe.clone()), exe);
+        assert_eq!(
+            autostart_program(Some(std::ffi::OsString::new()), exe.clone()),
+            exe
+        );
+    }
 
     #[test]
     fn saved_state_is_readable_only_by_the_owner_on_unix() {
