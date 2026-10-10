@@ -374,9 +374,13 @@ impl BotguardHelper {
             .stdin
             .take()
             .ok_or_else(|| PoTokenError::Helper("stdin unavailable".into()))?;
-        stdin
-            .write_all(&request)
-            .await
+        // The write is bounded like the wait: a helper that stops reading must not hang the request.
+        let written = tokio::select! {
+            _ = cancel.cancelled() => return Err(PoTokenError::Cancelled),
+            result = tokio::time::timeout(BOTGUARD_HELPER_TIMEOUT, stdin.write_all(&request)) => result,
+        };
+        written
+            .map_err(|_| PoTokenError::Helper("BotGuard helper did not read its input".into()))?
             .map_err(|error| PoTokenError::Helper(error.to_string()))?;
         drop(stdin);
         // A stuck helper is killed when the timed-out future drops the child (kill_on_drop).
