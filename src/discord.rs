@@ -234,16 +234,17 @@ fn now_millis() -> i64 {
 }
 
 fn build_activity(presence: &Presence, start_ms: i64) -> activity::Activity<'static> {
-    let title = bounded(&presence.title, 120);
+    let title = activity_text(bounded(&presence.title, 120));
     let artist = bounded(&presence.artist, 120);
+    let state = if presence.paused {
+        format!("{} · {artist}", presence.paused_label)
+    } else {
+        artist
+    };
     let mut activity = activity::Activity::new()
         .name("CrabyTube")
         .details(title.clone())
-        .state(if presence.paused {
-            format!("{} · {artist}", presence.paused_label)
-        } else {
-            artist
-        })
+        .state(activity_text(state))
         .activity_type(activity::ActivityType::Listening);
 
     if !presence.paused {
@@ -291,6 +292,16 @@ fn bounded(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
 }
 
+/// Discord drops activity text shorter than two characters, so short text gets blank braille cells.
+/// They render as nothing and are not whitespace, so they survive trimming on Discord's side.
+fn activity_text(value: String) -> String {
+    let mut text = value;
+    while text.chars().count() < 2 {
+        text.push('\u{2800}');
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,6 +333,13 @@ mod tests {
     #[test]
     fn presence_text_is_bounded_for_discord_limits() {
         assert_eq!(bounded(&"a".repeat(200), 120).len(), 120);
+    }
+
+    #[test]
+    fn short_activity_text_is_padded_to_the_two_character_minimum() {
+        assert_eq!(activity_text("A".into()).chars().count(), 2);
+        assert_eq!(activity_text(String::new()).chars().count(), 2);
+        assert_eq!(activity_text("Abc".into()), "Abc");
     }
 
     #[test]
