@@ -250,10 +250,6 @@ use tokio_util::sync::CancellationToken;
 fn client() -> Option<&'static reqwest::Client> {
     crate::network::shared().ok()
 }
-#[allow(dead_code)]
-fn cache_path(url: &str) -> std::path::PathBuf {
-    variant_cache_path(url, LARGE_MAX)
-}
 
 /// Persistent cache keyed by (URL, variant, version) so 128/192/320px
 /// thumbs survive RAM eviction without forcing a 640px download per row.
@@ -327,10 +323,6 @@ fn atomic_save_png(path: &std::path::Path, image: &::image::RgbaImage) -> bool {
         let _ = std::fs::remove_file(&tmp);
         false
     }
-}
-#[allow(dead_code)]
-fn artwork_request_url(url: &str) -> String {
-    artwork_request_url_for(url, 800)
 }
 
 fn artwork_request_url_for(url: &str, width: u32) -> String {
@@ -555,21 +547,9 @@ async fn fetch_in_lane(
     .ok()
     .flatten()
 }
-#[allow(dead_code)]
-fn cached_handle(path: std::path::PathBuf) -> Option<image::Handle> {
-    cached_handle_sized(path, LARGE_MAX)
-}
 fn cached_handle_sized(path: std::path::PathBuf, max_dim: u32) -> Option<image::Handle> {
     let image = thumbnail_sized(&std::fs::read(path).ok()?, max_dim)?;
     Some(rgba_handle(image))
-}
-#[allow(dead_code)]
-fn cached_or_remove(path: std::path::PathBuf) -> Option<image::Handle> {
-    let handle = cached_handle(path.clone());
-    if handle.is_none() {
-        let _ = std::fs::remove_file(path);
-    }
-    handle
 }
 fn cached_or_remove_sized(path: std::path::PathBuf, max_dim: u32) -> Option<image::Handle> {
     let handle = cached_handle_sized(path.clone(), max_dim);
@@ -591,10 +571,6 @@ fn read_image(bytes: &[u8]) -> Option<::image::DynamicImage> {
     limits.max_alloc = Some(16 * 1024 * 1024);
     reader.limits(limits);
     reader.decode().ok()
-}
-#[allow(dead_code)]
-fn thumbnail(bytes: &[u8]) -> Option<::image::RgbaImage> {
-    thumbnail_sized(bytes, LARGE_MAX)
 }
 fn thumbnail_sized(bytes: &[u8], max_dim: u32) -> Option<::image::RgbaImage> {
     // Keep disk, CPU and GPU artwork bounded even when a provider sends large originals.
@@ -706,6 +682,24 @@ fn trim_cache_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The sizes the tests check: the request for a default-width cover, and the cache and
+    // thumbnail readers at the largest size.
+    fn artwork_request_url(url: &str) -> String {
+        artwork_request_url_for(url, 800)
+    }
+
+    fn cached_handle(path: std::path::PathBuf) -> Option<image::Handle> {
+        cached_handle_sized(path, LARGE_MAX)
+    }
+
+    fn cached_or_remove(path: std::path::PathBuf) -> Option<image::Handle> {
+        cached_or_remove_sized(path, LARGE_MAX)
+    }
+
+    fn thumbnail(bytes: &[u8]) -> Option<::image::RgbaImage> {
+        thumbnail_sized(bytes, LARGE_MAX)
+    }
 
     #[test]
     fn video_frames_are_cropped_to_square_without_letterbox_bars() {
