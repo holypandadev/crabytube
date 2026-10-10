@@ -562,6 +562,13 @@ impl App {
         if self.queue_generation != queue_before {
             self.row_menu = None;
         }
+        // While synced lyrics are on screen the progress tick is off and their wake-ups drive the
+        // view, so one must always be on its way. Opening the Lyrics tab, lyrics that arrive and a
+        // resume can all turn the lyrics on without a status update to arm it.
+        let task = match self.arm_karaoke_wake() {
+            Some(wake) => Task::batch([task, wake]),
+            None => task,
+        };
         self.mpris.update(self.mpris_player_state());
         #[cfg(feature = "diagnostics")]
         timing::record_update(name, started.elapsed());
@@ -3454,6 +3461,43 @@ mod tests {
         assert!(
             (Duration::from_millis(500)..=Duration::from_millis(530)).contains(&wait),
             "wait was {wait:?}"
+        );
+    }
+
+    #[test]
+    fn opening_the_lyrics_tab_while_playing_arms_a_wake_up() {
+        let line = |start: f64, text: &str| crate::lyrics::Line {
+            start,
+            end: None,
+            text: text.into(),
+            words: Vec::new(),
+            translation: None,
+            romanization: None,
+            background: None,
+        };
+        let mut app = App {
+            page: Page::NowPlaying,
+            now_playing_tab: super::NowPlayingTab::Queue,
+            lyrics: Some(crate::lyrics::Lyrics {
+                source: "line-timed".into(),
+                lines: vec![line(10.0, "first"), line(13.0, "second")],
+                plain: None,
+            }),
+            ..App::default()
+        };
+        app.playback_status = PlaybackStatus {
+            track: Some(song("Track")),
+            position: Duration::from_secs_f64(12.5),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        };
+        assert!(!app.karaoke_tick_pending);
+        // The progress tick stops once the lyrics show, so the tab change itself must arm one.
+        drop(app.update(Message::SetNowPlayingTab(super::NowPlayingTab::Lyrics)));
+        assert!(app.karaoke_active());
+        assert!(
+            app.karaoke_tick_pending,
+            "the lyrics would never move again"
         );
     }
 
