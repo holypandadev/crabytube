@@ -576,11 +576,11 @@ impl App {
         let mut rows = vec![
             self.setting(
                 "Artwork Cache",
-                Some(format!(
-                    "{} on disk · {} in memory",
-                    mib(usage.artwork_bytes),
-                    mib(self.artwork_cache.bytes() as u64)
-                )),
+                Some(
+                    self.tr_static("{} on disk · {} in memory")
+                        .replacen("{}", &mib(usage.artwork_bytes), 1)
+                        .replacen("{}", &mib(self.artwork_cache.bytes() as u64), 1),
+                ),
                 action("Clear", Message::ClearArtworkCache),
                 width,
             ),

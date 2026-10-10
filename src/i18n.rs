@@ -66,6 +66,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "STILL UP?" => "BUENAS NOCHES.",
         "JUMP BACK IN" => "SEGUIR ESCUCHANDO",
         "FAVORITES" => "FAVORITOS",
+        "{} on disk · {} in memory" => "{} en disco · {} en memoria",
         "SUNDAY" => "DOMINGO",
         "MONDAY" => "LUNES",
         "TUESDAY" => "MARTES",
@@ -578,6 +579,19 @@ mod tests {
             "BUENAS NOCHES."
         );
         assert_eq!(translate(UiLanguage::English, "STILL UP?"), "STILL UP?");
+    }
+
+    #[test]
+    fn the_storage_and_status_labels_are_translated() {
+        assert_eq!(translate(UiLanguage::Spanish, "FAVORITES"), "FAVORITOS");
+        assert_eq!(
+            translate(UiLanguage::Spanish, "{} on disk · {} in memory"),
+            "{} en disco · {} en memoria"
+        );
+        assert_eq!(
+            translate(UiLanguage::English, "{} on disk · {} in memory"),
+            "{} on disk · {} in memory"
+        );
     }
 
     #[test]
