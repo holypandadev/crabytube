@@ -1339,7 +1339,21 @@ impl App {
             }
             Message::KeyPressed(event) => {
                 use iced::keyboard::{Event as KeyEvent, Key, key::Named};
-                if let KeyEvent::KeyPressed { key, modifiers, .. } = event {
+                if let KeyEvent::KeyPressed {
+                    key,
+                    modifiers,
+                    physical_key,
+                    repeat,
+                    ..
+                } = event
+                {
+                    // A held key repeats. Only the arrows that move through suggestions follow the repeats;
+                    // every other shortcut acts once per press.
+                    let suggestion_arrow =
+                        matches!(key, Key::Named(Named::ArrowDown | Named::ArrowUp));
+                    if repeat && !(suggestion_arrow && self.show_suggestions) {
+                        return Task::none();
+                    }
                     // Escape priority: suggestions > row menu > Now Playing > Settings.
                     if matches!(key, Key::Named(Named::Escape)) {
                         if self.show_suggestions {
@@ -1372,7 +1386,8 @@ impl App {
                             return self.highlight_suggestion(prev);
                         }
                     }
-                    if matches!(key, Key::Character(ref c) if c.as_str() == "k")
+                    // Matched by the physical key, so the shortcut works on any keyboard layout.
+                    if key.to_latin(physical_key) == Some('k')
                         && (modifiers.control() || modifiers.command())
                     {
                         let focus = operation::focus("search-field");
@@ -3572,6 +3587,52 @@ mod tests {
         let _ = app.update(Message::KeyPressed(escape));
         assert_eq!(app.page, Page::Search);
         assert_eq!(app.search_scroll.y, 480.0);
+    }
+
+    #[test]
+    fn a_held_key_acts_once_and_ctrl_k_follows_the_physical_key() {
+        use iced::keyboard::{Event as KeyEvent, Key, Modifiers, key::Named};
+        let mut app = App::default();
+        let _ = app.update(Message::Navigate(Page::Settings));
+        let press =
+            |key: Key, physical: iced::keyboard::key::Code, modifiers: Modifiers, repeat: bool| {
+                KeyEvent::KeyPressed {
+                    modified_key: key.clone(),
+                    key,
+                    physical_key: iced::keyboard::key::Physical::Code(physical),
+                    location: iced::keyboard::Location::Standard,
+                    modifiers,
+                    text: None,
+                    repeat,
+                }
+            };
+        let _ = app.update(Message::KeyPressed(press(
+            Key::Named(Named::Escape),
+            iced::keyboard::key::Code::Escape,
+            Modifiers::empty(),
+            true,
+        )));
+        assert_eq!(
+            app.page,
+            Page::Settings,
+            "a held Escape must not leave the page"
+        );
+        let _ = app.update(Message::KeyPressed(press(
+            Key::Named(Named::Escape),
+            iced::keyboard::key::Code::Escape,
+            Modifiers::empty(),
+            false,
+        )));
+        assert_ne!(app.page, Page::Settings, "a single Escape leaves the page");
+
+        let _ = app.update(Message::Navigate(Page::Settings));
+        let _ = app.update(Message::KeyPressed(press(
+            Key::Character("к".into()),
+            iced::keyboard::key::Code::KeyK,
+            Modifiers::CTRL,
+            false,
+        )));
+        assert_eq!(app.page, Page::Home, "Ctrl+K works with a non-Latin layout");
     }
 
     #[test]
