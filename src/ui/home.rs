@@ -5,7 +5,7 @@ use super::theme::{self, DIM, FADED, INK, MONO, RULE, hrule, icon, label};
 use super::{App, Message};
 use crate::music::{HomeItem, HomeItemKind, Track};
 use iced::widget::{
-    Space, button, column, container, pin, row, scrollable, stack, text, text_input,
+    Space, button, column, container, mouse_area, pin, row, scrollable, stack, text, text_input,
 };
 use iced::{Alignment, Element, Length, Size};
 use std::sync::Arc;
@@ -452,6 +452,11 @@ impl App {
         x: f32,
         y: f32,
     ) -> Element<'a, Message> {
+        // A press that no control takes dismisses the suggestions: controls capture their own
+        // presses, so the field and the suggestion rows keep theirs.
+        let base: Element<'a, Message> = mouse_area(base)
+            .on_press(Message::DismissSuggestions)
+            .into();
         // Always a stack: swapping the tree's shape when suggestions appear
         // would rebuild the search field and drop its focus mid-word.
         let overlay = self

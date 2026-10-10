@@ -1349,7 +1349,11 @@ impl App {
                 return Task::batch([navigation, search]);
             }
             Message::DismissSuggestions => {
-                self.invalidate_suggestions();
+                // Only a page press with suggestions on screen dismisses them; otherwise it
+                // would cancel a request that is still on its way.
+                if self.show_suggestions {
+                    self.invalidate_suggestions();
+                }
             }
             Message::KeyPressed(event) => {
                 use iced::keyboard::{Event as KeyEvent, Key, key::Named};
@@ -4493,6 +4497,18 @@ mod tests {
         let _ = app.update(Message::SearchSubmitted);
         assert!(app.search_loading);
         assert!(app.search_committed);
+        assert!(!app.show_suggestions);
+    }
+
+    #[test]
+    fn a_page_press_with_no_suggestions_on_screen_cancels_nothing() {
+        let mut app = App {
+            page: Page::Search,
+            ..App::default()
+        };
+        let before = app.suggest_request_id;
+        let _ = app.update(Message::DismissSuggestions);
+        assert_eq!(app.suggest_request_id, before);
         assert!(!app.show_suggestions);
     }
 
