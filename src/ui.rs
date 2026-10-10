@@ -1398,6 +1398,14 @@ impl App {
                         }
                         return Task::batch([self.navigate(Page::Home), focus]);
                     }
+                    // Alt+← and Alt+→ move through the history, as the mouse side buttons do.
+                    if modifiers.alt() {
+                        match key {
+                            Key::Named(Named::ArrowLeft) => return self.update(Message::Back),
+                            Key::Named(Named::ArrowRight) => return self.update(Message::Forward),
+                            _ => {}
+                        }
+                    }
                     // Global playback keys; text fields capture their own keys first.
                     if modifiers.is_empty() || modifiers.shift() {
                         match key {
@@ -3568,6 +3576,29 @@ mod tests {
         let _ = app.update(Message::Back);
         assert_eq!(app.page, Page::Home);
         assert!(app.history.is_empty());
+    }
+
+    #[test]
+    fn alt_arrows_move_back_and_forward_through_the_history() {
+        use iced::keyboard::{Event as KeyEvent, Key, Modifiers, key::Named};
+        let arrow = |named: Named| KeyEvent::KeyPressed {
+            key: Key::Named(named),
+            modified_key: Key::Named(named),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: Modifiers::ALT,
+            text: None,
+            repeat: false,
+        };
+        let mut app = App::default();
+        let _ = app.update(Message::Navigate(Page::Search));
+        let _ = app.update(Message::Navigate(Page::Library));
+        let _ = app.update(Message::KeyPressed(arrow(Named::ArrowLeft)));
+        assert_eq!(app.page, Page::Search);
+        let _ = app.update(Message::KeyPressed(arrow(Named::ArrowRight)));
+        assert_eq!(app.page, Page::Library);
     }
 
     #[test]

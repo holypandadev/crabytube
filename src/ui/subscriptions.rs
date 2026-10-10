@@ -97,6 +97,59 @@ impl App {
                 height: size.height,
             }),
             iced::keyboard::listen().map(Message::KeyPressed),
+            iced::event::listen_with(mouse_navigation),
         ])
+    }
+}
+
+/// The mouse back and forward buttons navigate, like Alt+← and Alt+→.
+fn mouse_navigation(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    match event {
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Back)) => {
+            Some(Message::Back)
+        }
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Forward)) => {
+            Some(Message::Forward)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mouse_back_and_forward_buttons_navigate_and_other_buttons_do_not() {
+        let window = iced::window::Id::unique();
+        let press = |button| iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button));
+        assert!(matches!(
+            mouse_navigation(
+                press(iced::mouse::Button::Back),
+                iced::event::Status::Ignored,
+                window
+            ),
+            Some(Message::Back)
+        ));
+        assert!(matches!(
+            mouse_navigation(
+                press(iced::mouse::Button::Forward),
+                iced::event::Status::Ignored,
+                window
+            ),
+            Some(Message::Forward)
+        ));
+        assert!(
+            mouse_navigation(
+                press(iced::mouse::Button::Left),
+                iced::event::Status::Ignored,
+                window
+            )
+            .is_none()
+        );
     }
 }
