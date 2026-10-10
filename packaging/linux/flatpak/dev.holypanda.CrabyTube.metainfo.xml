@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.holypanda.CrabyTube</id>
+  <name>CrabyTube</name>
+  <summary>Lightweight YouTube Music player</summary>
+  <developer id="dev.holypanda">
+    <name>Holy Panda</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>CrabyTube is a native player for YouTube Music. It needs no browser, no Electron and no account.</p>
+    <ul>
+      <li>Search, Home with recent searches and collections, and your favorite songs</li>
+      <li>Queue with shuffle, repeat and reordering</li>
+      <li>Synced lyrics that follow the playback</li>
+      <li>Media keys and desktop media controls (MPRIS)</li>
+      <li>Tray icon and track notifications</li>
+      <li>Optional Discord rich presence</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">dev.holypanda.CrabyTube.desktop</launchable>
+  <url type="homepage">https://github.com/holypandadev/crabytube</url>
+  <url type="bugtracker">https://github.com/holypandadev/crabytube/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Home</caption>
+      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/main/docs/screenshots/home.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Now Playing</caption>
+      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/main/docs/screenshots/now-playing.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Playlist</caption>
+      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/main/docs/screenshots/playlist.webp</image>
+    </screenshot>
+    <screenshot>
+      <caption>Search</caption>
+      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/main/docs/screenshots/search.webp</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>crabytube</binary>
+  </provides>
+</component>

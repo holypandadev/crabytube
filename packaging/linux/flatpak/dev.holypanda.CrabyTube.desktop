@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=CrabyTube
+GenericName=Music Player
+Comment=Lightweight YouTube Music player
+Exec=crabytube
+Icon=dev.holypanda.CrabyTube
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;youtube;player;
+# The window still reports the app id "crabytube", so the desktop entry is matched by this class.
+StartupWMClass=crabytube
