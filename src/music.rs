@@ -190,24 +190,7 @@ impl MusicError {
 
 #[async_trait]
 pub trait MusicService: Send + Sync {
-    async fn search(&self, query: &str) -> Result<Vec<Track>, MusicError>;
-    async fn search_catalog(&self, query: &str) -> Result<Vec<HomeItem>, MusicError> {
-        Ok(self
-            .search(query)
-            .await?
-            .into_iter()
-            .map(|track| HomeItem {
-                title: track.title.clone(),
-                subtitle: track.artist.clone(),
-                thumbnail_url: track.thumbnail_url.clone(),
-                kind: HomeItemKind::Song,
-                browse_id: None,
-                browse_target: None,
-                track: Some(track),
-                duration: None,
-            })
-            .collect())
-    }
+    async fn search_catalog(&self, query: &str) -> Result<Vec<HomeItem>, MusicError>;
     async fn search_catalog_filtered(
         &self,
         query: &str,
@@ -625,46 +608,6 @@ impl MusicService for YouTubeMusicService {
         tracks.retain(|t| t.video_id != video_id && seen.insert(t.video_id.clone()));
         Ok(tracks)
     }
-    async fn search(&self, query: &str) -> Result<Vec<Track>, MusicError> {
-        let mut request = self.client()?
-            .post("https://music.youtube.com/youtubei/v1/search?alt=json&key=AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30")
-            .header("X-YouTube-Client-Name", "67")
-            .header("X-YouTube-Client-Version", client_version())
-            .header("Origin", "https://music.youtube.com");
-        if let Some(visitor_data) = self.session.visitor_data() {
-            request = request.header("X-Goog-Visitor-Id", visitor_data);
-        }
-        let response = request
-            .json(&json!({
-                "context": {
-                    "client": {
-                        "clientName": "WEB_REMIX",
-                        "clientVersion": client_version(),
-                        "hl": content_language(),
-                        "gl": "US"
-                    },
-                    "user": {}
-                },
-                "query": query
-            }))
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            return Err(MusicError::HttpStatus(response.status()));
-        }
-
-        let payload = response_json(response, MAX_INNERTUBE_RESPONSE_BYTES).await?;
-        self.session.update_visitor_data(
-            payload
-                .pointer("/responseContext/visitorData")
-                .and_then(Value::as_str),
-        );
-        parse_search_results(&payload).ok_or_else(|| {
-            MusicError::InvalidResponse("search result sections were missing".into())
-        })
-    }
-
     async fn home(&self) -> Result<Vec<HomeShelf>, MusicError> {
         let target = BrowseTarget {
             browse_id: "FEmusic_home".into(),
@@ -769,50 +712,6 @@ impl MusicService for YouTubeMusicService {
         }
         Ok(suggestions)
     }
-}
-
-pub(crate) fn client_version() -> String {
-    let days = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| (duration.as_secs() / 86_400) as i64)
-        .unwrap_or(0);
-    let (year, month, day) = civil_from_days(days);
-    format!("1.{year:04}{month:02}{day:02}.01.00")
-}
-
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let mut year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    if month <= 2 {
-        year += 1;
-    }
-    (year, month, day)
-}
-
-fn parse_search_results(payload: &Value) -> Option<Vec<Track>> {
-    let sections = payload
-        .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")?
-        .as_array()?;
-
-    let tracks = sections
-        .iter()
-        .take(MAX_FEED_SHELVES)
-        .filter_map(|section| section.get("itemSectionRenderer"))
-        .filter_map(|section| section.get("contents"))
-        .filter_map(Value::as_array)
-        .flatten()
-        .take(MAX_CATALOG_ITEMS)
-        .filter_map(|item| item.get("musicResponsiveListItemRenderer"))
-        .filter_map(parse_track)
-        .collect();
-    Some(tracks)
 }
 
 /// Token for the next page of a Home feed or of one of its continuations.
@@ -1411,10 +1310,6 @@ pub(super) fn bound_catalog_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_owned()
 }
 
-fn parse_track(renderer: &Value) -> Option<Track> {
-    browse::parse_catalog_track(renderer).map(|entry| entry.track)
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1439,8 +1334,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        CatalogFilter, HomeItemKind, Track, parse_catalog_results, parse_radio,
-        parse_search_results, parse_suggestions,
+        CatalogFilter, HomeItemKind, parse_catalog_results, parse_radio, parse_suggestions,
     };
 
     #[test]
@@ -1479,51 +1373,6 @@ mod tests {
         assert_eq!(items[0].kind, HomeItemKind::Song);
         assert_eq!(items[0].track.as_ref().unwrap().video_id, "next-song");
         assert_eq!(continuation.unwrap().token, "next-token");
-    }
-
-    #[test]
-    fn parses_song_results_and_skips_non_track_items() {
-        let response = json!({
-            "contents": {
-                "tabbedSearchResultsRenderer": {
-                    "tabs": [{
-                        "tabRenderer": {
-                            "content": {"sectionListRenderer": {"contents": [
-                                {"musicCardShelfRenderer": {"contents": []}},
-                                {"itemSectionRenderer": {"contents": [{
-                                    "musicResponsiveListItemRenderer": {
-                                        "playlistItemData": {"videoId": "test-video"},
-                                        "flexColumns": [
-                                            {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Test Song"}]}}},
-                                            {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
-                                                {"text": "Song"}, {"text": " • "},
-                                                {"text": "Test Artist", "navigationEndpoint": {"browseEndpoint": {"browseId": "artist-id"}}}
-                                            ]}}}
-                                        ],
-                                        "thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
-                                            {"url": "https://example.test/small.jpg"},
-                                            {"url": "https://example.test/large.jpg"}
-                                        ]}}}
-                                    }
-                                }]}}
-                            ]}}
-                        }
-                    }]
-                }
-            }
-        });
-
-        assert_eq!(
-            parse_search_results(&response),
-            Some(vec![Track {
-                duration_secs: None,
-                video_id: "test-video".into(),
-                title: "Test Song".into(),
-                artist: "Test Artist".into(),
-                album: None,
-                thumbnail_url: Some("https://example.test/large.jpg".into()),
-            }])
-        );
     }
 
     #[test]
@@ -1602,11 +1451,6 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].video_id, "first");
         assert_eq!(tracks[0].artist, "Artist");
-    }
-
-    #[test]
-    fn missing_search_envelope_is_reported_as_malformed() {
-        assert_eq!(parse_search_results(&json!({"contents": {}})), None);
     }
 
     #[test]
