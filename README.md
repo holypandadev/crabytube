@@ -42,10 +42,16 @@
   cookies.
 - No telemetry, analytics or crash reporting.
 - Network requests go only to the services needed for the features you use: YouTube Music,
-  YouTube and Google servers (catalog, artwork, audio and the BotGuard challenge), and LRCLIB and
-  Better Lyrics when the Lyrics tab is open (they receive the track's title and artist; Better
-  Lyrics also receives the album, duration and YouTube video ID).
+  YouTube and Google servers (catalog, artwork, audio and the BotGuard challenge), and the lyrics
+  services LRCLIB and Better Lyrics (see below).
   Discord Rich Presence (off by default) talks only to the Discord client running on your computer.
+- Lyrics are requested from LRCLIB and Better Lyrics (api.betterlyrics.org). A request carries the
+  track's title, artist, album, duration and YouTube video ID. Lyrics are requested when the Lyrics
+  tab is open, and also near the end of a track for the next track in the queue, so they are ready
+  when that track starts. Fetched lyrics are cached on this computer for 30 days.
+- The track that plays and the next one are downloaded to a temporary folder in the cache directory
+  while they play. Files left behind by a crash are removed when CrabyTube starts, once they are old
+  enough not to be in use.
 - The `CRABYTUBE_NETWORK_DIAGNOSTICS` environment variable, meant for troubleshooting, makes one
   request to `api64.ipify.org` and logs only the address family and a truncated hash of the public
   address. It is off unless you set it.
@@ -55,7 +61,7 @@
 CrabyTube is an unofficial client. It is not affiliated with, endorsed by, or sponsored by Google
 or YouTube. YouTube and YouTube Music are trademarks of Google LLC; other trademarks belong to their
 respective owners. CrabyTube is intended for personal use. It streams music for listening and has
-no download feature; audio is only buffered temporarily while it plays.
+no download feature; audio is only kept temporarily in the cache while it plays.
 
 ## License
 
