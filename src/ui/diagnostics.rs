@@ -55,7 +55,11 @@ impl App {
                         self.update(Message::Navigate(Page::Library))
                     }
                     6 => self.update(Message::OpenNowPlaying),
-                    7 => {
+                    // Opened without a seek: a seek sends a new status, which would hide a view
+                    // that stopped following. Step 8 only waits; its capture checks the position.
+                    7 => self.update(Message::SetNowPlayingTab(NowPlayingTab::Lyrics)),
+                    8 => Task::none(),
+                    9 => {
                         let open = self.update(Message::SetNowPlayingTab(NowPlayingTab::Lyrics));
                         // The capture shows a part of the song with an active line and word timing.
                         // CRABYTUBE_TOUR_LYRICS_AT=<seconds> picks another part, for example a line with background vocals.
@@ -66,18 +70,18 @@ impl App {
                         let seek = self.update(Message::SeekTo(at));
                         Task::batch([open, seek])
                     }
-                    8 => Task::batch([
+                    10 => Task::batch([
                         self.update(Message::Navigate(Page::Settings)),
                         operation::scroll_to(
                             "settings-content",
                             AbsoluteOffset { x: 0.0, y: 700.0 },
                         ),
                     ]),
-                    9 => match diagnostic_collection(self) {
+                    11 => match diagnostic_collection(self) {
                         Some(target) => self.update(Message::OpenCollection(target)),
                         None => Task::none(),
                     },
-                    10 => {
+                    12 => {
                         // The first song of the results, with its ••• actions open.
                         let song = self
                             .catalog_results
@@ -95,7 +99,7 @@ impl App {
                             None => navigation,
                         }
                     }
-                    11 => {
+                    13 => {
                         // The results scroll under the floating field. The row menu from the
                         // previous step closes first, so the capture shows the rows only.
                         let first = self
@@ -225,6 +229,7 @@ impl App {
                         "diagnostic capture taken without its condition"
                     );
                 }
+                diagnostic_check_lyrics_position(self, step);
                 diagnostic_wait_done();
                 return iced::window::latest()
                     .and_then(iced::window::screenshot)
@@ -311,9 +316,10 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
     let _ = DIAGNOSTIC_AUTOPLAY.set(request);
 }
 
-/// `--screenshots <dir>`: page name and the wait before each capture.
+/// `--screenshots <dir>`: page name and the wait before each capture. Steps 7 and 8 open the
+/// lyrics without a seek and check that the position moved on between their captures.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 12] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 14] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -321,6 +327,8 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 12] = [
     ("home-carousel-step", 1_500),
     ("favorites", 2_500),
     ("now-playing", 2_500),
+    ("lyrics-no-seek", 1_000),
+    ("lyrics-no-seek-later", 3_000),
     ("lyrics", 1_000),
     ("settings-scrolled", 1_200),
     ("collection", 3_000),
@@ -492,7 +500,7 @@ pub(super) fn diagnostic_missing(app: &App, step: usize) -> Option<&'static str>
     if matches!(step, 0 | 6) && artwork_pending {
         return Some("current artwork");
     }
-    if step == 7 {
+    if matches!(step, 7 | 9) {
         if autoplay
             && app
                 .playback_status
@@ -506,13 +514,16 @@ pub(super) fn diagnostic_missing(app: &App, step: usize) -> Option<&'static str>
             return Some("LyricsLoaded");
         }
     }
+    if matches!(step, 7 | 8) && app.playback_status.state != PlaybackState::Playing {
+        return Some("playback running");
+    }
     None
 }
 
 /// How long the tour waits for `step` before it captures anyway and logs what was missing.
 #[cfg(feature = "diagnostics")]
 pub(super) fn diagnostic_wait_limit(step: usize) -> Duration {
-    if step == 7 {
+    if matches!(step, 7..=9) {
         Duration::from_secs(15)
     } else {
         Duration::from_secs(30)
@@ -527,6 +538,52 @@ pub(super) const PRESENTATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// Exit status when the window stops presenting frames during the tour.
 #[cfg(feature = "diagnostics")]
 pub const DIAGNOSTIC_NOT_PRESENTED: i32 = 3;
+
+/// Exit status when the lyrics position does not move on between the two lyrics captures.
+#[cfg(feature = "diagnostics")]
+pub const DIAGNOSTIC_LYRICS_STALLED: i32 = 4;
+
+/// The position the first lyrics capture read. The second capture must have moved past it.
+#[cfg(feature = "diagnostics")]
+static DIAGNOSTIC_LYRICS_POSITION: std::sync::Mutex<Option<Duration>> = std::sync::Mutex::new(None);
+
+/// Playback the second lyrics capture must be past the first one by. The tour waits three
+/// seconds between the two captures.
+#[cfg(feature = "diagnostics")]
+const DIAGNOSTIC_LYRICS_MIN_ADVANCE: Duration = Duration::from_millis(1_500);
+
+/// A view that stopped following also stops the position, so a second capture that has not moved
+/// on fails the tour. The steps do not seek, because a seek would send a status that hides it.
+#[cfg(feature = "diagnostics")]
+pub(super) fn diagnostic_check_lyrics_position(app: &App, step: usize) {
+    let position = app.playback_status.position;
+    let mut first = DIAGNOSTIC_LYRICS_POSITION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match step {
+        7 => *first = Some(position),
+        8 => {
+            let before = *first;
+            let moved_on =
+                before.is_some_and(|start| position >= start + DIAGNOSTIC_LYRICS_MIN_ADVANCE);
+            if moved_on {
+                tracing::info!(
+                    ?before,
+                    ?position,
+                    "lyrics position moved on between captures"
+                );
+            } else {
+                tracing::error!(
+                    ?before,
+                    ?position,
+                    "lyrics position stopped between captures"
+                );
+                diagnostic_fail(DIAGNOSTIC_LYRICS_STALLED);
+            }
+        }
+        _ => {}
+    }
+}
 
 #[cfg(feature = "diagnostics")]
 #[derive(Clone, Copy)]
