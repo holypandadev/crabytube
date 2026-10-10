@@ -1047,7 +1047,8 @@ async fn actor(
                     // Googlevideo refused the URL mid-track, usually because it expired. Resolve once more and
                     // resume from the position playback reached; the output stays open, so the pause is short.
                     resumed_this_track = true;
-                    resume_at = Some(status.position);
+                    // A live edge cannot be sought: the new resolution joins the broadcast where it is now.
+                    resume_at = (!status.live).then_some(status.position);
                     warn!(failure = %redact_urls(&format!("{failure:?}")), position_ms = status.position.as_millis(), "stream URL refused mid-track; resolving again from this position");
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
                     if let Some(output) = output.as_ref() {
@@ -1435,8 +1436,13 @@ fn played_seconds(cursor: &AtomicU64, rate: u32, channels: u16) -> f64 {
 
 /// Googlevideo refusing an audio range with 403: the URL expired or was revoked, and a fresh
 /// resolution fixes it. Other failures are reported as they were.
+/// The message of a 403 from a media server. The engine recognises it as a refused or expired URL.
+pub(super) fn googlevideo_refusal_message() -> String {
+    YoutubeHttpError::Status(403).to_string()
+}
+
 fn refused_by_googlevideo(error: &EngineError) -> bool {
-    matches!(error, EngineError::Network(message) if *message == YoutubeHttpError::Status(403).to_string())
+    matches!(error, EngineError::Network(message) if *message == googlevideo_refusal_message())
 }
 
 const MAX_HTTP_RANGE_BYTES: u64 = 1_048_576;

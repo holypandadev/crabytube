@@ -328,6 +328,15 @@ enum Poll {
     Cancelled,
 }
 
+/// What a refused poll reports. A 403 carries the message the engine answers with a new resolution.
+fn refusal_message(status: reqwest::StatusCode) -> String {
+    if status == reqwest::StatusCode::FORBIDDEN {
+        crate::playback::engine::googlevideo_refusal_message()
+    } else {
+        format!("live poll refused: HTTP {status}")
+    }
+}
+
 async fn poll_once(
     client: &reqwest::Client,
     url: &reqwest::Url,
@@ -344,7 +353,7 @@ async fn poll_once(
         Err(error) => return Poll::Failed(format!("live poll failed: {}", error.without_url())),
     };
     if !response.status().is_success() {
-        return Poll::Failed(format!("live poll refused: HTTP {}", response.status()));
+        return Poll::Failed(refusal_message(response.status()));
     }
     let body = tokio::select! {
         _ = cancellation.cancelled() => return Poll::Cancelled,
@@ -443,6 +452,18 @@ mod tests {
         reader.read_to_end(&mut out).unwrap();
         assert_eq!(out, b"firstsecond");
         assert_eq!(reader.read(&mut [0; 4]).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_forbidden_live_poll_reports_the_refusal_that_starts_a_new_resolution() {
+        assert_eq!(
+            refusal_message(reqwest::StatusCode::FORBIDDEN),
+            crate::playback::engine::googlevideo_refusal_message()
+        );
+        assert!(
+            refusal_message(reqwest::StatusCode::INTERNAL_SERVER_ERROR)
+                .starts_with("live poll refused")
+        );
     }
 
     #[test]
