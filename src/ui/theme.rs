@@ -19,10 +19,27 @@ pub(super) const RULE: Color = Color::from_rgb8(58, 58, 58);
 /// Hover fill for rows and inactive tabs.
 pub(super) const HOVER: Color = Color::from_rgb8(26, 26, 26);
 pub(super) const ALERT: Color = Color::from_rgb8(255, 92, 92);
+/// Unfilled part of the progress and volume rails. 3.1:1 on black.
+pub(super) const TRACK: Color = Color::from_rgb8(92, 92, 92);
+/// Selected text in an input field.
+pub(super) const SELECTION: Color = Color::from_rgb8(70, 70, 70);
 /// Unsung words of the active lyric line, which is drawn white. 5:1 on white.
 pub(super) const UNSUNG_ON_LIGHT: Color = Color::from_rgb8(110, 110, 110);
 /// Secondary text on the white active lyric line: translation and romanization.
 pub(super) const DIM_ON_LIGHT: Color = Color::from_rgb8(70, 70, 70);
+
+/// The type scale. Every text size in the interface is one of these, except sizes computed to
+/// fit a space (the greeting, the lyrics), which never go below `TEXT_CAPTION`.
+/// Captions, metadata, column headings and small buttons.
+pub(super) const TEXT_CAPTION: f32 = 12.0;
+/// Body text: rows, settings, lyrics source and messages.
+pub(super) const TEXT_BODY: f32 = 14.0;
+/// Section headings.
+pub(super) const TEXT_SECTION: f32 = 18.0;
+/// Page and track titles.
+pub(super) const TEXT_TITLE: f32 = 28.0;
+/// The largest page titles.
+pub(super) const TEXT_DISPLAY: f32 = 40.0;
 
 pub(super) const FONT_FAMILY: &str = "JetBrains Mono";
 pub(super) const MONO: Font = Font::with_name(FONT_FAMILY);
@@ -250,7 +267,7 @@ pub(super) fn input_style(_: &Theme, _: text_input::Status) -> text_input::Style
         icon: INK,
         placeholder: DIM,
         value: INK,
-        selection: Color::from_rgb8(70, 70, 70),
+        selection: SELECTION,
     }
 }
 
@@ -288,10 +305,7 @@ pub(super) fn seek_style(_: &Theme, status: slider::Status) -> slider::Style {
     let active = matches!(status, slider::Status::Hovered | slider::Status::Dragged);
     slider::Style {
         rail: slider::Rail {
-            backgrounds: (
-                Background::Color(INK),
-                Background::Color(Color::from_rgb8(52, 52, 52)),
-            ),
+            backgrounds: (Background::Color(INK), Background::Color(TRACK)),
             width: if active { 5.0 } else { 3.0 },
             border: Border::default(),
         },

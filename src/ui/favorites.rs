@@ -1,7 +1,10 @@
 //! Favorite Songs: a strict table of the locally saved tracks.
 
 use super::shell::fit;
-use super::theme::{self, DIM, INK, MONO, RULE, hrule, icon, label};
+use super::theme::{
+    self, DIM, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_TITLE, hrule, icon,
+    label,
+};
 use super::{App, Message, format_duration, layout};
 use crate::preferences::UiDensity;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
@@ -31,7 +34,7 @@ impl App {
             button(
                 row![
                     icon("play", 16.0, INK),
-                    label(self.tr("Play All").into_owned(), 14.0)
+                    label(self.tr("Play All").into_owned(), TEXT_BODY)
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
@@ -42,7 +45,7 @@ impl App {
             button(
                 row![
                     icon("shuffle", 16.0, INK),
-                    label(self.tr("Shuffle").into_owned(), 14.0)
+                    label(self.tr("Shuffle").into_owned(), TEXT_BODY)
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
@@ -55,9 +58,9 @@ impl App {
         let narrow = width < 700.0;
         let titles = column![
             text(self.tr("Favorite Songs"))
-                .size(if narrow { 28 } else { 40 })
+                .size(if narrow { TEXT_TITLE } else { TEXT_DISPLAY })
                 .font(MONO),
-            label(self.tr_string(format!("{count} saved tracks")), 16.0),
+            label(self.tr_string(format!("{count} saved tracks")), TEXT_BODY),
         ]
         .spacing(6)
         .width(Length::Fill);
@@ -92,7 +95,7 @@ impl App {
             (flexible - CELL_GAP, 0.0, 0.0)
         };
         let column_head = |title: &'static str, w: f32| {
-            container(label(self.tr(title).into_owned(), 11.0).color(DIM)).width(w)
+            container(label(self.tr(title).into_owned(), TEXT_CAPTION).color(DIM)).width(w)
         };
         let mut table_head = row![column_head("#", INDEX_W), column_head("TITLE", title_w)]
             .spacing(CELL_GAP)
@@ -122,7 +125,7 @@ impl App {
                     label(
                         self.tr("Tap the heart on any song to save it here.")
                             .into_owned(),
-                        13.0,
+                        TEXT_BODY,
                     )
                     .color(DIM),
                 )
@@ -131,7 +134,7 @@ impl App {
             return page.into();
         }
         if let Some(notice) = &self.library_notice {
-            page = page.push(label(self.tr_string(notice.clone()), 12.0).color(DIM));
+            page = page.push(label(self.tr_string(notice.clone()), TEXT_CAPTION).color(DIM));
         }
 
         let density = self.preferences.ui_density;
@@ -168,7 +171,7 @@ impl App {
                     } else {
                         (index + 1).to_string()
                     },
-                    14.0
+                    TEXT_BODY
                 ))
                 .width(INDEX_W),
                 row![
@@ -178,12 +181,21 @@ impl App {
                         crate::artwork::THUMB_MAX
                     ),
                     if show_duration {
-                        Element::from(label(fit(&track.title, title_w - cover - 16.0, 14.0), 14.0))
+                        Element::from(label(
+                            fit(&track.title, title_w - cover - 16.0, TEXT_BODY),
+                            TEXT_BODY,
+                        ))
                     } else {
                         column![
-                            label(fit(&track.title, title_w - cover - 16.0, 14.0), 14.0),
-                            label(fit(&track.artist, title_w - cover - 16.0, 12.0), 12.0)
-                                .color(DIM),
+                            label(
+                                fit(&track.title, title_w - cover - 16.0, TEXT_BODY),
+                                TEXT_BODY
+                            ),
+                            label(
+                                fit(&track.artist, title_w - cover - 16.0, TEXT_CAPTION),
+                                TEXT_CAPTION
+                            )
+                            .color(DIM),
                         ]
                         .spacing(4)
                         .into()
@@ -197,18 +209,21 @@ impl App {
             .align_y(Alignment::Center);
             let cells = if show_duration {
                 cells.push(
-                    container(label(fit(&track.artist, artist_w, 14.0), 14.0)).width(artist_w),
+                    container(label(fit(&track.artist, artist_w, TEXT_BODY), TEXT_BODY))
+                        .width(artist_w),
                 )
             } else {
                 cells
             };
             let cells = if show_album {
-                cells.push(container(label(fit(album, album_w, 14.0), 14.0)).width(album_w))
+                cells.push(
+                    container(label(fit(album, album_w, TEXT_BODY), TEXT_BODY)).width(album_w),
+                )
             } else {
                 cells
             };
             let cells = if show_duration {
-                cells.push(container(label(duration, 14.0)).width(DURATION_W))
+                cells.push(container(label(duration, TEXT_BODY)).width(DURATION_W))
             } else {
                 cells
             };

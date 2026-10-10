@@ -6,7 +6,9 @@ use super::home::{
     JUMP_ROW_GAP, MAX_CHIPS, STATUS_H,
 };
 use super::shell::{fit, section_heading};
-use super::theme::{self, DIM, FADED, MONO, MONO_BOLD, RULE, hrule, label};
+use super::theme::{
+    self, DIM, FADED, MONO, MONO_BOLD, RULE, TEXT_BODY, TEXT_CAPTION, hrule, label,
+};
 use super::{App, Message, format_duration};
 use crate::local_clock::LocalClock;
 use crate::preferences::RecentPlay;
@@ -23,7 +25,7 @@ pub(super) const JUMP_THUMB: f32 = 36.0;
 const JUMP_META_W: f32 = 96.0;
 /// Gap between the two columns of "Jump back in".
 const JUMP_COLUMN_GAP: f32 = 16.0;
-const CHIP_TEXT_SIZE: f32 = 12.0;
+const CHIP_TEXT_SIZE: f32 = TEXT_CAPTION;
 /// Estimated advance of one monospace character at chip size, and the chip's padding and border.
 const CHIP_CHAR_W: f32 = 8.0;
 const CHIP_PADDING: f32 = 26.0;
@@ -113,12 +115,12 @@ impl App {
             GreetingSize::Full => column![
                 text(greeting).size(layout.greeting_font).font(MONO_BOLD),
                 Space::new().height(GREETING_SUBLINE_GAP),
-                label(stamp, 13.0).color(DIM),
+                label(stamp, TEXT_BODY).color(DIM),
             ]
             .into(),
             GreetingSize::Small => row![
-                text(greeting).size(14.0).font(MONO_BOLD),
-                label(stamp, 12.0).color(DIM),
+                text(greeting).size(TEXT_BODY).font(MONO_BOLD),
+                label(stamp, TEXT_CAPTION).color(DIM),
             ]
             .spacing(12)
             .align_y(Alignment::Center)
@@ -151,10 +153,14 @@ impl App {
             .replacen("{}", error, 1);
         let retry = self.tr("Retry").into_owned();
         // The button is as wide as its label, plus its padding and border, and the gap before it.
-        let retry_room = retry.chars().count() as f32 * 12.0 * 0.6 + REFRESH_RETRY_EXTRA;
+        let retry_room = retry.chars().count() as f32 * TEXT_CAPTION * 0.6 + REFRESH_RETRY_EXTRA;
         let line = row![
-            label(fit(&text, layout.search_width - retry_room, 12.0), 12.0).color(DIM),
-            button(label(retry, 12.0))
+            label(
+                fit(&text, layout.search_width - retry_room, TEXT_CAPTION),
+                TEXT_CAPTION
+            )
+            .color(DIM),
+            button(label(retry, TEXT_CAPTION))
                 .on_press(Message::ReloadHome)
                 .padding([5, 12])
                 .style(theme::outline_button),
@@ -273,8 +279,8 @@ impl App {
         button(
             row![
                 self.cover(url, JUMP_THUMB, variant),
-                container(label(fit(&line, text_width, 13.0), 13.0)).width(Length::Fill),
-                label(meta, 12.0).color(DIM),
+                container(label(fit(&line, text_width, TEXT_BODY), TEXT_BODY)).width(Length::Fill),
+                label(meta, TEXT_CAPTION).color(DIM),
             ]
             .spacing(12)
             .align_y(Alignment::Center),
@@ -294,9 +300,9 @@ impl App {
             hrule(RULE),
             Space::new().height(8.0),
             row![
-                label(self.status_text(), 11.0).color(FADED),
+                label(self.status_text(), TEXT_CAPTION).color(FADED),
                 Space::new().width(Length::Fill),
-                label(version, 11.0).color(FADED),
+                label(version, TEXT_CAPTION).color(FADED),
             ]
             .align_y(Alignment::Center),
         ]

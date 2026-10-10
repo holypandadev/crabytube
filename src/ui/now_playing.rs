@@ -3,7 +3,8 @@
 
 use super::shell::fit;
 use super::theme::{
-    self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, UNSUNG_ON_LIGHT, hrule, label, vrule,
+    self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_TITLE,
+    UNSUNG_ON_LIGHT, hrule, label, vrule,
 };
 use super::{App, Message, NowPlayingTab, format_duration, layout};
 use crate::preferences::UiDensity;
@@ -53,11 +54,11 @@ impl App {
     pub(super) fn now_playing_page(&self, area: Size) -> Element<'_, Message> {
         let Some(track) = self.shown_track() else {
             return column![
-                label(self.tr("[ NOTHING PLAYING ]").into_owned(), 14.0),
+                label(self.tr("[ NOTHING PLAYING ]").into_owned(), TEXT_BODY),
                 label(
                     self.tr("Choose a song from Home or Favorite Songs.")
                         .into_owned(),
-                    12.0
+                    TEXT_CAPTION
                 )
                 .color(DIM),
             ]
@@ -77,7 +78,7 @@ impl App {
                     Space::new().height(16),
                     self.track_header(track, art),
                     Space::new().height(14),
-                    container(self.seek_row(12.0)).width(art),
+                    container(self.seek_row(TEXT_CAPTION)).width(art),
                     container(self.transport(22.0)).width(art).center_x(art),
                 ]
                 .width(left_width)
@@ -108,7 +109,7 @@ impl App {
                     ]
                     .spacing(20)
                     .align_y(Alignment::Center),
-                    self.seek_row(12.0),
+                    self.seek_row(TEXT_CAPTION),
                     container(self.transport(20.0)).center_x(Length::Fill),
                     container(self.side_panel(width)).height(Length::Fill),
                 ]
@@ -137,11 +138,15 @@ impl App {
         }
         row![
             column![
-                text(fit(&track.title, text_width, 28.0))
-                    .size(28)
+                text(fit(&track.title, text_width, TEXT_TITLE))
+                    .size(TEXT_TITLE)
                     .font(MONO),
                 self.artist_link(&track.artist, text_width, 18.0, INK),
-                label(fit(&meta.join("  •  "), text_width, 12.0), 12.0).color(DIM),
+                label(
+                    fit(&meta.join("  •  "), text_width, TEXT_CAPTION),
+                    TEXT_CAPTION
+                )
+                .color(DIM),
             ]
             .spacing(4)
             .width(Length::Fill),
@@ -155,7 +160,7 @@ impl App {
     fn side_panel(&self, width: f32) -> Element<'_, Message> {
         let tab = |title: &'static str, which: NowPlayingTab| {
             button(
-                container(label(self.tr(title).into_owned(), 14.0))
+                container(label(self.tr(title).into_owned(), TEXT_BODY))
                     .center_x(Length::Fill)
                     .center_y(Length::Fill),
             )
@@ -209,9 +214,11 @@ impl App {
 
     fn up_next(&self, width: f32) -> Element<'_, Message> {
         if self.queue.is_empty() {
-            return container(label(self.tr("The queue is empty.").into_owned(), 13.0).color(DIM))
-                .padding([16, 0])
-                .into();
+            return container(
+                label(self.tr("The queue is empty.").into_owned(), TEXT_BODY).color(DIM),
+            )
+            .padding([16, 0])
+            .into();
         }
         let density = self.preferences.ui_density;
         let pitch = density.queue_row_pitch();
@@ -243,7 +250,7 @@ impl App {
             };
             let open = self.row_menu.as_ref() == Some(&menu);
             let marker: Element<'_, Message> = if current {
-                label("▶", 12.0).into()
+                label("▶", TEXT_CAPTION).into()
             } else {
                 Space::new().width(0).into()
             };
@@ -265,16 +272,17 @@ impl App {
                     column![
                         row![
                             marker,
-                            text(fit(&entry.title, text_width, 15.0))
-                                .size(15)
+                            text(fit(&entry.title, text_width, TEXT_BODY))
+                                .size(TEXT_BODY)
                                 .font(MONO)
                         ]
                         .spacing(8),
-                        label(fit(&entry.artist, text_width, 12.0), 12.0).color(DIM),
+                        label(fit(&entry.artist, text_width, TEXT_CAPTION), TEXT_CAPTION)
+                            .color(DIM),
                     ]
                     .spacing(6)
                     .width(Length::Fill),
-                    label(duration, 13.0),
+                    label(duration, TEXT_BODY),
                     more,
                 ]
                 .spacing(20)
@@ -300,15 +308,17 @@ impl App {
         }
         if self.radio_loading {
             rows = rows.push(
-                container(label(self.tr("[ LOADING RADIO ]").into_owned(), 12.0).color(DIM))
-                    .padding([12, 0]),
+                container(
+                    label(self.tr("[ LOADING RADIO ]").into_owned(), TEXT_CAPTION).color(DIM),
+                )
+                .padding([12, 0]),
             );
         }
         if let Some(error) = &self.radio_error {
             rows = rows.push(
                 row![
-                    label(fit(error, width - 120.0, 12.0), 12.0).color(DIM),
-                    button(label(self.tr("Retry").into_owned(), 12.0))
+                    label(fit(error, width - 120.0, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    button(label(self.tr("Retry").into_owned(), TEXT_CAPTION))
                         .on_press(Message::RetryRadio)
                         .padding([6, 12])
                         .style(theme::outline_button),
@@ -325,11 +335,16 @@ impl App {
         // The notice takes the room left of the button and is cut short, never wrapped, so the list
         // below keeps its place. The room follows the translated label's width.
         let clear_label = self.tr("Clear up next").into_owned();
-        let clear_width = clear_label.chars().count() as f32 * 12.0 * 0.6 + CLEAR_BUTTON_EXTRA;
+        let clear_width =
+            clear_label.chars().count() as f32 * TEXT_CAPTION * 0.6 + CLEAR_BUTTON_EXTRA;
         let notice: Element<'_, Message> = match self.queue_notice {
             Some(notice) => container(label(
-                fit(&self.queue_notice_text(notice), width - clear_width, 12.0),
-                12.0,
+                fit(
+                    &self.queue_notice_text(notice),
+                    width - clear_width,
+                    TEXT_CAPTION,
+                ),
+                TEXT_CAPTION,
             ))
             .width(Length::Fill)
             .into(),
@@ -337,7 +352,7 @@ impl App {
         };
         let header = row![
             notice,
-            button(label(clear_label, 12.0))
+            button(label(clear_label, TEXT_CAPTION))
                 .on_press_maybe((upcoming > 0).then_some(Message::ClearUpcomingQueue))
                 .padding([6, 12])
                 .style(theme::outline_button),
@@ -364,26 +379,31 @@ impl App {
     /// Lyrics list; the active line is drawn as an inverted bar.
     fn lyrics_view(&self) -> Element<'_, Message> {
         if self.lyrics_loading && self.lyrics.is_none() {
-            return container(label(self.tr("[ LOADING LYRICS ]").into_owned(), 13.0).color(DIM))
-                .padding([16, 0])
-                .into();
+            return container(
+                label(self.tr("[ LOADING LYRICS ]").into_owned(), TEXT_BODY).color(DIM),
+            )
+            .padding([16, 0])
+            .into();
         }
         let Some(lyrics) = &self.lyrics else {
             // A restored track has no lyrics until playback starts; nothing is fetched at startup.
             if self.playback_status.track.is_none() {
-                return label(self.tr("Press play to load the lyrics.").into_owned(), 13.0)
-                    .color(DIM)
-                    .into();
+                return label(
+                    self.tr("Press play to load the lyrics.").into_owned(),
+                    TEXT_BODY,
+                )
+                .color(DIM)
+                .into();
             }
             return column![
                 label(
                     self.lyrics_error
                         .clone()
                         .unwrap_or_else(|| self.tr("No lyrics for this song.").into_owned()),
-                    13.0
+                    TEXT_BODY
                 )
                 .color(DIM),
-                button(label(self.tr("Retry").into_owned(), 12.0))
+                button(label(self.tr("Retry").into_owned(), TEXT_CAPTION))
                     .on_press(Message::RetryLyrics)
                     .padding([6, 12])
                     .style(theme::outline_button),
@@ -439,7 +459,7 @@ impl App {
             if show_translation && let Some(romanization) = line.romanization.as_deref() {
                 body = body.push(
                     text(romanization.to_owned())
-                        .size(12)
+                        .size(TEXT_CAPTION)
                         .font(MONO)
                         .color(sub_color),
                 );
@@ -452,7 +472,7 @@ impl App {
             {
                 body = body.push(
                     text(translation.to_owned())
-                        .size(12)
+                        .size(TEXT_CAPTION)
                         .font(MONO)
                         .color(sub_color),
                 );
@@ -460,7 +480,7 @@ impl App {
             if let Some(background) = line.background.as_deref() {
                 body = body.push(
                     text(background.to_owned())
-                        .size(12)
+                        .size(TEXT_CAPTION)
                         .font(MONO)
                         .color(sub_color),
                 );
@@ -487,7 +507,8 @@ impl App {
                 lines.push(container(text(plain.clone()).size(size).font(MONO)).padding([4, 12]));
         }
         let mut content = column![
-            container(label(self.lyrics_source_label(lyrics), 11.0).color(FADED)).padding([10, 12]),
+            container(label(self.lyrics_source_label(lyrics), TEXT_CAPTION).color(FADED))
+                .padding([10, 12]),
             scrollable(lines)
                 .id("lyrics")
                 .on_scroll(|viewport| Message::LyricsScrolled(viewport.absolute_offset()))
@@ -499,10 +520,13 @@ impl App {
         if self.lyrics_follow_paused && self.preferences.lyrics_follow {
             content = content.push(
                 container(
-                    button(label(self.tr("Return to current line").into_owned(), 12.0))
-                        .on_press(Message::ResumeLyricsFollow)
-                        .padding([6, 12])
-                        .style(theme::outline_button),
+                    button(label(
+                        self.tr("Return to current line").into_owned(),
+                        TEXT_CAPTION,
+                    ))
+                    .on_press(Message::ResumeLyricsFollow)
+                    .padding([6, 12])
+                    .style(theme::outline_button),
                 )
                 .padding([10, 0]),
             );

@@ -1,8 +1,8 @@
 //! Window chrome shared by every page: title bar, top tabs and player bar.
 
 use super::theme::{
-    self, BLACK, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, NAV_H, PLAYER_H, TITLE_BAR_H, hrule,
-    icon, label, vrule,
+    self, BLACK, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, NAV_H, PLAYER_H, TEXT_BODY,
+    TEXT_CAPTION, TEXT_SECTION, TEXT_TITLE, TITLE_BAR_H, hrule, icon, label, vrule,
 };
 use super::{App, Message, Page, Preference, format_duration};
 use crate::music::Track;
@@ -164,7 +164,7 @@ impl App {
     fn title_bar(&self) -> Element<'_, Message> {
         let dot = |message: Message, glyph: &'static str| {
             button(
-                container(text(glyph).size(9).font(MONO_BOLD))
+                container(text(glyph).size(TEXT_CAPTION).font(MONO_BOLD))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .center_x(Length::Fill)
@@ -298,7 +298,7 @@ impl App {
                 } else {
                     row![
                         icon("chev-left", 16.0, INK),
-                        label(self.tr("Back").into_owned(), 14.0)
+                        label(self.tr("Back").into_owned(), TEXT_BODY)
                     ]
                     .spacing(10)
                     .align_y(Alignment::Center)
@@ -517,7 +517,9 @@ impl App {
                     crate::artwork::THUMB_MAX
                 ),
                 column![
-                    text(fit(&title, text_width, 14.0)).size(14).font(MONO),
+                    text(fit(&title, text_width, TEXT_BODY))
+                        .size(TEXT_BODY)
+                        .font(MONO),
                     self.artist_link(&subtitle, text_width, 12.0, DIM),
                 ]
                 .spacing(4)
@@ -591,9 +593,11 @@ impl App {
                     crate::artwork::THUMB_MAX
                 ),
                 column![
-                    text(fit(&title, text_width, 14.0)).size(14).font(MONO),
-                    text(fit(&subtitle, text_width, 12.0))
-                        .size(12)
+                    text(fit(&title, text_width, TEXT_BODY))
+                        .size(TEXT_BODY)
+                        .font(MONO),
+                    text(fit(&subtitle, text_width, TEXT_CAPTION))
+                        .size(TEXT_CAPTION)
                         .font(MONO)
                         .color(DIM),
                 ]
@@ -613,7 +617,7 @@ impl App {
         .align_y(Alignment::Center);
         let center = column![
             container(self.transport_controls(18.0, !compact)).center_x(Length::Fill),
-            self.seek_row(11.0),
+            self.seek_row(TEXT_CAPTION),
         ]
         .spacing(2)
         .width(Length::Fill);
@@ -775,7 +779,7 @@ fn cover_box_faded<'a>(
             .into(),
         None => container(
             text("◻")
-                .size((size / 4.0).clamp(10.0, 28.0))
+                .size((size / 4.0).clamp(TEXT_CAPTION, TEXT_TITLE))
                 .font(MONO)
                 .color(FADED),
         )
@@ -799,7 +803,7 @@ pub(super) fn section_heading<'a>(
     trailing: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let mut line = row![
-        text(title).size(16).font(MONO),
+        text(title).size(TEXT_SECTION).font(MONO),
         container(hrule(INK))
             .width(Length::Fill)
             .center_y(Length::Fixed(20.0)),

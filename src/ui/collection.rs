@@ -1,5 +1,7 @@
 use super::shell::fit;
-use super::theme::{self, DIM, FADED, INK, MONO, RULE, hrule, icon, label};
+use super::theme::{
+    self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_TITLE, hrule, icon, label,
+};
 use super::{App, Message, Page, format_duration};
 use iced::widget::{
     Space, button, column, container,
@@ -188,9 +190,9 @@ impl App {
         let width = area.width.max(240.0);
         if let Some(error) = &self.collection.error {
             return column![
-                label(self.tr("[ COULD NOT LOAD ]").into_owned(), 14.0),
-                label(fit(error, width, 12.0), 12.0).color(DIM),
-                button(label(self.tr("Retry").into_owned(), 13.0))
+                label(self.tr("[ COULD NOT LOAD ]").into_owned(), TEXT_BODY),
+                label(fit(error, width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                     .on_press(Message::RetryCollection)
                     .padding([8, 18])
                     .style(theme::outline_button),
@@ -199,7 +201,7 @@ impl App {
             .into();
         }
         let Some(data) = &self.collection.data else {
-            return label(self.tr("[ LOADING ]").into_owned(), 14.0)
+            return label(self.tr("[ LOADING ]").into_owned(), TEXT_BODY)
                 .color(DIM)
                 .into();
         };
@@ -220,7 +222,11 @@ impl App {
         };
         // Phone-width windows stack the cover above the title and buttons.
         let narrow = width < super::home::NARROW_W;
-        let (cover_size, title_size) = if narrow { (140.0, 26.0) } else { (160.0, 34.0) };
+        let (cover_size, title_size) = if narrow {
+            (140.0, TEXT_TITLE)
+        } else {
+            (160.0, TEXT_TITLE)
+        };
         let text_width = if narrow {
             width
         } else {
@@ -233,10 +239,11 @@ impl App {
         ]
         .spacing(6);
         if let Some(subtitle) = data.subtitle.as_deref().or(data.owner.as_deref()) {
-            metadata = metadata.push(label(fit(subtitle, text_width, 16.0), 16.0));
+            metadata = metadata.push(label(fit(subtitle, text_width, TEXT_BODY), TEXT_BODY));
         }
         if let Some(summary) = &data.summary {
-            metadata = metadata.push(label(fit(summary, text_width, 12.0), 12.0).color(DIM));
+            metadata = metadata
+                .push(label(fit(summary, text_width, TEXT_CAPTION), TEXT_CAPTION).color(DIM));
         }
         let has_tracks = !queue_tracks.is_empty();
         metadata = metadata.push(Space::new().height(8)).push(
@@ -244,7 +251,7 @@ impl App {
                 button(
                     row![
                         icon("play", 14.0, INK),
-                        label(self.tr("Play").into_owned(), 14.0)
+                        label(self.tr("Play").into_owned(), TEXT_BODY)
                     ]
                     .spacing(12)
                     .align_y(Alignment::Center)
@@ -257,7 +264,7 @@ impl App {
                 button(
                     row![
                         icon("shuffle", 14.0, INK),
-                        label(self.tr("Shuffle").into_owned(), 14.0)
+                        label(self.tr("Shuffle").into_owned(), TEXT_BODY)
                     ]
                     .spacing(12)
                     .align_y(Alignment::Center)
@@ -291,9 +298,11 @@ impl App {
         let cover = self.preferences.ui_density.collection_cover();
         let title_w = width - index_w - cover - duration_w - 3.0 * 16.0 - 8.0;
         let table_head = row![
-            container(label(self.tr("#").into_owned(), 11.0).color(DIM)).width(index_w),
-            container(label(self.tr("TITLE").into_owned(), 11.0).color(DIM)).width(Length::Fill),
-            container(label(self.tr("DURATION").into_owned(), 11.0).color(DIM)).width(duration_w),
+            container(label(self.tr("#").into_owned(), TEXT_CAPTION).color(DIM)).width(index_w),
+            container(label(self.tr("TITLE").into_owned(), TEXT_CAPTION).color(DIM))
+                .width(Length::Fill),
+            container(label(self.tr("DURATION").into_owned(), TEXT_CAPTION).color(DIM))
+                .width(duration_w),
         ]
         .spacing(16)
         .padding([0, 4]);
@@ -306,7 +315,7 @@ impl App {
             hrule(INK),
         ];
         if self.collection.loading {
-            page = page.push(label(self.tr("Updating…").into_owned(), 11.0).color(FADED));
+            page = page.push(label(self.tr("Updating…").into_owned(), TEXT_CAPTION).color(FADED));
         }
         if data.tracks.is_empty() {
             page = page.push(
@@ -314,7 +323,7 @@ impl App {
                     label(
                         self.tr("No playable songs in this collection.")
                             .into_owned(),
-                        13.0,
+                        TEXT_BODY,
                     )
                     .color(DIM),
                 )
@@ -356,7 +365,7 @@ impl App {
                     } else {
                         (index + 1).to_string()
                     },
-                    14.0
+                    TEXT_BODY
                 ))
                 .width(index_w),
                 self.cover(
@@ -365,12 +374,12 @@ impl App {
                     crate::artwork::THUMB_MAX
                 ),
                 column![
-                    label(fit(&track.title, title_w, 14.0), 14.0),
-                    label(fit(&track.artist, title_w, 12.0), 12.0).color(DIM),
+                    label(fit(&track.title, title_w, TEXT_BODY), TEXT_BODY),
+                    label(fit(&track.artist, title_w, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
                 ]
                 .spacing(4)
                 .width(Length::Fill),
-                container(label(duration, 14.0)).width(duration_w),
+                container(label(duration, TEXT_BODY)).width(duration_w),
             ]
             .spacing(16)
             .align_y(Alignment::Center);
@@ -403,13 +412,16 @@ impl App {
             rows = rows.push(
                 container(if self.collection.more_error.is_some() {
                     Element::from(
-                        button(label(self.tr("Retry loading more").into_owned(), 12.0))
-                            .on_press(Message::RetryCollectionMore)
-                            .padding([6, 12])
-                            .style(theme::outline_button),
+                        button(label(
+                            self.tr("Retry loading more").into_owned(),
+                            TEXT_CAPTION,
+                        ))
+                        .on_press(Message::RetryCollectionMore)
+                        .padding([6, 12])
+                        .style(theme::outline_button),
                     )
                 } else {
-                    label(self.tr("Loading more songs…").into_owned(), 12.0)
+                    label(self.tr("Loading more songs…").into_owned(), TEXT_CAPTION)
                         .color(DIM)
                         .into()
                 })

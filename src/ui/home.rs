@@ -1,7 +1,9 @@
 //! Home: the search field, the "All-time essentials" carousel and search results.
 
 use super::shell::{fit, section_heading};
-use super::theme::{self, DIM, FADED, INK, MONO, RULE, hrule, icon, label};
+use super::theme::{
+    self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, hrule, icon, label,
+};
 use super::{App, Message};
 use crate::music::{HomeItem, HomeItemKind, Track};
 use crate::preferences::UiDensity;
@@ -388,13 +390,15 @@ impl App {
                 .on_input(Message::SearchChanged)
                 .on_submit(Message::SearchSubmitted)
                 .font(MONO)
-                .size(16)
+                .size(TEXT_BODY)
                 .padding([10, 4])
                 .style(theme::input_style),
                 if self.search_query.is_empty() {
                     // The shortcut hint only where there is room and a keyboard.
                     let hint = hint && width >= NARROW_W;
-                    Element::from(label(if hint { "Ctrl+K" } else { "" }, 11.0).color(FADED))
+                    Element::from(
+                        label(if hint { "Ctrl+K" } else { "" }, TEXT_CAPTION).color(FADED),
+                    )
                 } else {
                     button(icon("close", 16.0, INK))
                         .on_press(Message::SearchChanged(String::new()))
@@ -423,7 +427,7 @@ impl App {
         for (index, suggestion) in self.suggestions.iter().enumerate() {
             let selected = self.suggestion_index == Some(index);
             list = list.push(
-                button(label(fit(suggestion, width - 48.0, 14.0), 14.0))
+                button(label(fit(suggestion, width - 48.0, TEXT_BODY), TEXT_BODY))
                     .on_press(Message::SuggestionChosen(suggestion.clone()))
                     .width(Length::Fill)
                     .padding([8, 20])
@@ -474,14 +478,14 @@ impl App {
         let search_x = ((area.width - layout.search_width) / 2.0).max(0.0);
         let carousel: Element<'_, Message> = if self.home_picks.items.is_empty() {
             let status: Element<'_, Message> = if self.home_loading {
-                label(self.tr("[ LOADING YOUTUBE MUSIC ]").into_owned(), 13.0)
+                label(self.tr("[ LOADING YOUTUBE MUSIC ]").into_owned(), TEXT_BODY)
                     .color(DIM)
                     .into()
             } else if let Some(error) = &self.home_error {
                 column![
-                    label(self.tr("[ HOME COULD NOT LOAD ]").into_owned(), 13.0),
-                    label(fit(error, area.width, 12.0), 12.0).color(DIM),
-                    button(label(self.tr("Retry").into_owned(), 13.0))
+                    label(self.tr("[ HOME COULD NOT LOAD ]").into_owned(), TEXT_BODY),
+                    label(fit(error, area.width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                         .on_press(Message::ReloadHome)
                         .padding([8, 18])
                         .style(theme::outline_button),
@@ -489,9 +493,12 @@ impl App {
                 .spacing(10)
                 .into()
             } else {
-                label(self.tr("Search to start listening.").into_owned(), 13.0)
-                    .color(DIM)
-                    .into()
+                label(
+                    self.tr("Search to start listening.").into_owned(),
+                    TEXT_BODY,
+                )
+                .color(DIM)
+                .into()
             };
             container(status).center_x(Length::Fill).into()
         } else {
@@ -568,8 +575,8 @@ impl App {
             };
             cards = cards.push(card(
                 self.cover(item.thumbnail_url.as_deref(), layout.card, variant),
-                fit(&item.title, text_width, 14.0),
-                fit(&item.subtitle, text_width, 12.0),
+                fit(&item.title, text_width, TEXT_BODY),
+                fit(&item.subtitle, text_width, TEXT_CAPTION),
                 layout.card,
                 action,
             ));
@@ -605,7 +612,11 @@ impl App {
         let mut content = column![Space::new().height(top + SEARCH_HEADER)].spacing(0);
         let count = self.catalog_results.len();
         content = content
-            .push(text(self.tr("Search Results")).size(22).font(MONO))
+            .push(
+                text(self.tr("Search Results"))
+                    .size(TEXT_SECTION)
+                    .font(MONO),
+            )
             .push(
                 label(
                     if self.search_loading {
@@ -613,7 +624,7 @@ impl App {
                     } else {
                         self.tr_string(format!("{count} results for {query}"))
                     },
-                    13.0,
+                    TEXT_BODY,
                 )
                 .color(DIM),
             )
@@ -622,9 +633,9 @@ impl App {
         if let Some(error) = &self.search_error {
             content = content.push(Space::new().height(16)).push(
                 column![
-                    label(self.tr("[ SEARCH FAILED ]").into_owned(), 13.0),
-                    label(fit(error, width, 12.0), 12.0).color(DIM),
-                    button(label(self.tr("Retry").into_owned(), 13.0))
+                    label(self.tr("[ SEARCH FAILED ]").into_owned(), TEXT_BODY),
+                    label(fit(error, width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                         .on_press(Message::SearchSubmitted)
                         .padding([8, 18])
                         .style(theme::outline_button),
@@ -635,7 +646,7 @@ impl App {
         if let Some(top) = self.catalog_results.first() {
             content = content
                 .push(Space::new().height(18))
-                .push(label(self.tr("Top Result").into_owned(), 15.0))
+                .push(label(self.tr("Top Result").into_owned(), TEXT_BODY))
                 .push(Space::new().height(8))
                 .push(self.top_result(top, width));
         }
@@ -644,7 +655,7 @@ impl App {
             let queue: Arc<[Track]> = live.iter().filter_map(|item| item.track.clone()).collect();
             content = content
                 .push(Space::new().height(22))
-                .push(label(self.tr("Live").into_owned(), 15.0))
+                .push(label(self.tr("Live").into_owned(), TEXT_BODY))
                 .push(Space::new().height(6))
                 .push(hrule(INK));
             for (index, item) in live.iter().enumerate() {
@@ -667,7 +678,7 @@ impl App {
             let queue: Arc<[Track]> = songs.iter().filter_map(|item| item.track.clone()).collect();
             content = content
                 .push(Space::new().height(22))
-                .push(label(self.tr("Songs").into_owned(), 15.0))
+                .push(label(self.tr("Songs").into_owned(), TEXT_BODY))
                 .push(Space::new().height(6))
                 .push(hrule(INK));
             for (index, item) in songs.iter().enumerate() {
@@ -700,7 +711,7 @@ impl App {
             }
             content = content
                 .push(Space::new().height(22))
-                .push(label(self.tr(title).into_owned(), 15.0))
+                .push(label(self.tr(title).into_owned(), TEXT_BODY))
                 .push(Space::new().height(6))
                 .push(hrule(INK))
                 .push(Space::new().height(12))
@@ -792,13 +803,15 @@ impl App {
                     crate::artwork::CARD_MID_MAX
                 ),
                 column![
-                    text(fit(&title, text_width, 18.0)).size(18).font(MONO),
-                    label(fit(&item.subtitle, text_width, 12.0), 12.0).color(DIM),
+                    text(fit(&title, text_width, TEXT_SECTION))
+                        .size(TEXT_SECTION)
+                        .font(MONO),
+                    label(fit(&item.subtitle, text_width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
                     Space::new().height(6),
                     button(
                         row![
                             icon("play", 14.0, INK),
-                            label(self.tr("Play").into_owned(), 13.0)
+                            label(self.tr("Play").into_owned(), TEXT_BODY)
                         ]
                         .spacing(10)
                         .align_y(Alignment::Center)
@@ -856,12 +869,12 @@ impl App {
                     cover,
                     crate::artwork::THUMB_MAX
                 ),
-                text(fit(&title, text_width, 14.0))
-                    .size(14)
+                text(fit(&title, text_width, TEXT_BODY))
+                    .size(TEXT_BODY)
                     .font(MONO)
                     .width(Length::Fill),
-                label(if playing { "▶ " } else { "" }, 12.0),
-                label(duration, 12.0).color(DIM),
+                label(if playing { "▶ " } else { "" }, TEXT_CAPTION),
+                label(duration, TEXT_CAPTION).color(DIM),
                 more,
             ]
             .spacing(16)
@@ -891,7 +904,7 @@ impl App {
     ) -> Element<'a, Message> {
         let liked = self.liked.contains(&track.video_id);
         let action = |title: String, message: Message| {
-            button(label(title, 12.0))
+            button(label(title, TEXT_CAPTION))
                 .on_press(message)
                 .padding([6, 12])
                 .style(theme::outline_button)
@@ -936,7 +949,7 @@ impl App {
             ));
         }
         if self.copy_notice.is_some() {
-            actions = actions.push(label(self.tr("Copied").into_owned(), 12.0).color(DIM));
+            actions = actions.push(label(self.tr("Copied").into_owned(), TEXT_CAPTION).color(DIM));
         }
         container(actions.wrap().vertical_spacing(8))
             .padding([4, 52])
@@ -970,8 +983,9 @@ impl App {
                                 crate::artwork::THUMB_MAX
                             ),
                             column![
-                                label(fit(&item.title, text_width, 14.0), 14.0),
-                                label(fit(&item.subtitle, text_width, 11.0), 11.0).color(DIM),
+                                label(fit(&item.title, text_width, TEXT_BODY), TEXT_BODY),
+                                label(fit(&item.subtitle, text_width, TEXT_CAPTION), TEXT_CAPTION)
+                                    .color(DIM),
                             ]
                             .spacing(6),
                         ]
@@ -1010,8 +1024,8 @@ fn card<'a>(
         column![
             cover,
             Space::new().height(10),
-            label(title, 14.0),
-            label(subtitle, 12.0).color(DIM),
+            label(title, TEXT_BODY),
+            label(subtitle, TEXT_CAPTION).color(DIM),
         ]
         .spacing(2)
         .width(size),

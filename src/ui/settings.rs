@@ -3,7 +3,10 @@
 
 use super::messages::Confirmation;
 use super::shell::fit;
-use super::theme::{self, ALERT, DIM, FADED, INK, MONO, RULE, hrule, icon, label, toggle};
+use super::theme::{
+    self, ALERT, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_SECTION,
+    hrule, icon, label, toggle,
+};
 use super::{App, Message, Preference};
 use crate::playback::PlaybackState;
 use crate::preferences::{UiDensity, UiLanguage};
@@ -68,14 +71,18 @@ impl App {
         };
         let header = row![
             column![
-                text(self.tr("Settings")).size(40).font(MONO),
-                label(self.tr("Customize your experience").into_owned(), 16.0),
+                text(self.tr("Settings")).size(TEXT_DISPLAY).font(MONO),
+                label(self.tr("Customize your experience").into_owned(), TEXT_BODY),
             ]
             .spacing(6)
             .width(Length::Fill),
             if width >= 760.0 {
                 Element::from(
-                    label(self.tr("Changes save automatically").into_owned(), 12.0).color(FADED),
+                    label(
+                        self.tr("Changes save automatically").into_owned(),
+                        TEXT_CAPTION,
+                    )
+                    .color(FADED),
                 )
             } else {
                 Space::new().width(0).into()
@@ -83,7 +90,7 @@ impl App {
             button(
                 row![
                     icon("repeat", 16.0, INK),
-                    label(self.tr("Reset").into_owned(), 14.0)
+                    label(self.tr("Reset").into_owned(), TEXT_BODY)
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
@@ -157,7 +164,7 @@ impl App {
         rows: Vec<Element<'a, Message>>,
     ) -> Section<'a> {
         let mut body = column![
-            text(self.tr(title)).size(22).font(MONO),
+            text(self.tr(title)).size(TEXT_SECTION).font(MONO),
             Space::new().height(14),
             hrule(INK),
         ];
@@ -183,11 +190,11 @@ impl App {
     /// Cancel and confirm for an inline confirmation. Cancel leaves the setting as it was.
     fn confirm_buttons(&self, confirm: &'static str, message: Message) -> Element<'_, Message> {
         row![
-            button(label(self.tr("Cancel").into_owned(), 12.0))
+            button(label(self.tr("Cancel").into_owned(), TEXT_CAPTION))
                 .on_press(Message::CancelConfirmation)
                 .padding([6, 12])
                 .style(theme::outline_button),
-            button(label(self.tr(confirm).into_owned(), 12.0))
+            button(label(self.tr(confirm).into_owned(), TEXT_CAPTION))
                 .on_press(message)
                 .padding([6, 12])
                 .style(theme::outline_button),
@@ -199,9 +206,9 @@ impl App {
     /// The Reset confirmation, shown under the header while it waits for its second press.
     fn reset_confirmation(&self) -> Element<'_, Message> {
         column![
-            label(self.tr("Reset settings?").into_owned(), 15.0),
+            label(self.tr("Reset settings?").into_owned(), TEXT_BODY),
             text(self.tr("Language, window size and lyrics offsets stay."))
-                .size(11)
+                .size(TEXT_CAPTION)
                 .font(MONO)
                 .color(DIM),
             row![
@@ -257,7 +264,7 @@ impl App {
                     "Search History",
                     Some(hint),
                     row![
-                        button(label(self.tr("Clear").into_owned(), 12.0))
+                        button(label(self.tr("Clear").into_owned(), TEXT_CAPTION))
                             .on_press_maybe(
                                 (searches > 0 || shelf).then_some(Message::AskClearHistory)
                             )
@@ -284,11 +291,11 @@ impl App {
         control: Element<'a, Message>,
         _width: f32,
     ) -> Element<'a, Message> {
-        let mut left = column![label(self.tr(title).into_owned(), 15.0)].spacing(4);
+        let mut left = column![label(self.tr(title).into_owned(), TEXT_BODY)].spacing(4);
         if let Some(hint) = hint {
             left = left.push(
                 text(self.tr_string(hint))
-                    .size(11)
+                    .size(TEXT_CAPTION)
                     .font(MONO)
                     .color(DIM)
                     .width(Length::Fill),
@@ -326,7 +333,7 @@ impl App {
     {
         pick_list(options, selected, on_select)
             .font(MONO)
-            .text_size(14)
+            .text_size(TEXT_BODY)
             .padding([8, 12])
             .width(self.picker_width())
             .style(theme::pick_style)
@@ -467,7 +474,7 @@ impl App {
             )
             .placeholder(self.tr("Default").into_owned())
             .font(MONO)
-            .text_size(14)
+            .text_size(TEXT_BODY)
             .padding([8, 12])
             .width(device_width)
             .style(theme::pick_style)
@@ -557,7 +564,7 @@ impl App {
                         Message::Preference(Preference::CloseToTray(!p.close_to_tray)),
                     )
                 } else {
-                    label("—", 14.0).color(FADED).into()
+                    label("—", TEXT_BODY).color(FADED).into()
                 },
                 width,
             ));
@@ -569,10 +576,13 @@ impl App {
         let p = &self.preferences;
         let slider_row =
             |value: String, control: Element<'static, Message>| -> Element<'_, Message> {
-                row![container(control).width(150), label(value, 12.0).width(70)]
-                    .spacing(10)
-                    .align_y(Alignment::Center)
-                    .into()
+                row![
+                    container(control).width(150),
+                    label(value, TEXT_CAPTION).width(70)
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .into()
             };
         self.settings_box(
             "Lyrics",
@@ -663,9 +673,9 @@ impl App {
                 Some(fit(
                     &self.mpris.status(),
                     width - 2.0 * BOX_PADDING - 40.0,
-                    11.0,
+                    TEXT_CAPTION,
                 )),
-                label("●", 14.0).into(),
+                label("●", TEXT_BODY).into(),
                 width,
             ));
         }
@@ -677,7 +687,7 @@ impl App {
         let busy = self.storage_loading;
         let language = self.preferences.ui_language;
         let action = |title: &'static str, message: Message| -> Element<'_, Message> {
-            button(label(self.tr(title).into_owned(), 12.0))
+            button(label(self.tr(title).into_owned(), TEXT_CAPTION))
                 .on_press_maybe((!busy).then_some(message))
                 .padding([6, 12])
                 .style(theme::outline_button)
@@ -747,7 +757,7 @@ impl App {
             rows.push(
                 container(
                     text(self.tr_string(notice.clone()))
-                        .size(11)
+                        .size(TEXT_CAPTION)
                         .font(MONO)
                         .color(DIM),
                 )
@@ -761,7 +771,7 @@ impl App {
                     text(self.tr_string(format!(
                         "Saved settings could not be read and were moved to {moved}"
                     )))
-                    .size(11)
+                    .size(TEXT_CAPTION)
                     .font(MONO)
                     .color(ALERT),
                 )
@@ -774,7 +784,7 @@ impl App {
 
     fn about_box(&self, width: f32) -> Section<'_> {
         let line = |content: String| -> Element<'_, Message> {
-            container(text(content).size(12).font(MONO).color(DIM))
+            container(text(content).size(TEXT_CAPTION).font(MONO).color(DIM))
                 .padding([10, 0])
                 .into()
         };
