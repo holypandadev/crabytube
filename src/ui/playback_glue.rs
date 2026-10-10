@@ -81,7 +81,7 @@ impl App {
         }
 
         // Follow first, so the branches below cannot skip the lyric scroll.
-        let resync = self.lyric_active.is_some() && std::mem::take(&mut self.lyrics_resync);
+        let resync = self.lyric_active.is_some() && self.take_lyrics_resync();
         let mut tasks = vec![self.follow_lyrics_task(old_active, resync)];
         tasks.append(&mut metadata_tasks);
 
@@ -138,10 +138,8 @@ impl App {
     /// Timed lyrics are on screen and followed while the track plays: at each word when the
     /// source gives word timing, and at each line otherwise.
     pub(super) fn karaoke_active(&self) -> bool {
-        self.page == Page::NowPlaying
-            && self.now_playing_tab == NowPlayingTab::Lyrics
+        self.lyrics_on_screen()
             && self.playback_status.state == PlaybackState::Playing
-            && !self.window_hidden_to_tray
             && self
                 .lyrics
                 .as_ref()
@@ -183,6 +181,19 @@ impl App {
     pub(super) fn resync_lyrics(&mut self) {
         self.lyrics_follow_paused = false;
         self.lyrics_resync = true;
+    }
+
+    /// Takes the request to scroll to the active line. The request waits while the lyrics are not
+    /// on screen: their view is rebuilt when its tab opens, so the scroll has to happen then.
+    pub(super) fn take_lyrics_resync(&mut self) -> bool {
+        self.lyrics_on_screen() && std::mem::take(&mut self.lyrics_resync)
+    }
+
+    /// Now Playing shows the Lyrics tab and the window is not hidden to the tray.
+    pub(super) fn lyrics_on_screen(&self) -> bool {
+        self.page == Page::NowPlaying
+            && self.now_playing_tab == NowPlayingTab::Lyrics
+            && !self.window_hidden_to_tray
     }
 
     /// The resolver fills in title, artist, artwork and length for a track that was started

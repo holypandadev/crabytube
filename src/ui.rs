@@ -1047,13 +1047,18 @@ impl App {
                 if tab == NowPlayingTab::Queue {
                     return self.preload_current_page_artwork();
                 }
-                if tab == NowPlayingTab::Lyrics
-                    && self.lyrics.is_none()
+                // The lyrics view is rebuilt on every visit and starts at the top: following
+                // resumes and the view scrolls to the line that is sung now.
+                self.resync_lyrics();
+                let resync = self.take_lyrics_resync();
+                let follow = self.follow_lyrics_task(None, resync);
+                if self.lyrics.is_none()
                     && !self.lyrics_loading
                     && let Some(track) = self.playback_status.track.clone()
                 {
-                    return self.load_lyrics(track);
+                    return Task::batch([follow, self.load_lyrics(track)]);
                 }
+                return follow;
             }
             Message::OpenCollection(target) => {
                 if !target.is_public_collection() {
@@ -3499,6 +3504,60 @@ mod tests {
             app.karaoke_tick_pending,
             "the lyrics would never move again"
         );
+    }
+
+    #[test]
+    fn a_seek_made_on_the_queue_tab_scrolls_the_lyrics_when_they_open() {
+        let line = |start: f64, text: &str| crate::lyrics::Line {
+            start,
+            end: None,
+            text: text.into(),
+            words: Vec::new(),
+            translation: None,
+            romanization: None,
+            background: None,
+        };
+        let mut app = App {
+            page: Page::NowPlaying,
+            now_playing_tab: super::NowPlayingTab::Queue,
+            lyrics: Some(crate::lyrics::Lyrics {
+                source: "line-timed".into(),
+                lines: vec![
+                    line(10.0, "first"),
+                    line(13.0, "second"),
+                    line(20.0, "third"),
+                ],
+                plain: None,
+            }),
+            ..App::default()
+        };
+        app.preferences.lyrics_follow = true;
+        let track = song("Track");
+        let at = |seconds: f64| PlaybackStatus {
+            track: Some(track.clone()),
+            position: Duration::from_secs_f64(seconds),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        };
+        drop(app.update_playback_status(at(12.0)));
+
+        // The seek is made while the queue is on screen, so the request waits for the lyrics.
+        app.seek_playback(Duration::from_secs(21));
+        drop(app.update_playback_status(at(21.0)));
+        assert_eq!(app.lyric_active, Some(2));
+        assert!(
+            app.lyrics_resync,
+            "the request waits while the queue is shown"
+        );
+
+        // The lyrics view is rebuilt on every visit and starts at the top, so opening it scrolls
+        // to the line that is sung.
+        drop(app.update(Message::SetNowPlayingTab(super::NowPlayingTab::Lyrics)));
+        assert!(
+            app.lyrics_auto_scroll_until.is_some(),
+            "the view must follow the active line when it opens"
+        );
+        assert!(!app.lyrics_resync);
     }
 
     #[test]
