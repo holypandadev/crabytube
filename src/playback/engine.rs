@@ -360,6 +360,18 @@ fn hand_over(samples_tx: &Sender<Vec<f32>>, produced: &AtomicU64, chunk: Vec<f32
     samples_tx.send(chunk).is_ok()
 }
 
+/// A buffer for the next chunk: a finished one the output handed back when there is one, so the
+/// decoder reuses memory instead of allocating.
+fn fresh_chunk(recycled: &Receiver<Vec<f32>>) -> Vec<f32> {
+    match recycled.try_recv() {
+        Ok(mut chunk) => {
+            chunk.clear();
+            chunk
+        }
+        Err(_) => Vec::with_capacity(AUDIO_CHUNK_SAMPLES),
+    }
+}
+
 enum WorkerCommand {
     Seek(Duration, tokio::sync::oneshot::Sender<Result<(), String>>),
     Stop,
@@ -377,6 +389,7 @@ struct ActiveAudio {
     first_sample_output: Arc<AtomicBool>,
     underruns: Arc<AtomicU64>,
     drained: Sender<()>,
+    recycled: Sender<Vec<f32>>,
     selected_at: Instant,
 }
 
@@ -386,6 +399,7 @@ impl ActiveAudio {
         AudioSource {
             samples: self.samples.clone(),
             drained: self.drained.clone(),
+            recycled: self.recycled.clone(),
             current: Vec::new(),
             index: 0,
             cursor: Arc::clone(&self.cursor),
@@ -403,6 +417,8 @@ struct AudioSource {
     samples: Receiver<Vec<f32>>,
     /// Signalled each time a chunk is taken, so a decoder waiting for room can refill.
     drained: Sender<()>,
+    /// Finished chunks go back to the decoder, so the audio thread never frees a buffer.
+    recycled: Sender<Vec<f32>>,
     /// The chunk being played, and the index of its next sample.
     current: Vec<f32>,
     index: usize,
@@ -424,7 +440,11 @@ impl Iterator for AudioSource {
                 Ok(chunk) => {
                     // A signal already waiting is enough: the decoder re-checks the buffer when it wakes.
                     let _ = self.drained.try_send(());
-                    self.current = chunk;
+                    let finished = std::mem::replace(&mut self.current, chunk);
+                    // The placeholder of an empty source has no buffer to reuse.
+                    if finished.capacity() > 0 {
+                        let _ = self.recycled.try_send(finished);
+                    }
                     self.index = 0;
                 }
                 Err(crossbeam_channel::TryRecvError::Empty) => {
@@ -924,6 +944,7 @@ async fn actor(
                         let rodio_source = AudioSource {
                             samples: active_audio.samples.clone(),
                             drained: active_audio.drained.clone(),
+                            recycled: active_audio.recycled.clone(),
                             current: Vec::new(),
                             index: 0,
                             cursor: Arc::clone(&active_audio.cursor),
@@ -934,7 +955,7 @@ async fn actor(
                             underruns: Arc::clone(&active_audio.underruns),
                             in_underrun: false,
                         };
-                        active = Some(ActiveAudio { samples: active_audio.samples, produced: active_audio.produced, cursor: active_audio.cursor, rate: active_audio.rate.get(), channels: active_audio.channels.get(), duration, worker: active_audio.worker, first_sample_output: active_audio.first_sample_output, underruns: active_audio.underruns, drained: active_audio.drained, selected_at });
+                        active = Some(ActiveAudio { samples: active_audio.samples, produced: active_audio.produced, cursor: active_audio.cursor, rate: active_audio.rate.get(), channels: active_audio.channels.get(), duration, worker: active_audio.worker, first_sample_output: active_audio.first_sample_output, underruns: active_audio.underruns, drained: active_audio.drained, recycled: active_audio.recycled, selected_at });
                         if let Some(position) = resume_at.take() {
                             // The new decoder seeks to where playback stopped first; the Seeked event then starts the output.
                             seek_generation = seek_generation.wrapping_add(1);
@@ -1321,6 +1342,7 @@ struct PreparedAudio {
     first_sample_output: Arc<AtomicBool>,
     underruns: Arc<AtomicU64>,
     drained: Sender<()>,
+    recycled: Sender<Vec<f32>>,
     live: bool,
 }
 
@@ -1698,6 +1720,9 @@ where
         // The output signals each chunk it takes, so a decoder waiting for room wakes without polling.
         let (drained_tx, drained_rx) = bounded::<()>(1);
         let drained_keepalive = drained_tx.clone();
+        // Finished chunks come back here. The pool is larger than the samples channel, so a
+        // buffer is only freed when the pool is full.
+        let (recycled_tx, recycled_rx) = bounded::<Vec<f32>>(64);
         // The decoder waits once about half a second of chunks is waiting for the output.
         let pump_threshold =
             (rate_u32 as usize * channels_u16 as usize / 2).min(48_000) / AUDIO_CHUNK_SAMPLES;
@@ -1716,11 +1741,12 @@ where
             first_sample_output: Arc::clone(&first_sample_output),
             underruns: Arc::clone(&underruns),
             drained: drained_tx,
+            recycled: recycled_tx,
             live,
         };
         let mut decoder = decoder;
         let mut samples_sent = 0_usize;
-        let mut chunk = Vec::with_capacity(AUDIO_CHUNK_SAMPLES);
+        let mut chunk = fresh_chunk(&recycled_rx);
         while samples_sent < (rate_u32 as usize * channels_u16 as usize / 3).min(24_000) {
             if cancellation.is_cancelled() {
                 let _ = prepared_tx.send(Err(EngineError::Worker("playback was cancelled".into())));
@@ -1731,7 +1757,11 @@ where
                     chunk.push(sample);
                     samples_sent += 1;
                     if chunk.len() == AUDIO_CHUNK_SAMPLES
-                        && !hand_over(&samples_tx, &produced, std::mem::take(&mut chunk))
+                        && !hand_over(
+                            &samples_tx,
+                            &produced,
+                            std::mem::replace(&mut chunk, fresh_chunk(&recycled_rx)),
+                        )
                     {
                         let _ = prepared_tx.send(Err(EngineError::Worker(
                             "playback source was dropped".into(),
@@ -1841,7 +1871,7 @@ where
                         });
                         break;
                     }
-                    let mut chunk = Vec::with_capacity(AUDIO_CHUNK_SAMPLES);
+                    let mut chunk = fresh_chunk(&recycled_rx);
                     while chunk.len() < AUDIO_CHUNK_SAMPLES {
                         match decoder.next() {
                             Some(sample) => chunk.push(sample),
@@ -1950,6 +1980,7 @@ mod tests {
             first_sample_output: Arc::clone(&first_sample_output),
             underruns: Arc::clone(&underruns),
             drained: bounded::<()>(1).0,
+            recycled: bounded::<Vec<f32>>(1).0,
             in_underrun: false,
         };
 
@@ -1985,6 +2016,7 @@ mod tests {
             first_sample_output: Arc::new(AtomicBool::new(false)),
             underruns: Arc::clone(&underruns),
             drained: bounded::<()>(1).0,
+            recycled: bounded::<Vec<f32>>(1).0,
             in_underrun: false,
         };
 
@@ -2258,6 +2290,49 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_chunk_goes_back_to_the_decoder_when_the_next_one_plays() {
+        let (sample_tx, samples) = bounded(4);
+        let (drained, _signalled) = bounded::<()>(1);
+        let (recycled, returned) = bounded::<Vec<f32>>(4);
+        sample_tx.send(vec![0.5; 8]).unwrap();
+        sample_tx.send(vec![0.25; 8]).unwrap();
+        let mut source = AudioSource {
+            samples,
+            drained,
+            recycled,
+            current: Vec::new(),
+            index: 0,
+            cursor: Arc::new(AtomicU64::new(0)),
+            rate: NonZeroU32::new(48_000).unwrap(),
+            channels: NonZeroU16::new(2).unwrap(),
+            duration: None,
+            first_sample_output: Arc::new(AtomicBool::new(false)),
+            underruns: Arc::new(AtomicU64::new(0)),
+            in_underrun: false,
+        };
+        for _ in 0..8 {
+            assert_eq!(source.next(), Some(0.5));
+        }
+        // The first chunk stays in use until the next one is pulled.
+        assert!(returned.try_recv().is_err());
+        assert_eq!(source.next(), Some(0.25));
+        assert_eq!(returned.try_recv().unwrap(), vec![0.5; 8]);
+    }
+
+    #[test]
+    fn the_decoder_reuses_a_returned_chunk_buffer_before_allocating() {
+        let (recycled, returned) = bounded::<Vec<f32>>(2);
+        let mut finished = Vec::with_capacity(super::AUDIO_CHUNK_SAMPLES);
+        finished.push(0.5);
+        recycled.send(finished).unwrap();
+        let reused = super::fresh_chunk(&returned);
+        assert!(reused.is_empty());
+        assert!(reused.capacity() >= super::AUDIO_CHUNK_SAMPLES);
+        // With nothing returned, a new buffer is allocated at the chunk size.
+        assert!(super::fresh_chunk(&returned).capacity() >= super::AUDIO_CHUNK_SAMPLES);
+    }
+
+    #[test]
     fn taking_a_chunk_signals_the_decoder_that_waits_for_room() {
         let (sample_tx, samples) = bounded(4);
         let (drained, signalled) = bounded::<()>(1);
@@ -2265,6 +2340,7 @@ mod tests {
         let mut source = AudioSource {
             samples,
             drained,
+            recycled: bounded::<Vec<f32>>(1).0,
             current: Vec::new(),
             index: 0,
             cursor: Arc::new(AtomicU64::new(0)),
