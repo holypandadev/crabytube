@@ -1012,22 +1012,26 @@ fn retryable_config_status(status: reqwest::StatusCode) -> bool {
     status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
-async fn retry_config_get(
-    attempt: u8,
-    url: &str,
-    retry_after_secs: Option<u64>,
-    cancellation: &CancellationToken,
-) -> Result<(), StreamError> {
+/// How long to wait before a retry: the server's Retry-After, held to one second, or a short backoff.
+fn retry_delay(attempt: u8, url: &str, retry_after_secs: Option<u64>) -> Duration {
     // Stable per URL/attempt jitter, avoiding another RNG dependency while
     // spreading retries slightly across concurrent desktop clients.
     let fingerprint = sha256_hex(format!("{url}:{attempt}").as_bytes());
     let jitter = u64::from_str_radix(&fingerprint[..2], 16).unwrap_or(0) % 61;
     let exponential_ms = u64::from(attempt) * 80;
     let retry_after_ms = retry_after_secs.unwrap_or(0).saturating_mul(1000).min(1000);
-    let delay = Duration::from_millis(retry_after_ms.max(exponential_ms + jitter));
+    Duration::from_millis(retry_after_ms.max(exponential_ms + jitter))
+}
+
+async fn retry_config_get(
+    attempt: u8,
+    url: &str,
+    retry_after_secs: Option<u64>,
+    cancellation: &CancellationToken,
+) -> Result<(), StreamError> {
+    let delay = retry_delay(attempt, url, retry_after_secs);
     warn!(
         attempt,
-        retry_after_ms,
         delay_ms = delay.as_millis(),
         "retrying transient idempotent configuration GET"
     );
@@ -2214,6 +2218,18 @@ fn quality_allows(quality: AudioQuality, bitrate: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_retry_waits_at_most_a_second_for_the_server_and_backs_off_otherwise() {
+        let url = "https://music.youtube.com/youtubei/v1/browse";
+        assert_eq!(
+            super::retry_delay(1, url, Some(3_600)),
+            std::time::Duration::from_millis(1_000)
+        );
+        // Backoff is 80 ms per attempt plus a jitter of at most 60 ms.
+        assert!(super::retry_delay(1, url, None) < std::time::Duration::from_millis(141));
+        assert!(super::retry_delay(3, url, None) >= std::time::Duration::from_millis(240));
+    }
+
     #[test]
     fn a_missing_file_asks_for_a_reinstall_and_a_refused_broadcast_is_not_called_unsupported() {
         let missing = StreamError::Installation("js-challenge-helper is not installed".into());
