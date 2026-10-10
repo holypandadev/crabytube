@@ -5,6 +5,7 @@ use super::theme::{
     icon, label, vrule,
 };
 use super::{App, Message, Page, Preference, format_duration};
+use crate::music::Track;
 use crate::playback::PlaybackState;
 use crate::preferences::RepeatMode;
 use iced::widget::{
@@ -133,7 +134,7 @@ impl App {
         .height(Length::Fill);
         let mut body = column![self.title_bar(), content];
         // The player bar appears once something is loaded.
-        if !matches!(self.page, Page::NowPlaying) && self.playback_status.track.is_some() {
+        if !matches!(self.page, Page::NowPlaying) && self.shown_track().is_some() {
             body = body.push(hrule(INK)).push(
                 container(responsive(move |size| self.player_bar(size.width)))
                     .width(Length::Fill)
@@ -331,6 +332,15 @@ impl App {
         self.playback_status.track.is_some() || self.queue_index.is_some()
     }
 
+    /// The track the player bar and Now Playing show. Until the engine reports one, the queue's
+    /// current entry stands in, so a restored session shows its track paused and starts nothing.
+    pub(super) fn shown_track(&self) -> Option<&Track> {
+        self.playback_status
+            .track
+            .as_ref()
+            .or_else(|| self.queue_index.and_then(|index| self.queue.get(index)))
+    }
+
     /// Shuffle, previous, play/pause, next and repeat at the given icon size.
     pub(super) fn transport(&self, size: f32) -> Element<'_, Message> {
         self.transport_controls(size, true)
@@ -457,7 +467,7 @@ impl App {
     /// Phone-width player: a full-width seek rail on top, then the cover,
     /// title and the three main transport buttons.
     fn mini_player(&self, width: f32) -> Element<'_, Message> {
-        let track = self.playback_status.track.as_ref();
+        let track = self.shown_track();
         let max_position = self
             .playback_status
             .duration
@@ -536,7 +546,7 @@ impl App {
         } else {
             (width * 0.28).clamp(150.0, 420.0)
         };
-        let track = self.playback_status.track.as_ref();
+        let track = self.shown_track();
         let status = match self.playback_status.state {
             PlaybackState::Resolving => Some(self.tr("Loading…").into_owned()),
             PlaybackState::Buffering => Some(self.tr("Buffering…").into_owned()),

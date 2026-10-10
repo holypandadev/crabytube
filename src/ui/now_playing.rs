@@ -49,7 +49,7 @@ impl App {
     }
 
     pub(super) fn now_playing_page(&self, area: Size) -> Element<'_, Message> {
-        let Some(track) = self.playback_status.track.as_ref() else {
+        let Some(track) = self.shown_track() else {
             return column![
                 label(self.tr("[ NOTHING PLAYING ]").into_owned(), 14.0),
                 label(
@@ -364,6 +364,12 @@ impl App {
                 .into();
         }
         let Some(lyrics) = &self.lyrics else {
+            // A restored track has no lyrics until playback starts; nothing is fetched at startup.
+            if self.playback_status.track.is_none() {
+                return label(self.tr("Press play to load the lyrics.").into_owned(), 13.0)
+                    .color(DIM)
+                    .into();
+            }
             return column![
                 label(
                     self.lyrics_error

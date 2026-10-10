@@ -234,6 +234,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Media Controls (MPRIS)" => "Controles multimedia (MPRIS)",
         "No lyrics for this song." => "No hay letra para esta canción.",
         "Not synced" => "Sin sincronizar",
+        "Press play to load the lyrics." => "Pulsa reproducir para cargar la letra.",
         "No playable songs in this collection." => {
             "Esta colección no tiene canciones reproducibles."
         }

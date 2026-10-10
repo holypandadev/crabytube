@@ -862,7 +862,7 @@ impl App {
                 return self.navigate(page);
             }
             Message::OpenNowPlaying => {
-                if self.playback_status.track.is_some() {
+                if self.shown_track().is_some() {
                     if self.preferences.show_lyrics_default
                         && !matches!(self.page, Page::NowPlaying)
                     {
@@ -2445,7 +2445,7 @@ impl App {
         if self.page == page {
             return Task::none();
         }
-        if matches!(page, Page::NowPlaying) && self.playback_status.track.is_none() {
+        if matches!(page, Page::NowPlaying) && self.shown_track().is_none() {
             return Task::none();
         }
         // Remember where Now Playing was opened from, so closing it returns there.
@@ -4263,6 +4263,40 @@ mod tests {
         let _ = app.update(Message::PlayContext(tracks, 2));
         let _ = app.update(Message::NextTrack);
         assert_eq!(app.queue_index, Some(2));
+    }
+
+    #[test]
+    fn a_restored_queue_entry_is_shown_until_the_engine_reports_a_track() {
+        let mut app = App {
+            queue: Arc::new(vec![fixture_track("a"), fixture_track("b")]),
+            queue_index: Some(1),
+            ..App::default()
+        };
+        assert!(app.playback_status.track.is_none());
+        assert_eq!(
+            app.shown_track().map(|track| track.video_id.as_str()),
+            Some("b")
+        );
+        app.playback_status.track = Some(fixture_track("c"));
+        assert_eq!(
+            app.shown_track().map(|track| track.video_id.as_str()),
+            Some("c")
+        );
+    }
+
+    #[test]
+    fn now_playing_opens_for_a_restored_queue_entry_without_fetching_lyrics() {
+        let mut app = App {
+            queue: Arc::new(vec![fixture_track("a")]),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        app.preferences.show_lyrics_default = true;
+        let _ = app.update(Message::OpenNowPlaying);
+        assert_eq!(app.page, Page::NowPlaying);
+        assert_eq!(app.now_playing_tab, NowPlayingTab::Lyrics);
+        assert!(app.playback_status.track.is_none());
+        assert!(app.lyrics.is_none() && !app.lyrics_loading);
     }
 
     #[test]
