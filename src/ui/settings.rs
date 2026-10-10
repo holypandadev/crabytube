@@ -1,5 +1,5 @@
-//! Settings: outlined boxes on a strict two-column grid. Only controls that
-//! change real behaviour are listed; every change saves immediately.
+//! Settings: outlined boxes in two columns, each box going to the shorter column.
+//! Only controls that change real behaviour are listed; every change saves immediately.
 
 use super::shell::fit;
 use super::theme::{self, ALERT, DIM, FADED, INK, MONO, RULE, hrule, icon, label, toggle};
@@ -12,6 +12,36 @@ use iced::{Alignment, Element, Length, Size};
 const BOX_PADDING: f32 = 20.0;
 const GRID_GAP: f32 = 24.0;
 const TWO_COLUMNS_FROM: f32 = 880.0;
+/// Estimated box chrome (padding, title and rules) and height per row. They only steer
+/// the column choice; nothing is sized from them.
+const BOX_CHROME_ESTIMATE: f32 = 80.0;
+const ROW_ESTIMATE: f32 = 64.0;
+
+/// A settings box with its row count, which estimates its height for the column layout.
+struct Section<'a> {
+    rows: usize,
+    element: Element<'a, Message>,
+}
+
+impl Section<'_> {
+    fn estimated_height(&self) -> f32 {
+        BOX_CHROME_ESTIMATE + self.rows as f32 * ROW_ESTIMATE
+    }
+}
+
+/// The column (0 = left, 1 = right) for each height, in order: every box goes to the
+/// shorter column so far, and a tie goes left.
+fn masonry_columns(heights: &[f32]) -> Vec<usize> {
+    let mut totals = [0.0_f32; 2];
+    heights
+        .iter()
+        .map(|height| {
+            let column = usize::from(totals[1] < totals[0]);
+            totals[column] += height;
+            column
+        })
+        .collect()
+}
 
 fn mib(bytes: u64) -> String {
     format!("{:.1} MiB", bytes as f64 / 1_048_576.0)
@@ -55,7 +85,7 @@ impl App {
         .spacing(24)
         .align_y(Alignment::Center);
 
-        let boxes = [
+        let sections = [
             self.appearance_box(box_width),
             self.playback_box(box_width),
             self.audio_box(box_width),
@@ -65,24 +95,28 @@ impl App {
             self.storage_box(box_width),
             self.about_box(box_width),
         ];
-        let mut grid = column![].spacing(GRID_GAP);
-        if two_columns {
-            let mut iter = boxes.into_iter();
-            while let Some(left) = iter.next() {
-                let right: Element<'_, Message> = iter
-                    .next()
-                    .unwrap_or_else(|| Space::new().width(box_width).into());
-                grid = grid.push(
-                    row![left, right]
-                        .spacing(GRID_GAP)
-                        .align_y(Alignment::Start),
-                );
+        let grid: Element<'_, Message> = if two_columns {
+            let heights: Vec<f32> = sections
+                .iter()
+                .map(|section| section.estimated_height())
+                .collect();
+            let mut columns: [Vec<Element<'_, Message>>; 2] = [Vec::new(), Vec::new()];
+            for (section, index) in sections.into_iter().zip(masonry_columns(&heights)) {
+                columns[index].push(section.element);
             }
+            let [left, right] = columns;
+            row![
+                column(left).spacing(GRID_GAP).width(box_width),
+                column(right).spacing(GRID_GAP).width(box_width),
+            ]
+            .spacing(GRID_GAP)
+            .align_y(Alignment::Start)
+            .into()
         } else {
-            for section in boxes {
-                grid = grid.push(section);
-            }
-        }
+            column(sections.into_iter().map(|section| section.element))
+                .spacing(GRID_GAP)
+                .into()
+        };
         scrollable(
             column![
                 Space::new().height(8),
@@ -105,7 +139,7 @@ impl App {
         title: &'static str,
         width: f32,
         rows: Vec<Element<'a, Message>>,
-    ) -> Element<'a, Message> {
+    ) -> Section<'a> {
         let mut body = column![
             text(self.tr(title)).size(22).font(MONO),
             Space::new().height(14),
@@ -118,11 +152,14 @@ impl App {
                 body = body.push(hrule(RULE));
             }
         }
-        container(body)
-            .width(width)
-            .padding(BOX_PADDING)
-            .style(theme::boxed)
-            .into()
+        Section {
+            rows: count,
+            element: container(body)
+                .width(width)
+                .padding(BOX_PADDING)
+                .style(theme::boxed)
+                .into(),
+        }
     }
 
     /// One setting: label (and optional hint) on the left, control on the right.
@@ -180,7 +217,7 @@ impl App {
             .into()
     }
 
-    fn appearance_box(&self, width: f32) -> Element<'_, Message> {
+    fn appearance_box(&self, width: f32) -> Section<'_> {
         let p = &self.preferences;
         self.settings_box(
             "Appearance",
@@ -243,7 +280,7 @@ impl App {
         )
     }
 
-    fn playback_box(&self, width: f32) -> Element<'_, Message> {
+    fn playback_box(&self, width: f32) -> Section<'_> {
         let p = &self.preferences;
         self.settings_box(
             "Playback",
@@ -280,7 +317,7 @@ impl App {
         )
     }
 
-    fn audio_box(&self, width: f32) -> Element<'_, Message> {
+    fn audio_box(&self, width: f32) -> Section<'_> {
         let p = &self.preferences;
         let selected = self
             .output_devices
@@ -331,7 +368,7 @@ impl App {
         )
     }
 
-    fn general_box(&self, width: f32) -> Element<'_, Message> {
+    fn general_box(&self, width: f32) -> Section<'_> {
         let p = &self.preferences;
         let mut rows = vec![
             self.setting(
@@ -419,7 +456,7 @@ impl App {
         self.settings_box("General", width, rows)
     }
 
-    fn lyrics_box(&self, width: f32) -> Element<'_, Message> {
+    fn lyrics_box(&self, width: f32) -> Section<'_> {
         let p = &self.preferences;
         let slider_row =
             |value: String, control: Element<'static, Message>| -> Element<'_, Message> {
@@ -488,7 +525,7 @@ impl App {
         )
     }
 
-    fn integrations_box(&self, width: f32) -> Element<'_, Message> {
+    fn integrations_box(&self, width: f32) -> Section<'_> {
         let p = &self.preferences;
         let discord_status = if !p.discord_presence {
             "Off".to_owned()
@@ -526,7 +563,7 @@ impl App {
         self.settings_box("Integrations", width, rows)
     }
 
-    fn storage_box(&self, width: f32) -> Element<'_, Message> {
+    fn storage_box(&self, width: f32) -> Section<'_> {
         let usage = self.storage_cache_usage;
         let busy = self.storage_loading;
         let action = |title: &'static str, message: Message| -> Element<'_, Message> {
@@ -617,7 +654,7 @@ impl App {
         self.settings_box("Storage", width, rows)
     }
 
-    fn about_box(&self, width: f32) -> Element<'_, Message> {
+    fn about_box(&self, width: f32) -> Section<'_> {
         let line = |content: String| -> Element<'_, Message> {
             container(text(content).size(12).font(MONO).color(DIM))
                 .padding([10, 0])
@@ -643,5 +680,21 @@ impl App {
                 ),
             ],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::masonry_columns;
+
+    #[test]
+    fn each_box_goes_to_the_shorter_column_and_ties_go_left() {
+        assert_eq!(
+            masonry_columns(&[400.0, 272.0, 144.0, 464.0]),
+            vec![0, 1, 1, 0]
+        );
+        assert_eq!(masonry_columns(&[100.0, 100.0]), vec![0, 1]);
+        assert_eq!(masonry_columns(&[50.0, 40.0, 40.0]), vec![0, 1, 1]);
+        assert!(masonry_columns(&[]).is_empty());
     }
 }
