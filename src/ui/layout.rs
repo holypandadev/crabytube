@@ -42,13 +42,6 @@ pub fn virtual_range(
             .min(total)
 }
 
-/// Fixed geometry for virtualized lists. All virtual rows have an
-/// enforced fixed height (`row_pitch`) via a fixed-height container and
-/// truncated single-line text, so the rendered layout matches the arithmetic.
-/// Spacers live in an inner `column` with `spacing(0)` — never in the outer
-/// `spacing(18/12/8)` column — so no double spacing drifts the window.
-/// 44 px cover + 10 px padding above and below + 1 px rule.
-pub const COLLECTION_ROW_PITCH: f32 = 65.0;
 /// How far from the end of the search results the next page is asked for, in pixels.
 pub const CATALOG_MORE_MARGIN: f32 = 480.0;
 /// Height of a top/bottom spacer for `missing` virtual rows. Because spacers
@@ -98,7 +91,7 @@ mod tests {
         assert_eq!(virtual_spacer_height(5, 78.0), 390.0);
         assert_eq!(virtual_spacer_height(10, 76.0), 760.0);
         // Start + visible + end reconstructs the full list height.
-        let pitch = COLLECTION_ROW_PITCH;
+        let pitch = 65.0;
         let total = 200;
         for scroll in [0.0, 780.0, 3_900.0, 7_800.0, 15_000.0] {
             let range = virtual_range(total, scroll, 720.0, pitch, 10);

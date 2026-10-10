@@ -298,7 +298,9 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Up Next" => "A continuación",
         "Remove favorite" => "Quitar de favoritas",
         "Add to favorites" => "Añadir a favoritas",
-        "Smaller rows in lists and tables." => "Filas más pequeñas en listas y tablas.",
+        "Smaller rows in Up Next, results, collections and Favorites." => {
+            "Filas más pequeñas en A continuación, resultados, colecciones y favoritas."
+        }
         "Smoother on large windows; uses much more memory. Applies after restart." => {
             "Más fluido en ventanas grandes; usa mucha más memoria. Se aplica al reiniciar."
         }

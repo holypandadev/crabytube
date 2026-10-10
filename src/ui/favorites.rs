@@ -14,15 +14,12 @@ const HEART_W: f32 = 44.0;
 const CELL_GAP: f32 = 16.0;
 
 pub(super) fn favorites_cover(density: UiDensity) -> f32 {
-    match density {
-        UiDensity::Comfortable => 44.0,
-        UiDensity::Compact => 30.0,
-    }
+    density.collection_cover()
 }
 
 /// Fixed row pitch: cover, 10 px padding above and below, 1 px rule.
 pub(super) fn favorites_row_pitch(density: UiDensity) -> f32 {
-    favorites_cover(density) + 20.0 + 1.0
+    density.collection_row_pitch()
 }
 
 impl App {

@@ -1312,7 +1312,7 @@ impl App {
                     self.remember_collection_scroll(target, y);
                 }
                 let rows_top = self.collection_rows_offset();
-                let pitch = layout::COLLECTION_ROW_PITCH;
+                let pitch = self.preferences.ui_density.collection_row_pitch();
                 let artwork = self.scroll_preload_task();
                 let more = if self.collection.data.as_ref().is_some_and(|data| {
                     data.continuation.is_some()

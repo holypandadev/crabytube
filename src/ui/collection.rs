@@ -288,7 +288,7 @@ impl App {
 
         let duration_w = 96.0;
         let index_w = 48.0;
-        let cover = 44.0;
+        let cover = self.preferences.ui_density.collection_cover();
         let title_w = width - index_w - cover - duration_w - 3.0 * 16.0 - 8.0;
         let table_head = row![
             container(label(self.tr("#").into_owned(), 11.0).color(DIM)).width(index_w),
@@ -322,7 +322,7 @@ impl App {
             );
             return page.into();
         }
-        let pitch = super::layout::COLLECTION_ROW_PITCH;
+        let pitch = self.preferences.ui_density.collection_row_pitch();
         let range = super::layout::virtual_range(
             data.tracks.len(),
             self.collection_scroll,

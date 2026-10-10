@@ -4,6 +4,7 @@ use super::shell::{fit, section_heading};
 use super::theme::{self, DIM, FADED, INK, MONO, RULE, hrule, icon, label};
 use super::{App, Message};
 use crate::music::{HomeItem, HomeItemKind, Track};
+use crate::preferences::UiDensity;
 use iced::widget::{
     Space, button, column, container, mouse_area, pin, row, scrollable, stack, text, text_input,
 };
@@ -833,7 +834,10 @@ impl App {
             .as_ref()
             .is_some_and(|current| current.video_id == track.video_id);
         let duration = duration.unwrap_or_default();
-        let text_width = width - 36.0 - 16.0 - 60.0 - 44.0 - 24.0;
+        let density = self.preferences.ui_density;
+        let cover = density.result_cover();
+        let padding = UiDensity::row_padding(cover, density.result_row_height());
+        let text_width = width - cover - 16.0 - 60.0 - 44.0 - 24.0;
         let title = byline(&track.title, &track.artist);
         let more = button(icon("more", 18.0, INK))
             .on_press(Message::ToggleRowMenu(menu))
@@ -849,7 +853,7 @@ impl App {
             row![
                 self.cover(
                     track.thumbnail_url.as_deref(),
-                    36.0,
+                    cover,
                     crate::artwork::THUMB_MAX
                 ),
                 text(fit(&title, text_width, 14.0))
@@ -865,7 +869,7 @@ impl App {
         )
         .on_press(play)
         .width(Length::Fill)
-        .padding([6, 8])
+        .padding([padding, 8.0])
         .style(theme::row_button);
         let mut block = column![main];
         if open {

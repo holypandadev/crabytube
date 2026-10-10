@@ -343,7 +343,7 @@ impl App {
                 ),
                 self.setting(
                     "Compact Mode",
-                    Some("Smaller rows in lists and tables.".into()),
+                    Some("Smaller rows in Up Next, results, collections and Favorites.".into()),
                     toggle(
                         p.ui_density == UiDensity::Compact,
                         Message::Preference(Preference::UiDensity(

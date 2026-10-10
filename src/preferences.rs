@@ -105,25 +105,126 @@ pub enum UiDensity {
 impl UiDensity {
     pub const ALL: [Self; 2] = [Self::Comfortable, Self::Compact];
 
+    /// Cover edge of a search result row.
+    pub const fn result_cover(self) -> f32 {
+        match self {
+            Self::Comfortable => 36.0,
+            Self::Compact => 30.0,
+        }
+    }
+
+    /// Height of a search result row: the cover, 6 px above and below it in comfortable rows, and
+    /// the 1 px rule. Compact rows use 3 px.
     pub const fn result_row_height(self) -> f32 {
+        match self {
+            Self::Comfortable => 49.0,
+            Self::Compact => 37.0,
+        }
+    }
+
+    /// Cover edge of an Up Next row.
+    pub const fn queue_cover(self) -> f32 {
         match self {
             Self::Comfortable => 64.0,
             Self::Compact => 48.0,
         }
     }
 
+    /// Row pitch of Up Next: the cover, 8 px above and below it in comfortable rows (4 px compact),
+    /// and the 1 px rule.
     pub const fn queue_row_pitch(self) -> f32 {
         match self {
-            Self::Comfortable => 54.0,
-            Self::Compact => 42.0,
+            Self::Comfortable => 81.0,
+            Self::Compact => 57.0,
         }
     }
 
-    pub const fn library_row_pitch(self) -> f32 {
+    /// Cover edge of a collection track row and of a Favorites row.
+    pub const fn collection_cover(self) -> f32 {
         match self {
-            Self::Comfortable => 76.0,
-            Self::Compact => 56.0,
+            Self::Comfortable => 44.0,
+            Self::Compact => 30.0,
         }
+    }
+
+    /// Row pitch of a collection track row and of a Favorites row: the cover, 10 px above and below
+    /// it, and the 1 px rule.
+    pub const fn collection_row_pitch(self) -> f32 {
+        match self {
+            Self::Comfortable => 65.0,
+            Self::Compact => 51.0,
+        }
+    }
+
+    /// Row pitch of the Favorites list, which is the same as a collection row.
+    pub const fn library_row_pitch(self) -> f32 {
+        self.collection_row_pitch()
+    }
+
+    /// Vertical padding of a row whose cover and pitch are given, so the row fills its pitch.
+    pub fn row_padding(cover: f32, pitch: f32) -> f32 {
+        (pitch - cover - 1.0) / 2.0
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::UiDensity;
+
+    #[test]
+    fn compact_rows_are_shorter_and_each_row_fills_its_pitch() {
+        for density in UiDensity::ALL {
+            assert!(
+                density.queue_row_pitch() > density.queue_cover(),
+                "a row holds its cover"
+            );
+            assert!(density.result_row_height() > density.result_cover());
+            assert!(density.collection_row_pitch() > density.collection_cover());
+        }
+        for (compact, comfortable) in [
+            (
+                UiDensity::Compact.queue_row_pitch(),
+                UiDensity::Comfortable.queue_row_pitch(),
+            ),
+            (
+                UiDensity::Compact.result_row_height(),
+                UiDensity::Comfortable.result_row_height(),
+            ),
+            (
+                UiDensity::Compact.collection_row_pitch(),
+                UiDensity::Comfortable.collection_row_pitch(),
+            ),
+        ] {
+            assert!(compact < comfortable);
+        }
+        assert_eq!(
+            UiDensity::row_padding(
+                UiDensity::Comfortable.queue_cover(),
+                UiDensity::Comfortable.queue_row_pitch()
+            ),
+            8.0
+        );
+        assert_eq!(
+            UiDensity::row_padding(
+                UiDensity::Compact.queue_cover(),
+                UiDensity::Compact.queue_row_pitch()
+            ),
+            4.0
+        );
+        assert_eq!(
+            UiDensity::row_padding(
+                UiDensity::Comfortable.result_cover(),
+                UiDensity::Comfortable.result_row_height()
+            ),
+            6.0
+        );
+        assert_eq!(
+            UiDensity::row_padding(
+                UiDensity::Compact.result_cover(),
+                UiDensity::Compact.result_row_height()
+            ),
+            3.0
+        );
     }
 }
 

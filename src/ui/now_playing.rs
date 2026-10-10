@@ -4,12 +4,9 @@
 use super::shell::fit;
 use super::theme::{self, BLACK, DIM, FADED, INK, MONO, RULE, hrule, label, vrule};
 use super::{App, Message, NowPlayingTab, format_duration, layout};
+use crate::preferences::UiDensity;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Color, Element, Length, Size};
-
-/// Row pitch of the Up Next list: 64 px cover, 8 px padding above and below, 1 px rule.
-pub(super) const QUEUE_ROW_PITCH: f32 = 81.0;
-const QUEUE_COVER: f32 = 64.0;
 const PANEL_PADDING: f32 = 16.0;
 const COLUMN_GAP: f32 = 40.0;
 const STACK_BELOW: f32 = 760.0;
@@ -211,20 +208,23 @@ impl App {
                 .padding([16, 0])
                 .into();
         }
+        let density = self.preferences.ui_density;
+        let pitch = density.queue_row_pitch();
+        let cover = density.queue_cover();
+        let padding = UiDensity::row_padding(cover, pitch);
         let range = layout::virtual_range(
             self.queue.len(),
             self.queue_scroll.y,
             self.page_height(),
-            QUEUE_ROW_PITCH,
+            pitch,
             6,
         );
         let mut rows = column![].spacing(0).width(Length::Fill);
         if range.start > 0 {
-            rows = rows.push(
-                Space::new().height(layout::virtual_spacer_height(range.start, QUEUE_ROW_PITCH)),
-            );
+            rows =
+                rows.push(Space::new().height(layout::virtual_spacer_height(range.start, pitch)));
         }
-        let text_width = width - QUEUE_COVER - 20.0 - 64.0 - 44.0 - 24.0;
+        let text_width = width - cover - 20.0 - 64.0 - 44.0 - 24.0;
         for index in range.clone() {
             let entry = &self.queue[index];
             let current = self.queue_index == Some(index);
@@ -254,7 +254,7 @@ impl App {
                 row![
                     self.cover(
                         entry.thumbnail_url.as_deref(),
-                        QUEUE_COVER,
+                        cover,
                         crate::artwork::THUMB_MAX
                     ),
                     column![
@@ -277,7 +277,7 @@ impl App {
             )
             .on_press(Message::PlayQueueIndex(index))
             .width(Length::Fill)
-            .padding([8, 8])
+            .padding([padding, 8.0])
             .style(if current {
                 theme::row_button_current
             } else {
@@ -291,9 +291,7 @@ impl App {
         }
         let remaining = self.queue.len().saturating_sub(range.end);
         if remaining > 0 {
-            rows = rows.push(
-                Space::new().height(layout::virtual_spacer_height(remaining, QUEUE_ROW_PITCH)),
-            );
+            rows = rows.push(Space::new().height(layout::virtual_spacer_height(remaining, pitch)));
         }
         if self.radio_loading {
             rows = rows.push(

@@ -120,7 +120,7 @@ impl App {
                     .collect()
             }
             Page::NowPlaying => {
-                let pitch = now_playing::QUEUE_ROW_PITCH;
+                let pitch = self.preferences.ui_density.queue_row_pitch();
                 let height = self.page_height();
                 let visible =
                     layout::virtual_range(self.queue.len(), self.queue_scroll.y, height, pitch, 0);
@@ -144,7 +144,7 @@ impl App {
                 let Some(data) = self.collection.data.as_ref() else {
                     return Vec::new();
                 };
-                let pitch = layout::COLLECTION_ROW_PITCH;
+                let pitch = self.preferences.ui_density.collection_row_pitch();
                 let visible = layout::virtual_range(
                     data.tracks.len(),
                     self.collection_scroll,
