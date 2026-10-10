@@ -211,14 +211,18 @@ impl App {
                 .track_duration(&entry.video_id)
                 .map(format_duration)
                 .unwrap_or_default();
-            let open = self.row_menu.as_deref() == Some(entry.video_id.as_str());
+            let menu = super::messages::RowMenu {
+                list: "queue",
+                index,
+            };
+            let open = self.row_menu.as_ref() == Some(&menu);
             let marker: Element<'_, Message> = if current {
                 label("▶", 12.0).into()
             } else {
                 Space::new().width(0).into()
             };
             let more = button(super::theme::icon("more", 18.0, INK))
-                .on_press(Message::ToggleRowMenu(entry.video_id.clone()))
+                .on_press(Message::ToggleRowMenu(menu))
                 .padding(6)
                 .style(if open {
                     theme::icon_button_active

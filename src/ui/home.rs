@@ -651,6 +651,10 @@ impl App {
                         Some("LIVE".to_owned()),
                         Message::PlayContext(Arc::clone(&queue), index),
                         width,
+                        super::messages::RowMenu {
+                            list: "live",
+                            index,
+                        },
                     ));
                 }
             }
@@ -674,6 +678,10 @@ impl App {
                         duration,
                         Message::PlayContext(Arc::clone(&queue), index),
                         width,
+                        super::messages::RowMenu {
+                            list: "songs",
+                            index,
+                        },
                     ));
                 }
             }
@@ -806,8 +814,9 @@ impl App {
         duration: Option<String>,
         play: Message,
         width: f32,
+        menu: super::messages::RowMenu,
     ) -> Element<'a, Message> {
-        let open = self.row_menu.as_deref() == Some(track.video_id.as_str());
+        let open = self.row_menu.as_ref() == Some(&menu);
         let playing = self
             .playback_status
             .track
@@ -817,7 +826,7 @@ impl App {
         let text_width = width - 36.0 - 16.0 - 60.0 - 44.0 - 24.0;
         let title = byline(&track.title, &track.artist);
         let more = button(icon("more", 18.0, INK))
-            .on_press(Message::ToggleRowMenu(track.video_id.clone()))
+            .on_press(Message::ToggleRowMenu(menu))
             .padding(6)
             .style(if open {
                 theme::icon_button_active

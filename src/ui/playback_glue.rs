@@ -369,6 +369,7 @@ impl App {
         }
         let item = Arc::make_mut(&mut self.queue).remove(from);
         Arc::make_mut(&mut self.queue).insert(to, item);
+        self.queue_generation = self.queue_generation.wrapping_add(1);
         self.queue_index = self.queue_index.map(|i| {
             if i == from {
                 to
@@ -422,6 +423,7 @@ impl App {
         };
         if start < self.queue.len() {
             Arc::make_mut(&mut self.queue)[start..].shuffle(&mut rand::thread_rng());
+            self.queue_generation = self.queue_generation.wrapping_add(1);
         }
         self.persist();
     }

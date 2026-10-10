@@ -83,13 +83,15 @@ impl App {
                             .catalog_results
                             .iter()
                             .find_map(|item| item.track.as_ref())
-                            .map(|track| track.video_id.clone());
+                            .map(|_| super::messages::RowMenu {
+                                list: "songs",
+                                index: 0,
+                            });
                         let navigation = self.update(Message::Navigate(Page::Search));
                         match song {
-                            Some(video_id) => Task::batch([
-                                navigation,
-                                self.update(Message::ToggleRowMenu(video_id)),
-                            ]),
+                            Some(menu) => {
+                                Task::batch([navigation, self.update(Message::ToggleRowMenu(menu))])
+                            }
                             None => navigation,
                         }
                     }
@@ -100,9 +102,12 @@ impl App {
                             .catalog_results
                             .iter()
                             .find_map(|item| item.track.as_ref())
-                            .map(|track| track.video_id.clone());
+                            .map(|_| super::messages::RowMenu {
+                                list: "songs",
+                                index: 0,
+                            });
                         let close = match first {
-                            Some(video_id) => self.update(Message::ToggleRowMenu(video_id)),
+                            Some(menu) => self.update(Message::ToggleRowMenu(menu)),
                             None => Task::none(),
                         };
                         Task::batch([

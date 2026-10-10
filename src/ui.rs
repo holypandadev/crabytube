@@ -42,7 +42,7 @@ pub use diagnostics::{
     enable_diagnostic_soak, set_diagnostic_autoplay,
 };
 use iced::widget::operation::{self, AbsoluteOffset};
-use messages::{Message, NowPlayingTab, Page, Preference};
+use messages::{Message, NowPlayingTab, Page, Preference, RowMenu};
 
 #[allow(dead_code)]
 struct App {
@@ -210,7 +210,7 @@ struct App {
     /// Until when newly arrived covers are still fading in.
     fade_until: Option<std::time::Instant>,
     /// Video ID whose ••• actions are open, if any.
-    row_menu: Option<String>,
+    row_menu: Option<RowMenu>,
     /// Durations learned from playback, collections and search subtitles.
     known_durations: HashMap<String, Duration>,
 }
@@ -479,7 +479,12 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         #[cfg(feature = "diagnostics")]
         let (name, started) = (timing::message_name(&message), std::time::Instant::now());
+        let queue_before = self.queue_generation;
         let task = self.update_inner(message);
+        // Rows are numbered within their list: a menu for a row that moved or went is closed.
+        if self.queue_generation != queue_before {
+            self.row_menu = None;
+        }
         self.mpris.update(self.mpris_player_state());
         #[cfg(feature = "diagnostics")]
         timing::record_update(name, started.elapsed());
@@ -1645,11 +1650,11 @@ impl App {
                     self.carousel.offset = x;
                 }
             }
-            Message::ToggleRowMenu(video_id) => {
-                self.row_menu = if self.row_menu.as_deref() == Some(video_id.as_str()) {
+            Message::ToggleRowMenu(menu) => {
+                self.row_menu = if self.row_menu.as_ref() == Some(&menu) {
                     None
                 } else {
-                    Some(video_id)
+                    Some(menu)
                 };
             }
             Message::LikeTrack(mut track) => {
@@ -2012,6 +2017,7 @@ impl App {
         self.window_geometry_generation = self.window_geometry_generation.wrapping_add(1);
         self.autoplay = self.preferences.autoplay;
         self.queue = snapshot.queue;
+        self.queue_generation = self.queue_generation.wrapping_add(1);
         self.queue_index = snapshot.queue_index;
         self.radio_track_ids.clear();
         self.queue_notice = None;
@@ -2432,6 +2438,7 @@ impl App {
         self.cancel_artwork_batch();
         self.artwork_generation = self.artwork_generation.wrapping_add(1);
         self.invalidate_suggestions();
+        self.row_menu = None;
         self.page = page.clone();
         if self.page == Page::Home {
             self.enter_home();
@@ -4529,6 +4536,34 @@ mod tests {
         assert_eq!(app.committed_query, "daft punk");
         let _ = app.update(Message::SearchSubmitted);
         assert_eq!(app.committed_query, "radio");
+    }
+
+    #[test]
+    fn a_row_menu_belongs_to_one_queue_row_and_closes_when_rows_move_or_the_page_changes() {
+        let mut app = App {
+            page: Page::NowPlaying,
+            queue: vec![fixture_track("a"), fixture_track("a"), fixture_track("b")].into(),
+            ..App::default()
+        };
+        let first = RowMenu {
+            list: "queue",
+            index: 0,
+        };
+        let _ = app.update(Message::ToggleRowMenu(first.clone()));
+        assert_eq!(app.row_menu, Some(first.clone()));
+        // The same track sits at index 1 as well, but that row is not the one that is open.
+        assert_ne!(
+            app.row_menu,
+            Some(RowMenu {
+                list: "queue",
+                index: 1
+            })
+        );
+        let _ = app.update(Message::MoveQueue(0, 2));
+        assert!(app.row_menu.is_none(), "a move renumbers the rows");
+        let _ = app.update(Message::ToggleRowMenu(first));
+        let _ = app.update(Message::Navigate(Page::Library));
+        assert!(app.row_menu.is_none(), "leaving the page closes the menu");
     }
 
     #[test]

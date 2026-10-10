@@ -257,10 +257,18 @@ pub(super) enum Message {
     CarouselFrame(std::time::Instant),
     /// Redraws while covers fade in.
     FadeFrame(std::time::Instant),
-    ToggleRowMenu(String),
+    ToggleRowMenu(RowMenu),
     PlayNext(Track),
     AddToQueue(Track),
     /// Likes or unlikes a track that may not be in the queue or results.
     LikeTrack(Track),
     ResetSettings,
+}
+
+/// A row whose ••• menu is open: its list and its position in that list. A queue can hold the same
+/// track twice, so the track's id alone does not tell the rows apart.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RowMenu {
+    pub(super) list: &'static str,
+    pub(super) index: usize,
 }
