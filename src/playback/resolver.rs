@@ -559,19 +559,6 @@ fn trim_persisted_player_js_cache(directory: &std::path::Path) {
     }
 }
 
-/// Diagnostic-only credentials for comparing a client request with an external reference request.
-/// Treat both values as secrets; never log or persist them.
-pub struct ProbeCredentials {
-    pub visitor_data: String,
-    pub innertube_context: Value,
-    pub native_request: PoTokenRequest,
-    pub session_po_token: Option<String>,
-    pub content_po_token: Option<String>,
-    pub challenge_source: &'static str,
-    pub event_id_present: bool,
-    pub gvs_binding: GvsPoBinding,
-}
-
 impl YouTubeStreamResolver {
     pub fn new(session: YouTubeSession) -> Self {
         let token_provider: std::sync::Arc<dyn PoTokenProvider> =
@@ -601,45 +588,6 @@ impl YouTubeStreamResolver {
             player_cache: tokio::sync::Mutex::new(HashMap::new()),
             live_fallback: None,
         }
-    }
-
-    pub async fn prepare_probe(
-        &self,
-        track: &TrackId,
-        cancellation: CancellationToken,
-    ) -> Result<ProbeCredentials, StreamError> {
-        let runtime = self.player_runtime(&cancellation).await?;
-        let visitor_data = runtime_visitor_data(&runtime)?;
-        let native_request = po_token_request(&runtime, &visitor_data, track);
-        let tokens = if runtime.profile.requires_gvs_po_token {
-            Some(tokio::select! {
-                _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                result = self.token_provider.tokens(native_request.clone(), cancellation.child_token()) => result.map_err(|error| match error { PoTokenError::Cancelled => StreamError::Cancelled, _ => StreamError::PoToken(error.to_string()) })?,
-            })
-        } else {
-            None
-        };
-        info!(
-            client = runtime.profile.name,
-            visitor_data_present = true,
-            session_po_token_present = tokens.as_ref().is_some_and(|t| !t.session.value.is_empty()),
-            content_po_token_present = tokens.as_ref().is_some_and(|t| !t.content.value.is_empty()),
-            "player probe context prepared"
-        );
-        Ok(ProbeCredentials {
-            visitor_data,
-            innertube_context: runtime.context.clone(),
-            native_request,
-            session_po_token: tokens.as_ref().map(|t| t.session.value.clone()),
-            content_po_token: tokens.map(|t| t.content.value),
-            challenge_source: if runtime.homepage_challenge_json.is_some() {
-                "homepage"
-            } else {
-                "legacy"
-            },
-            event_id_present: runtime.event_id.is_some(),
-            gvs_binding: runtime.gvs_binding,
-        })
     }
 
     fn client() -> Result<&'static Client, StreamError> {

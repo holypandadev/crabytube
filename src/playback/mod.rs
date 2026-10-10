@@ -14,9 +14,8 @@ pub use pot::{
 };
 pub use resolver::{
     AudioCodec, AudioQuality, AudioStream, AudioStreamDiagnostics, ChallengeCapture, ClientProfile,
-    GvsPoBinding, MAX_PERSISTED_PLAYER_JS_ENTRIES, MAX_PERSISTED_PREPROCESSED_BYTES,
-    ProbeCredentials, StreamError, StreamResolver, TrackId, ValidatedPlaybackResolution,
-    YouTubeStreamResolver,
+    GvsPoBinding, MAX_PERSISTED_PLAYER_JS_ENTRIES, MAX_PERSISTED_PREPROCESSED_BYTES, StreamError,
+    StreamResolver, TrackId, ValidatedPlaybackResolution, YouTubeStreamResolver,
 };
 
 pub(crate) use resolver::parse_ytcfg;
