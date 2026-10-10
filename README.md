@@ -36,6 +36,45 @@
   </tr>
 </table>
 
+## Install
+
+Each release on the GitHub Releases page has one file per platform. Nothing is signed with a paid
+certificate, so your system asks you to confirm the first start once.
+
+### Linux
+
+Download the `.flatpak` file and install it for your user:
+
+```bash
+flatpak install --user CrabyTube.flatpak
+```
+
+If Flatpak asks for a runtime, allow it; it comes from Flathub. Then start CrabyTube from your
+application menu.
+
+### Windows
+
+1. Download the `.zip` file and extract it to a folder of your choice. Keep all the files together.
+2. Run `CrabyTube.exe`. Windows SmartScreen shows "Windows protected your PC" because the app is not
+   signed. Click **More info**, then **Run anyway**. You only need to do this once.
+3. If Windows reports a missing `VCRUNTIME140.dll` or `MSVCP140.dll`, install the Microsoft Visual C++
+   Redistributable for x64 (free from Microsoft) and start CrabyTube again.
+
+### macOS
+
+1. Download the `.zip` file, extract it and move `CrabyTube.app` to `/Applications`. The app is
+   universal and runs natively on Apple Silicon and Intel Macs.
+2. The app is signed ad hoc and not notarized, so macOS blocks the first start. Either:
+   - Control-click `CrabyTube.app`, choose **Open**, then **Open** again; or
+   - run this once in Terminal, then open the app normally:
+
+     ```bash
+     xattr -cr /Applications/CrabyTube.app
+     ```
+
+   On recent macOS versions you can also allow it under **System Settings → Privacy & Security →
+   Open Anyway**.
+
 ## Privacy
 
 - No account and no login. CrabyTube uses YouTube Music anonymously and stores no credentials or
