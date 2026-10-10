@@ -578,6 +578,15 @@ mod tests {
     }
 
     #[test]
+    fn clearing_the_artwork_cache_requests_the_playing_cover_again() {
+        let mut app = App::default();
+        app.playback_status.track = Some(track("now"));
+        drop(app.update(Message::ClearArtworkCache));
+        // Loading the cover starts a request for it, which is what keeps it from staying blank.
+        assert!(app.artwork_cancel.is_some());
+    }
+
+    #[test]
     fn playlist_header_cover_is_requested_on_scroll() {
         let mut app = playlist_app(200);
         drop(app.update(Message::CollectionScrolled(0.0)));

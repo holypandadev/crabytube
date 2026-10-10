@@ -962,8 +962,15 @@ impl App {
                 self.artwork_failed.clear();
                 self.cancel_artwork_batch();
                 self.artwork_generation = self.artwork_generation.wrapping_add(1);
-                self.artwork = None;
-                return self.clear_cache_task(crate::storage::CacheKind::Artwork);
+                // The playing cover is requested again, so it does not stay blank until the next track.
+                let playing = self
+                    .playback_status
+                    .track
+                    .as_ref()
+                    .and_then(|track| track.thumbnail_url.clone());
+                let reload = self.load_artwork(playing);
+                let clear = self.clear_cache_task(crate::storage::CacheKind::Artwork);
+                return Task::batch([clear, reload]);
             }
             Message::ClearLyricsCache => {
                 return self.clear_cache_task(crate::storage::CacheKind::Lyrics);
