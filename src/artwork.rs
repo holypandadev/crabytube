@@ -566,7 +566,13 @@ async fn fetch_in_lane(
     .flatten()
 }
 fn cached_handle_sized(path: std::path::PathBuf, max_dim: u32) -> Option<image::Handle> {
-    let image = thumbnail_sized(&std::fs::read(path).ok()?, max_dim)?;
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    // Trimming removes the least recently modified files first, so a file that was just read counts as used now.
+    let _ = file.set_modified(std::time::SystemTime::now());
+    let image = thumbnail_sized(&bytes, max_dim)?;
     Some(rgba_handle(image))
 }
 fn cached_or_remove_sized(path: std::path::PathBuf, max_dim: u32) -> Option<image::Handle> {
@@ -754,6 +760,41 @@ mod tests {
         assert!(!cache.contains_key("offscreen"));
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.bytes(), 2 * 256);
+    }
+
+    #[test]
+    fn a_cover_read_from_disk_is_trimmed_after_the_covers_nobody_read() {
+        let dir = std::env::temp_dir().join(format!(
+            "crabytube-artwork-access-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        ::image::RgbaImage::from_pixel(8, 8, ::image::Rgba([5, 5, 5, 255]))
+            .write_to(&mut encoded, ::image::ImageFormat::Png)
+            .unwrap();
+        let now = std::time::SystemTime::now();
+        let hours_ago = |hours: u64| now - std::time::Duration::from_secs(hours * 3600);
+        for (name, age) in [("a.img", 3), ("b.img", 2), ("c.img", 1)] {
+            let path = dir.join(name);
+            std::fs::write(&path, encoded.get_ref()).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(hours_ago(age))
+                .unwrap();
+        }
+        // The oldest file is read, so it becomes the most recently used one.
+        assert!(cached_handle_sized(dir.join("a.img"), THUMB_MAX).is_some());
+
+        trim_cache_to(&dir, None, u64::MAX, 2);
+
+        assert!(dir.join("a.img").is_file());
+        assert!(!dir.join("b.img").exists());
+        assert!(dir.join("c.img").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
