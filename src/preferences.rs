@@ -399,10 +399,28 @@ pub fn state_path() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/state.json")
 }
+/// The state file as it was before the last write. It is read only when the state file is unreadable.
+pub fn backup_path(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
 pub fn load(path: &Path) -> Result<Snapshot, String> {
     if !path.exists() {
         return Ok(Snapshot::default());
     }
+    match read_snapshot(path) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            let backup = backup_path(path);
+            match backup.exists().then(|| read_snapshot(&backup)) {
+                Some(Ok(snapshot)) => Ok(snapshot),
+                _ => Err(error),
+            }
+        }
+    }
+}
+
+fn read_snapshot(path: &Path) -> Result<Snapshot, String> {
     let data = std::fs::read(path).map_err(|e| e.to_string())?;
     if data.len() > MAX_STATE_BYTES {
         return Err(format!(
@@ -429,7 +447,7 @@ pub fn quarantine(path: &Path) -> Result<PathBuf, String> {
 
 pub fn write(path: &Path, value: &Snapshot) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing config directory")?;
-    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    create_private_dir(parent)?;
     let temp = path.with_extension("json.tmp");
     let mut value = value.clone();
     value.normalize();
@@ -440,8 +458,53 @@ pub fn write(path: &Path, value: &Snapshot) -> Result<(), String> {
             MAX_STATE_BYTES / 1024 / 1024
         ));
     }
-    std::fs::write(&temp, data).map_err(|e| e.to_string())?;
-    std::fs::rename(&temp, path).map_err(|e| e.to_string())
+    write_private_synced(&temp, &data)?;
+    // The previous state becomes the backup that `load` reads when the state file is unreadable.
+    if path.exists() {
+        let _ = std::fs::copy(path, backup_path(path));
+    }
+    std::fs::rename(&temp, path).map_err(|e| e.to_string())?;
+    // Makes the rename itself durable. Best effort: not every platform can sync a folder.
+    if let Ok(folder) = std::fs::File::open(parent) {
+        let _ = folder.sync_all();
+    }
+    Ok(())
+}
+
+/// Writes a file that only the owner can read (on Unix) and flushes it before it is renamed into place.
+fn write_private_synced(path: &Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|e| e.to_string())?;
+    file.write_all(data).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
+}
+
+/// Creates the settings folder. On Unix a folder created here is readable only by the owner; an
+/// existing folder keeps its permissions, because it may be shared with other programs.
+fn create_private_dir(dir: &Path) -> Result<(), String> {
+    if dir.is_dir() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())
+    }
 }
 
 fn cap_track(track: &mut Track) {
@@ -587,6 +650,44 @@ pub fn set_startup(enabled: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_state_is_readable_only_by_the_owner_on_unix() {
+        let dir = std::env::temp_dir().join(format!("crabytube-state-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("state.json");
+        write(&path, &Snapshot::default()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_write_keeps_the_previous_state_as_backup_and_load_falls_back_to_it() {
+        let dir =
+            std::env::temp_dir().join(format!("crabytube-state-backup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("state.json");
+        let first = Snapshot {
+            history: vec!["first".into()],
+            ..Snapshot::default()
+        };
+        let second = Snapshot {
+            history: vec!["second".into()],
+            ..Snapshot::default()
+        };
+        write(&path, &first).unwrap();
+        write(&path, &second).unwrap();
+        assert_eq!(load(&path).unwrap().history, vec!["second".to_string()]);
+        std::fs::write(&path, b"{ not json").unwrap();
+        assert_eq!(load(&path).unwrap().history, vec!["first".to_string()]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn recent_plays_keep_the_newest_unique_entries_and_respect_history_privacy() {
         let track = |id: &str| Track {
