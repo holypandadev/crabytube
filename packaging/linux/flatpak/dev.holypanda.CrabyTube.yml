@@ -1,0 +1,44 @@
+app-id: dev.holypanda.CrabyTube
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: crabytube
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --share=network
+  - --socket=pulseaudio
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.mpris.MediaPlayer2.crabytube
+  # Discord's rich presence: the native socket, and the socket of Discord's own Flatpak.
+  - --filesystem=xdg-run/discord-ipc-0
+  - --filesystem=xdg-run/app/com.discordapp.Discord
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/crabytube/cargo
+modules:
+  - name: crabytube
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked
+      - install -Dm755 target/release/crabytube /app/bin/crabytube
+      - install -Dm755 target/release/botguard-helper /app/bin/botguard-helper
+      - install -Dm755 target/release/js-challenge-helper /app/bin/js-challenge-helper
+      - install -Dm644 packaging/linux/flatpak/dev.holypanda.CrabyTube.desktop /app/share/applications/dev.holypanda.CrabyTube.desktop
+      - install -Dm644 packaging/linux/flatpak/dev.holypanda.CrabyTube.metainfo.xml /app/share/metainfo/dev.holypanda.CrabyTube.metainfo.xml
+      - |
+        for dir in packaging/icons/hicolor/*; do
+          size=$(basename "$dir")
+          install -Dm644 "$dir/apps/crabytube.png" "/app/share/icons/hicolor/$size/apps/dev.holypanda.CrabyTube.png"
+        done
+    sources:
+      - type: dir
+        path: ../../..
+        skip:
+          - .git
+          - target
