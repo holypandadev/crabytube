@@ -1674,7 +1674,7 @@ fn stream_temp_dir() -> std::path::PathBuf {
     let dir = dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/stream");
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = crate::storage::create_private_dir_all(&dir);
     dir
 }
 

@@ -429,7 +429,7 @@ pub fn quarantine(path: &Path) -> Result<PathBuf, String> {
 
 pub fn write(path: &Path, value: &Snapshot) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing config directory")?;
-    create_private_dir(parent)?;
+    crate::storage::create_private_dir_all(parent).map_err(|e| e.to_string())?;
     let temp = path.with_extension("json.tmp");
     let mut value = value.clone();
     value.normalize();
@@ -466,27 +466,6 @@ fn write_private_synced(path: &Path, data: &[u8]) -> Result<(), String> {
     let mut file = options.open(path).map_err(|e| e.to_string())?;
     file.write_all(data).map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())
-}
-
-/// Creates the settings folder. On Unix a folder created here is readable only by the owner; an
-/// existing folder keeps its permissions, because it may be shared with other programs.
-fn create_private_dir(dir: &Path) -> Result<(), String> {
-    if dir.is_dir() {
-        return Ok(());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
-            .map_err(|e| e.to_string())
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())
-    }
 }
 
 fn cap_track(track: &mut Track) {

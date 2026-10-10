@@ -599,7 +599,7 @@ where
     if let Some(data) = to_store
         && let Some(parent) = path.parent()
     {
-        let _ = tokio::fs::create_dir_all(parent).await;
+        let _ = crate::storage::create_private_dir_all(parent);
         if tokio::fs::write(&path, data).await.is_ok() {
             let parent = parent.to_path_buf();
             drop(tokio::task::spawn_blocking(move || {

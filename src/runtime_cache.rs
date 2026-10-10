@@ -75,7 +75,7 @@ fn write(saved: &SavedRuntime) {
         return;
     };
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = crate::storage::create_private_dir_all(parent);
     }
     let Ok(bytes) = serde_json::to_vec(saved) else {
         return;

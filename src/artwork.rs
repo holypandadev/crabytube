@@ -297,7 +297,7 @@ fn atomic_save_png(path: &std::path::Path, image: &::image::RgbaImage) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
-    if std::fs::create_dir_all(parent).is_err() {
+    if crate::storage::create_private_dir_all(parent).is_err() {
         return false;
     }
     trim_cache(parent, Some(path));

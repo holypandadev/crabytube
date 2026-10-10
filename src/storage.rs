@@ -197,9 +197,30 @@ fn botguard_snapshot_bytes(root: &Path) -> u64 {
         })
 }
 
+/// Creates a folder the app owns, with its parents. On Unix a folder created here is readable only
+/// by its owner. A folder that already exists keeps its permissions, because it may be shared with
+/// other programs.
+pub(crate) fn create_private_dir_all(dir: &Path) -> io::Result<()> {
+    if dir.is_dir() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CacheKind, clear_cache_at, disk_cache_usage_at};
+    use super::{CacheKind, clear_cache_at, create_private_dir_all, disk_cache_usage_at};
     use std::{fs, path::PathBuf, time::SystemTime};
 
     fn temp_root(label: &str) -> PathBuf {
@@ -211,6 +232,24 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos()
         ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folders_the_app_creates_are_private_and_existing_ones_keep_their_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("private-dirs");
+        let nested = root.join("cache").join("stream");
+        create_private_dir_all(&nested).unwrap();
+        let mode =
+            |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&nested), 0o700);
+        let shared = root.join("shared");
+        fs::create_dir(&shared).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
+        create_private_dir_all(&shared).unwrap();
+        assert_eq!(mode(&shared), 0o755);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

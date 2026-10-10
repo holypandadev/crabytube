@@ -90,7 +90,7 @@ fn save_at(path: &Path, snapshot: &Snapshot) {
     let Some(parent) = path.parent() else {
         return;
     };
-    if std::fs::create_dir_all(parent).is_err() {
+    if crate::storage::create_private_dir_all(parent).is_err() {
         return;
     }
     let temporary = path.with_extension("json.tmp");

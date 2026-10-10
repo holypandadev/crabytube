@@ -250,7 +250,7 @@ fn save_persisted_cache(path: &Path, cache: &PoTokenCache, now: i64) -> std::io:
     let Some(parent) = path.parent() else {
         return Ok(());
     };
-    std::fs::create_dir_all(parent)?;
+    crate::storage::create_private_dir_all(parent)?;
     let data = serde_json::to_vec(&cache.to_persisted(now))
         .map_err(|error| std::io::Error::other(error.to_string()))?;
     let temporary = path.with_extension("json.tmp");
