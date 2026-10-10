@@ -220,7 +220,7 @@ pub(crate) fn create_private_dir_all(dir: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CacheKind, clear_cache_at, create_private_dir_all, disk_cache_usage_at};
+    use super::{CacheKind, clear_cache_at, disk_cache_usage_at};
     use std::{fs, path::PathBuf, time::SystemTime};
 
     fn temp_root(label: &str) -> PathBuf {
@@ -237,6 +237,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn folders_the_app_creates_are_private_and_existing_ones_keep_their_mode() {
+        use super::create_private_dir_all;
         use std::os::unix::fs::PermissionsExt;
         let root = temp_root("private-dirs");
         let nested = root.join("cache").join("stream");
