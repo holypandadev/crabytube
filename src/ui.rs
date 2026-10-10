@@ -3130,13 +3130,64 @@ mod tests {
         drop(app.update(Message::PlaybackTick));
         assert!(!app.karaoke_tick_pending);
 
-        // Lyrics without word timing keep the fixed tick.
+        // Lyrics without any timing keep the progress tick.
         app.lyrics = Some(crate::lyrics::Lyrics {
             source: "plain".into(),
             lines: Vec::new(),
             plain: Some("no timing".into()),
         });
         assert!(!app.karaoke_active());
+    }
+
+    #[test]
+    fn line_timed_lyrics_wake_at_the_next_line_start() {
+        let line = |start: f64, text: &str| crate::lyrics::Line {
+            start,
+            end: None,
+            text: text.into(),
+            words: Vec::new(),
+            translation: None,
+            romanization: None,
+            background: None,
+        };
+        let mut app = App {
+            page: Page::NowPlaying,
+            now_playing_tab: super::NowPlayingTab::Lyrics,
+            lyrics: Some(crate::lyrics::Lyrics {
+                source: "line-timed".into(),
+                lines: vec![line(10.0, "first"), line(13.0, "second")],
+                plain: None,
+            }),
+            ..App::default()
+        };
+        drop(app.update_playback_status(PlaybackStatus {
+            track: Some(song("Track")),
+            position: Duration::from_secs_f64(12.5),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        }));
+        assert!(
+            app.karaoke_active(),
+            "line timing alone must drive the lyrics"
+        );
+        // The next line starts half a second away, plus the small margin.
+        let wait = app.karaoke_wait().unwrap();
+        assert!(
+            (Duration::from_millis(500)..=Duration::from_millis(530)).contains(&wait),
+            "wait was {wait:?}"
+        );
+    }
+
+    #[test]
+    fn now_playing_ticks_once_a_second_and_other_pages_four_times() {
+        assert_eq!(
+            super::subscriptions::progress_tick(&Page::NowPlaying),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            super::subscriptions::progress_tick(&Page::Home),
+            super::PLAYBACK_TICK
+        );
     }
 
     #[test]

@@ -5,6 +5,18 @@ use super::*;
 /// Home's greeting changes once a minute at most. The status line has its own stream, which
 /// reads the process every few seconds. Both run only while Home is on screen.
 const HOME_CLOCK_TICK: std::time::Duration = std::time::Duration::from_secs(60);
+/// Now Playing redraws the lyrics and the queue on every progress tick, so it ticks once a
+/// second when no karaoke wake-up drives it. Elsewhere the progress bar ticks 4 times a second.
+const NOW_PLAYING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The interval of the progress tick on `page`.
+pub(super) fn progress_tick(page: &Page) -> std::time::Duration {
+    if *page == Page::NowPlaying {
+        NOW_PLAYING_TICK
+    } else {
+        PLAYBACK_TICK
+    }
+}
 
 impl App {
     pub(super) fn subscription(&self) -> Subscription<Message> {
@@ -22,7 +34,7 @@ impl App {
                 self.playback_status.state,
                 PlaybackState::Buffering | PlaybackState::Seeking | PlaybackState::Playing
             ) {
-            iced::time::every(PLAYBACK_TICK).map(|_| Message::PlaybackTick)
+            iced::time::every(progress_tick(&self.page)).map(|_| Message::PlaybackTick)
         } else {
             Subscription::none()
         };

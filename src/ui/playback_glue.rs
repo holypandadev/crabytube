@@ -5,7 +5,8 @@ use crate::preferences::{MAX_RECENT_PLAYS, RecentCollection, RecentPlay};
 
 /// Bounds of the karaoke wait between two highlight changes.
 const KARAOKE_MIN_WAIT: Duration = Duration::from_millis(60);
-const KARAOKE_MAX_WAIT: Duration = Duration::from_millis(500);
+/// Longest wait before the app looks again, so the progress bar moves between lines.
+const KARAOKE_MAX_WAIT: Duration = Duration::from_millis(1000);
 
 impl App {
     /// Adds the track that just started playing to "Jump back in", once per start. A track that
@@ -128,7 +129,8 @@ impl App {
         Task::batch(tasks)
     }
 
-    /// Synced lyrics are on screen and sung word by word while the track plays.
+    /// Timed lyrics are on screen and followed while the track plays: at each word when the
+    /// source gives word timing, and at each line otherwise.
     pub(super) fn karaoke_active(&self) -> bool {
         self.page == Page::NowPlaying
             && self.now_playing_tab == NowPlayingTab::Lyrics
@@ -137,7 +139,7 @@ impl App {
             && self
                 .lyrics
                 .as_ref()
-                .is_some_and(|lyrics| lyrics.lines.iter().any(|line| !line.words.is_empty()))
+                .is_some_and(|lyrics| !lyrics.lines.is_empty())
     }
 
     /// How long until the next word or line of the lyrics starts, counted from the
