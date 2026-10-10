@@ -1320,6 +1320,10 @@ async fn prepare_stream(
         Err(error) => return Some((None, Err(error))),
     };
     let byte_len = reader.content_length();
+    let reader = DownloadWatch {
+        inner: reader,
+        failure: Arc::clone(&fetch_error),
+    };
     let source = create_audio_source(
         reader,
         MediaKind::Progressive { byte_len },
@@ -1695,6 +1699,34 @@ fn fetch_error_message(source: &Mutex<Option<String>>) -> Option<String> {
 enum MediaKind {
     Progressive { byte_len: Option<u64> },
     Live,
+}
+
+/// A progressive reader that records a failed download in the fetch error. The decoder reads through
+/// it, so a failure reaches the playback as an error rather than being taken for the end of the track.
+struct DownloadWatch<R> {
+    inner: R,
+    failure: Arc<Mutex<Option<String>>>,
+}
+
+impl<R: io::Read> io::Read for DownloadWatch<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let result = self.inner.read(buf);
+        if let Err(error) = &result {
+            // The download reports its failure as `Other`. A cancelled read is not a failure.
+            if error.kind() == io::ErrorKind::Other
+                && let Ok(mut slot) = self.failure.lock()
+            {
+                slot.get_or_insert_with(|| format!("the audio download failed: {error}"));
+            }
+        }
+        result
+    }
+}
+
+impl<R: io::Seek> io::Seek for DownloadWatch<R> {
+    fn seek(&mut self, position: io::SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
+    }
 }
 
 async fn create_audio_source<R>(
@@ -2193,6 +2225,42 @@ mod tests {
             }
         });
         port
+    }
+
+    /// A reader whose every read fails with `kind`, as a failed or cancelled download does.
+    struct FailingDownload(std::io::ErrorKind);
+
+    impl std::io::Read for FailingDownload {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(self.0, "stream failed to download"))
+        }
+    }
+
+    impl std::io::Seek for FailingDownload {
+        fn seek(&mut self, _: std::io::SeekFrom) -> std::io::Result<u64> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn a_failed_download_is_recorded_for_the_decoder_but_a_cancelled_read_is_not() {
+        use std::io::Read;
+        let mut buf = [0_u8; 8];
+        let failure = Arc::new(std::sync::Mutex::new(None));
+        let mut watched = super::DownloadWatch {
+            inner: FailingDownload(std::io::ErrorKind::Other),
+            failure: Arc::clone(&failure),
+        };
+        assert!(watched.read(&mut buf).is_err());
+        assert!(super::fetch_error_message(&failure).is_some());
+
+        let cancelled = Arc::new(std::sync::Mutex::new(None));
+        let mut interrupted = super::DownloadWatch {
+            inner: FailingDownload(std::io::ErrorKind::Interrupted),
+            failure: Arc::clone(&cancelled),
+        };
+        assert!(interrupted.read(&mut buf).is_err());
+        assert!(super::fetch_error_message(&cancelled).is_none());
     }
 
     /// Answers one request with `response` and hands back the request text it received.
