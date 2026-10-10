@@ -445,6 +445,11 @@ fn generation_matches(active: u64, event: u64) -> bool {
     active == event
 }
 
+/// Whether a seek lands at or past the end of a track whose length is known.
+fn seek_ends_track(target: Duration, duration: Option<Duration>) -> bool {
+    duration.is_some_and(|duration| target >= duration)
+}
+
 fn transition(status: &mut PlaybackStatus, next: PlaybackState) {
     if is_valid_transition(status.state, next) {
         status.state = next;
@@ -655,6 +660,9 @@ async fn actor(
                 Some(Command::Stop) => {
                     if let Some(token) = cancellation.take() { token.cancel(); }
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
+                    // Events of the stopped track, including one prepared ahead, must not apply to what follows.
+                    if let Some(stale) = prepared_ahead.take() { stale.discard(); }
+                    generation = next_generation();
                     if let Some(output) = output.as_ref() {
                         output.player.clear();
                     }
@@ -676,8 +684,11 @@ async fn actor(
                     output_device_id = device_id;
                 }
                 Some(Command::Seek(position)) => {
+                    if !status.live && active.is_some() && seek_ends_track(position, status.duration) {
+                        // Past the end there is nothing left to play: the track finishes as it does at its last sample.
+                        let _ = events_tx.send(Event::TrackEnded { generation });
                     // A live broadcast has no position to go back to.
-                    if let Some(audio) = active.as_ref().filter(|_| !status.live) {
+                    } else if let Some(audio) = active.as_ref().filter(|_| !status.live) {
                         seek_generation = seek_generation.wrapping_add(1);
                         let current_seek_generation = seek_generation;
                         let (reply, response) = tokio::sync::oneshot::channel();
@@ -833,9 +844,22 @@ async fn actor(
                             transition(&mut status, if paused_by_user { PlaybackState::Paused } else { PlaybackState::Buffering });
                             info!(position_ms = requested.as_millis(), "seek");
                         }
-                        (Err(error), _, _) => {
-                            warn!(%error, "seek failed");
-                            transition(&mut status, if paused_by_user { PlaybackState::Paused } else { PlaybackState::Playing });
+                        (Err(error), Some(audio), output) => {
+                            // The output was cleared for the seek, so the unchanged source is queued again.
+                            warn!(%error, "seek failed; continuing from the current position");
+                            audio.first_sample_output.store(false, Ordering::Relaxed);
+                            observed_underruns = audio.underruns.load(Ordering::Relaxed);
+                            status.position = position(&audio.cursor, audio.rate, audio.channels);
+                            if let Some(output) = output {
+                                output.player.append(audio.source());
+                                if !paused_by_user { output.player.play(); }
+                            }
+                            transition(&mut status, if paused_by_user { PlaybackState::Paused } else { PlaybackState::Buffering });
+                        }
+                        (Err(error), None, _) => {
+                            error!(%error, "seek failed and the audio stream is gone");
+                            transition(&mut status, PlaybackState::Error);
+                            status.error = Some(engine_error_message(&EngineError::Worker(error)).into());
                         }
                         _ => {}
                     }
@@ -1589,7 +1613,7 @@ mod tests {
     use super::{
         AudioSource, EngineError, PlaybackState, PlaybackStatus, PlaybackStatusReceiver,
         ResolvedAudioFormat, engine_error_message, generation_matches, is_valid_transition,
-        playback_status_stream,
+        playback_status_stream, seek_ends_track,
     };
 
     #[tokio::test]
@@ -1764,6 +1788,16 @@ mod tests {
     fn stale_resolution_generations_are_rejected() {
         assert!(generation_matches(42, 42));
         assert!(!generation_matches(43, 42));
+    }
+
+    #[test]
+    fn a_seek_to_or_past_the_end_finishes_the_track() {
+        let length = Duration::from_secs(200);
+        assert!(seek_ends_track(length, Some(length)));
+        assert!(seek_ends_track(Duration::from_secs(260), Some(length)));
+        assert!(!seek_ends_track(Duration::from_secs(199), Some(length)));
+        // Without a known length the seek is sent to the decoder as before.
+        assert!(!seek_ends_track(Duration::from_secs(260), None));
     }
 
     #[test]
