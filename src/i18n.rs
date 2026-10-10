@@ -45,32 +45,19 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Music" => "Música",
         "Playlists" => "Listas de reproducción",
         "Settings" => "Ajustes",
-        "CrabyTube preferences" => "Preferencias de CrabyTube",
         "CrabyTube" => "CrabyTube",
         "Home" => "Inicio",
         "Library" => "Biblioteca",
         "Queue" => "Cola",
         "Search" => "Buscar",
         "Ctrl+K" => "Ctrl+K",
-        "Search songs, albums, artists, playlists…" => {
-            "Buscar canciones, álbumes, artistas y listas…"
-        }
         "Top result" => "Mejor resultado",
-        "✧  Top result" => "✧  Mejor resultado",
         "TOP RESULT" => "MEJOR RESULTADO",
         "SONGS" => "CANCIONES",
-        "YOUR MUSIC" => "TU MÚSICA",
         "YOUTUBE MUSIC" => "YOUTUBE MUSIC",
-        "Quick searches" => "Búsquedas rápidas",
-        "Electronic" => "Electrónica",
         "Relax" => "Relajación",
-        "Concentration" => "Concentración",
-        "Energy" => "Energía",
         "Night" => "Noche",
-        "Classics" => "Clásicos",
-        "Workout" => "Entrenamiento",
         "Party" => "Fiesta",
-        "Listen your way" => "Escucha a tu manera",
         "Back" => "Atrás",
         "1 song" => "1 canción",
         "GOOD MORNING." => "BUENOS DÍAS.",
@@ -103,76 +90,22 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Copied" => "Copiado",
         "Live" => "Directos",
         "Live streams are not supported yet" => "Los directos todavía no son compatibles",
-        "See all  ›" => "Ver todo  ›",
-        "Updating results…" => "Actualizando resultados…",
         "Searching…" => "Buscando…",
-        "No results in this category." => "No hay resultados en esta categoría.",
-        "More results could not load" => "No se pudieron cargar más resultados",
-        "Loading more results…" => "Cargando más resultados…",
         "Retry loading more" => "Reintentar carga",
-        "Load more results" => "Cargar más resultados",
-        "Search could not finish" => "No se pudo completar la búsqueda",
-        "Retry search" => "Reintentar búsqueda",
         "Recent searches" => "Búsquedas recientes",
         "Clear" => "Borrar",
-        "No songs found" => "No se encontraron canciones",
-        "Try another title, artist, or a shorter search." => {
-            "Prueba otro título o artista, o una búsqueda más corta."
-        }
-        "Song • {}" => "Canción • {}",
-        "▶ Play" => "▶ Reproducir",
         "Try again" => "Intentar de nuevo",
-        "Retry refresh" => "Reintentar actualización",
-        "Loading your music" => "Cargando tu música",
-        "Connecting to YouTube Music…" => "Conectando con YouTube Music…",
         "Home could not load" => "No se pudo cargar Inicio",
-        "Showing saved Home data · {error}" => "Mostrando datos guardados de Inicio · {error}",
-        "Your Home feed is empty" => "Tu página de Inicio está vacía",
-        "Fetching live charts, releases and recommendations…" => {
-            "Cargando listas, lanzamientos y recomendaciones…"
-        }
-        "Made for exploring" => "Hecho para explorar",
-        "Choose a quick search or try again to load live catalogs." => {
-            "Elige una búsqueda rápida o vuelve a intentarlo para cargar el catálogo."
-        }
-        "Liked songs" => "Canciones que te gustan",
-        "SAVED ON THIS DEVICE" => "GUARDADAS EN ESTE DISPOSITIVO",
-        "Like a song using the heart button to save it here." => {
-            "Pulsa el corazón de una canción para guardarla aquí."
-        }
-        "No more songs in the queue." => "No hay más canciones en la cola.",
-        "Loading radio…" => "Cargando radio…",
-        "Retry radio" => "Reintentar radio",
-        "Playing from" => "Reproduciendo desde",
         "Autoplay" => "Reproducción automática",
-        "● On" => "● Activada",
-        "○ Off" => "○ Desactivada",
         "Playing" => "Reproduciendo",
         "Paused" => "En pausa",
         "Listen on YouTube Music" => "Escuchar en YouTube Music",
         "Stopped" => "Detenida",
         "Nothing playing" => "No se está reproduciendo nada",
-        "Choose a track to open Now Playing." => {
-            "Elige una canción para abrir Reproduciendo ahora."
-        }
-        "‹ Back" => "‹ Atrás",
-        "Resolving…" => "Preparando…",
         "Buffering…" => "Cargando…",
-        "Seeking…" => "Buscando posición…",
         "Playback failed" => "Falló la reproducción",
         "Ready" => "Listo",
-        "Return to current lyric" => "Volver a la letra actual",
-        "Showing available text while checking for synchronized lyrics." => {
-            "Mostrando el texto disponible mientras se buscan letras sincronizadas."
-        }
-        "Loading lyrics…" => "Cargando letras…",
-        "Checking synced sources and local cache" => {
-            "Comprobando fuentes sincronizadas y caché local"
-        }
-        "No playlists found" => "No se encontraron listas de reproducción",
-        "Play a song to load lyrics." => "Reproduce una canción para cargar sus letras.",
         "Retry" => "Reintentar",
-        "Collection could not load" => "No se pudo cargar la colección",
         "This collection type is not supported yet." => {
             "Este tipo de colección todavía no es compatible."
         }
@@ -187,105 +120,20 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "ALBUM" => "ÁLBUM",
         "SONG" => "CANCIÓN",
         "MIX" => "MEZCLA",
-        "⇄ Shuffle" => "⇄ Aleatorio",
         "Loading more songs…" => "Cargando más canciones…",
-        "Retry loading more songs" => "Reintentar carga de canciones",
-        "No playable songs returned" => "No se recibieron canciones reproducibles",
-        "This collection has no playable songs in the returned batch." => {
-            "Este grupo no contiene canciones reproducibles."
-        }
         "TITLE" => "TÍTULO",
         "DURATION" => "DURACIÓN",
-        "Mute audio" => "Silenciar audio",
-        "Continue with radio when the queue ends" => {
-            "Continuar con la radio cuando termine la cola"
-        }
-        "Shuffle the whole queue, including tracks before the current song" => {
-            "Mezclar toda la cola, incluidas las canciones anteriores a la actual"
-        }
-        "Restore queue after restarting (playback stays paused)" => {
-            "Restaurar la cola al reiniciar (la reproducción seguirá en pausa)"
-        }
-        "Playback & queue" => "Reproducción y cola",
-        "Choose how CrabyTube plays music on this device." => {
-            "Elige cómo reproduce música CrabyTube en este dispositivo."
-        }
         "Audio output" => "Salida de audio",
-        "Loading available output devices…" => "Cargando dispositivos de salida…",
-        "Device changes take effect on the next track. If a saved device disconnects, switch to System default and restart playback." => {
-            "El cambio de dispositivo se aplica a la siguiente canción. Si el dispositivo guardado se desconecta, elige la salida predeterminada y reinicia la reproducción."
-        }
         "Volume" => "Volumen",
         "System default" => "Predeterminado del sistema",
-        "Keep the interface comfortable and responsive." => "Mantén la interfaz cómoda y ágil.",
-        "Artwork visibility" => "Visibilidad de la portada",
         "Reduce motion" => "Reducir movimiento",
-        "UI font family" => "Tipografía de la interfaz",
-        "Font family changes apply the next time CrabyTube opens." => {
-            "El cambio de tipografía se aplicará al volver a abrir CrabyTube."
-        }
-        "List density" => "Densidad de listas",
-        "Compact density reduces artwork and spacing in result, favorite and queue rows." => {
-            "La vista compacta reduce las portadas y el espacio entre resultados, favoritos y canciones de la cola."
-        }
         "Compact" => "Compacta",
         "Comfortable" => "Espaciosa",
         "Sans serif" => "Palo seco",
         "Serif" => "Serif",
         "Monospace" => "Monoespaciada",
-        "History & privacy" => "Historial y privacidad",
-        "Keep search history on this device" => {
-            "Guardar el historial de búsqueda en este dispositivo"
-        }
-        "Clear search history" => "Borrar historial de búsqueda",
-        "Launch CrabyTube when I sign in" => "Abrir CrabyTube al iniciar sesión",
-        "Close to tray when closing the window" => "Minimizar a la bandeja al cerrar la ventana",
-        "Use the tray menu to reopen CrabyTube or quit." => {
-            "Usa el menú de la bandeja para volver a abrir CrabyTube o salir."
-        }
-        "Close to tray is available only when a compatible Linux tray host is active." => {
-            "La opción de minimizar a la bandeja requiere un host compatible activo en Linux."
-        }
-        "Launch on startup is supported on Linux only." => {
-            "El inicio automático solo está disponible en Linux."
-        }
-        "Startup integration is available on Linux." => {
-            "La integración de inicio está disponible en Linux."
-        }
-        "Startup integration is not available on this platform." => {
-            "La integración de inicio no está disponible en esta plataforma."
-        }
         "Integrations" => "Integraciones",
-        "Discord Rich Presence uses the Discord desktop client's local IPC connection." => {
-            "Discord Rich Presence usa la conexión IPC local de la aplicación de escritorio de Discord."
-        }
-        "Share the current song, artist, artwork and playback progress" => {
-            "Compartir la canción actual, el artista, la portada y el progreso"
-        }
-        "Global timing offset. Songs with their own saved offset keep it." => {
-            "Sincronización global. Las canciones con su propio ajuste guardado lo conservan."
-        }
-        "Show provider translations when available" => {
-            "Mostrar traducciones del proveedor cuando estén disponibles"
-        }
-        "Follow the current timed line" => "Seguir la línea sincronizada actual",
-        "Storage & diagnostics" => "Almacenamiento y diagnóstico",
-        "Refresh cache sizes" => "Actualizar tamaños de caché",
-        "Clear artwork cache" => "Borrar caché de portadas",
-        "Clear lyrics cache" => "Borrar caché de letras",
-        "Clear Home" => "Borrar Inicio",
-        "Clear player JS disk" => "Borrar caché de JavaScript del reproductor",
-        "Clear BotGuard disk" => "Borrar caché de BotGuard",
-        "Export diagnostics (no credentials)" => "Exportar diagnóstico (sin credenciales)",
-        "Export local data" => "Exportar datos locales",
-        "Import local data" => "Importar datos locales",
-        "Exports include local preferences, queue, history and favorites; they do not include credentials." => {
-            "La exportación incluye preferencias, cola, historial y favoritos locales; no incluye credenciales."
-        }
         "System media controls" => "Controles multimedia del sistema",
-        "Play, pause, seek, volume, shuffle, repeat, next, previous, raise and quit are exposed through MPRIS on the Linux session bus. Track titles and artists are shared with desktop media controls while playback is active." => {
-            "MPRIS ofrece reproducir, pausar, buscar, ajustar volumen, mezclar, repetir, cambiar de canción, restaurar la ventana y salir en Linux. El título y el artista se comparten con los controles multimedia del escritorio mientras se reproduce música."
-        }
         "System tray is starting." => "Iniciando la bandeja del sistema.",
         "System tray is active." => "La bandeja del sistema está activa.",
         "Waiting for a compatible system tray host." => {
@@ -297,17 +145,9 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "System tray support is unavailable on this platform." => {
             "La bandeja del sistema no está disponible en esta plataforma."
         }
-        "About CrabyTube" => "Acerca de CrabyTube",
-        "Keyboard shortcuts" => "Atajos de teclado",
-        "Third-party notices: see docs/licenses.md in the source distribution." => {
-            "Avisos de terceros: consulta docs/licenses.md en el código fuente."
-        }
-        "Version {} · {} build · {}-{}" => "Versión {} · compilación {} · {}-{}",
-        "CrabyTube Monochrome" => "CrabyTube monocromo",
         "Language" => "Idioma",
         "English" => "English",
         "Español" => "Español",
-        "Off · enable to share presence" => "Desactivado · activa para compartir tu actividad",
         "Enabled · waiting for playback" => "Activado · esperando la reproducción",
         "Connecting to Discord…" => "Conectando con Discord…",
         "Connected to Discord" => "Conectado con Discord",
@@ -316,15 +156,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         }
         "Discord connection error · retrying…" => {
             "Error de conexión con Discord · reintentando…"
-        }
-        "Local data backup path: Documents/crabytube-backup.json" => {
-            "Ubicación de la copia de datos: Documents/crabytube-backup.json"
-        }
-        "MPRIS controls are supported on Linux; this platform has no native media-control adapter yet." => {
-            "MPRIS está disponible en Linux; esta plataforma aún no tiene adaptador nativo de controles multimedia."
-        }
-        "Saved output is unavailable. Choose System default to recover." => {
-            "La salida guardada no está disponible. Elige la salida predeterminada del sistema para recuperarla."
         }
         "The selected output applies when the next track starts." => {
             "La salida seleccionada se aplicará al comenzar la siguiente canción."
@@ -335,9 +166,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Cache sizes refreshed." => "Se actualizaron los tamaños de caché.",
         "Local-data backup imported." => "Se importó la copia de los datos locales.",
         "Documents folder is unavailable" => "La carpeta Documentos no está disponible.",
-        "MPRIS controls unavailable: no session bus." => {
-            "Los controles MPRIS no están disponibles: falta el bus de sesión."
-        }
         "Starting MPRIS session-bus service…" => "Iniciando el servicio MPRIS del bus de sesión…",
         "MPRIS media controls active on the Linux session bus" => {
             "Los controles multimedia MPRIS están activos en el bus de sesión de Linux"
@@ -346,20 +174,12 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "System media controls are unavailable on this platform" => {
             "Los controles multimedia del sistema no están disponibles en esta plataforma"
         }
-        "Playback output is unavailable." => "La salida de audio no está disponible.",
         "YouTube requires sign-in for this track; it can't be played without an account." => {
             "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
         }
-        "Search YouTube Music" => "Buscar en YouTube Music",
         "Lyrics only" => "Solo letras",
-        "GPU acceleration (requires restart)" => "Aceleración por GPU (requiere reiniciar)",
-        "Saved settings could not be read. Defaults are in use." => {
-            "No se pudieron leer las preferencias guardadas. Se usan los valores predeterminados."
-        }
-        "Choose a track to start" => "Elige una canción para empezar",
         "See all" => "Ver todo",
         "Refresh" => "Actualizar",
-        "Restore default size" => "Restaurar tamaño predeterminado",
         "Scale With Window" => "Escalar con la ventana",
         "Keeps the layout's proportions on large windows." => {
             "Mantiene las proporciones en ventanas grandes."
@@ -373,7 +193,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Add to queue" => "Añadir a la cola",
         "Remove from queue" => "Quitar de la cola",
         "Clear queue" => "Limpiar cola",
-        "Albums & Playlists" => "Álbumes y listas",
         "Artwork Cache" => "Caché de carátulas",
         "Audio" => "Audio",
         "Changes save automatically" => "Los cambios se guardan solos",
