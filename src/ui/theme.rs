@@ -12,13 +12,17 @@ pub(super) const BLACK: Color = Color::from_rgb8(0, 0, 0);
 pub(super) const INK: Color = Color::from_rgb8(255, 255, 255);
 /// Secondary text: metadata, captions and table headings.
 pub(super) const DIM: Color = Color::from_rgb8(160, 160, 160);
-/// Tertiary text and disabled controls.
-pub(super) const FADED: Color = Color::from_rgb8(96, 96, 96);
+/// Tertiary text and disabled controls. 5:1 on black, so it stays readable.
+pub(super) const FADED: Color = Color::from_rgb8(124, 124, 124);
 /// Thin separators between table rows.
 pub(super) const RULE: Color = Color::from_rgb8(58, 58, 58);
 /// Hover fill for rows and inactive tabs.
 pub(super) const HOVER: Color = Color::from_rgb8(26, 26, 26);
 pub(super) const ALERT: Color = Color::from_rgb8(255, 92, 92);
+/// Unsung words of the active lyric line, which is drawn white. 5:1 on white.
+pub(super) const UNSUNG_ON_LIGHT: Color = Color::from_rgb8(110, 110, 110);
+/// Secondary text on the white active lyric line: translation and romanization.
+pub(super) const DIM_ON_LIGHT: Color = Color::from_rgb8(70, 70, 70);
 
 pub(super) const FONT_FAMILY: &str = "JetBrains Mono";
 pub(super) const MONO: Font = Font::with_name(FONT_FAMILY);
@@ -420,4 +424,41 @@ pub(super) fn app_theme() -> Theme {
         )
     });
     THEME.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WCAG relative luminance of an sRGB colour.
+    fn luminance(color: Color) -> f32 {
+        let linear = |channel: f32| {
+            if channel <= 0.03928 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    /// WCAG contrast ratio of two colours, from 1 to 21.
+    fn contrast(a: Color, b: Color) -> f32 {
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn text_tokens_reach_the_aa_contrast_ratio_on_their_background() {
+        assert!(contrast(FADED, BLACK) >= 4.5, "tertiary text on black");
+        assert!(contrast(DIM, BLACK) >= 4.5, "secondary text on black");
+        assert!(
+            contrast(UNSUNG_ON_LIGHT, INK) >= 4.5,
+            "unsung lyric words on the white active line"
+        );
+        assert!(
+            contrast(DIM_ON_LIGHT, INK) >= 4.5,
+            "translation on the white active line"
+        );
+    }
 }

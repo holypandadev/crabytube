@@ -2,11 +2,13 @@
 //! on the right.
 
 use super::shell::fit;
-use super::theme::{self, BLACK, DIM, FADED, INK, MONO, RULE, hrule, label, vrule};
+use super::theme::{
+    self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, UNSUNG_ON_LIGHT, hrule, label, vrule,
+};
 use super::{App, Message, NowPlayingTab, format_duration, layout};
 use crate::preferences::UiDensity;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
-use iced::{Alignment, Color, Element, Length, Size};
+use iced::{Alignment, Element, Length, Size};
 const PANEL_PADDING: f32 = 16.0;
 const COLUMN_GAP: f32 = 40.0;
 const STACK_BELOW: f32 = 760.0;
@@ -414,7 +416,7 @@ impl App {
                                 if seconds >= word.start {
                                     BLACK
                                 } else {
-                                    Color::from_rgb8(120, 120, 120)
+                                    UNSUNG_ON_LIGHT
                                 },
                             )
                         })
@@ -432,11 +434,7 @@ impl App {
             // Romanization and translation sit under the line with the translation switch;
             // background vocals stay apart from the main text, always in the dim style.
             let show_translation = self.preferences.lyrics_show_translation;
-            let sub_color = if active {
-                Color::from_rgb8(70, 70, 70)
-            } else {
-                DIM
-            };
+            let sub_color = if active { DIM_ON_LIGHT } else { DIM };
             let mut body = column![content].spacing(2);
             if show_translation && let Some(romanization) = line.romanization.as_deref() {
                 body = body.push(
