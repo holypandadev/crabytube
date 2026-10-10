@@ -218,6 +218,44 @@ pub(crate) fn create_private_dir_all(dir: &Path) -> io::Result<()> {
     }
 }
 
+/// Makes the app's own folders owner-only where they already exist, as the folders created now are.
+/// Only the `crabytube` folders under the config and cache roots change, with the folders below
+/// them. Links are not followed. Unix only: other systems have no such modes.
+#[cfg(unix)]
+pub fn tighten_app_folders() {
+    for root in [dirs::config_dir(), dirs::cache_dir()]
+        .into_iter()
+        .flatten()
+    {
+        tighten_private_tree(&root.join("crabytube"));
+    }
+}
+
+#[cfg(not(unix))]
+pub fn tighten_app_folders() {}
+
+/// Sets owner-only permissions on `dir` and on every real folder below it. Files and links are left
+/// alone, and a link is not followed.
+#[cfg(unix)]
+fn tighten_private_tree(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(metadata) = fs::symlink_metadata(dir) else {
+        return;
+    };
+    if !metadata.file_type().is_dir() {
+        return;
+    }
+    if metadata.permissions().mode() & 0o777 != 0o700 {
+        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        tighten_private_tree(&entry.path());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CacheKind, clear_cache_at, disk_cache_usage_at};
@@ -251,6 +289,32 @@ mod tests {
         create_private_dir_all(&shared).unwrap();
         assert_eq!(mode(&shared), 0o755);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_app_folders_become_owner_only_and_links_and_other_folders_stay_as_they_were() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let base = temp_root("tighten-tree");
+        let app = base.join("crabytube");
+        let artwork = app.join("artwork");
+        let outside = base.join("outside");
+        fs::create_dir_all(&artwork).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        for dir in [&app, &artwork, &outside] {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // A link inside the app's folders must not lead to the folder it points at.
+        symlink(&outside, app.join("linked")).unwrap();
+
+        super::tighten_private_tree(&app);
+
+        let mode =
+            |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&app), 0o700);
+        assert_eq!(mode(&artwork), 0o700);
+        assert_eq!(mode(&outside), 0o755);
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

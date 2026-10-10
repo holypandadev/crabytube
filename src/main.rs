@@ -123,6 +123,7 @@ fn main() {
 
     crabytube::ui::configure_renderer_from_preferences();
     crabytube::temp_cleanup::sweep_in_background();
+    crabytube::storage::tighten_app_folders();
 
     #[cfg(feature = "diagnostics")]
     parse_diagnostic_args();
