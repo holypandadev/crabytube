@@ -167,7 +167,6 @@ impl MprisRemote {
                 }
 
                 let mut last_state = PlayerState::default();
-                let mut last_position_signal = Instant::now();
                 let mut last_position_change = Instant::now();
                 loop {
                     let poll_interval = worker_state
@@ -197,10 +196,6 @@ impl MprisRemote {
                     }
                     if current.position != last_state.position {
                         last_position_change = Instant::now();
-                    }
-                    if last_position_signal.elapsed() >= Duration::from_secs(1) {
-                        emit_position(&connection, &current);
-                        last_position_signal = Instant::now();
                     }
                     last_state = current;
                 }
@@ -598,18 +593,6 @@ fn emit_seeked(connection: &zbus::blocking::Connection, state: &PlayerState) {
         PLAYER_IFACE,
         "Seeked",
         &position_micros(state),
-    );
-}
-
-fn emit_position(connection: &zbus::blocking::Connection, state: &PlayerState) {
-    let changed = HashMap::from([("Position".to_owned(), variant(position_micros(state)))]);
-    let body = (PLAYER_IFACE, changed, Vec::<String>::new());
-    let _ = connection.emit_signal(
-        None::<&str>,
-        OBJECT_PATH,
-        "org.freedesktop.DBus.Properties",
-        "PropertiesChanged",
-        &body,
     );
 }
 
