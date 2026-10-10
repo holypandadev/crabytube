@@ -272,7 +272,7 @@ impl App {
             return self.update(Message::SelectTrack(track));
         }
         if self.queue.len() >= crate::preferences::MAX_QUEUE_TRACKS {
-            self.queue_notice = Some("The queue is full.".into());
+            self.queue_notice = Some(super::now_playing::QueueNotice::Full);
             return Task::none();
         }
         let position = match (next, self.queue_index) {
@@ -287,6 +287,11 @@ impl App {
         }
         self.queue_source = None;
         self.queue_generation = self.queue_generation.wrapping_add(1);
+        self.queue_notice = Some(if next {
+            super::now_playing::QueueNotice::PlaysNext
+        } else {
+            super::now_playing::QueueNotice::AddedToQueue
+        });
         self.persist();
         Task::none()
     }
@@ -820,13 +825,10 @@ impl App {
                 self.radio_track_ids.clear();
                 self.queue_source = None;
                 self.queue_scroll = AbsoluteOffset::default();
-                self.queue_notice =
-                    (tracks.len() > crate::preferences::MAX_QUEUE_TRACKS).then(|| {
-                        format!(
-                            "Queue limited to {} entries; the selected track stays first.",
-                            crate::preferences::MAX_QUEUE_TRACKS
-                        )
-                    });
+                self.queue_notice = (tracks.len() > crate::preferences::MAX_QUEUE_TRACKS)
+                    .then_some(super::now_playing::QueueNotice::Limited(
+                        crate::preferences::MAX_QUEUE_TRACKS,
+                    ));
                 // Shuffle mode: keep the selected track first and shuffle the rest.
                 if self.shuffle && tracks.len() > 2 {
                     let mut rest: Vec<Track> = tracks

@@ -23,6 +23,15 @@ fn now_playing_columns(content: f32) -> Option<(f32, f32)> {
     Some((left, content - COLUMN_GAP - left))
 }
 
+/// A short message about the queue, shown above it until the queue changes again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum QueueNotice {
+    Full,
+    Limited(usize),
+    AddedToQueue,
+    PlaysNext,
+}
+
 impl App {
     pub(super) fn now_playing_panel_width(&self) -> f32 {
         let width = self.area.width.max(320.0);
@@ -184,6 +193,18 @@ impl App {
         .into()
     }
 
+    /// The notice in the current language.
+    fn queue_notice_text(&self, notice: QueueNotice) -> String {
+        match notice {
+            QueueNotice::Full => self.tr("The queue is full.").into_owned(),
+            QueueNotice::Limited(entries) => self
+                .tr("Queue limited to {} entries; the selected track stays first.")
+                .replacen("{}", &entries.to_string(), 1),
+            QueueNotice::AddedToQueue => self.tr("Added to queue").into_owned(),
+            QueueNotice::PlaysNext => self.tr("Plays next").into_owned(),
+        }
+    }
+
     fn up_next(&self, width: f32) -> Element<'_, Message> {
         if self.queue.is_empty() {
             return container(label(self.tr("The queue is empty.").into_owned(), 13.0).color(DIM))
@@ -298,8 +319,19 @@ impl App {
             .queue
             .len()
             .saturating_sub(self.queue_index.map_or(0, |current| current + 1));
+        // The notice takes the room left of the button and is cut short, never wrapped, so the list
+        // below keeps its place.
+        let notice: Element<'_, Message> = match self.queue_notice {
+            Some(notice) => container(label(
+                fit(&self.queue_notice_text(notice), width - 130.0, 12.0),
+                12.0,
+            ))
+            .width(Length::Fill)
+            .into(),
+            None => Space::new().width(Length::Fill).into(),
+        };
         let header = row![
-            Space::new().width(Length::Fill),
+            notice,
             button(label(self.tr("Clear queue").into_owned(), 12.0))
                 .on_press_maybe((upcoming > 0).then_some(Message::ClearUpcomingQueue))
                 .padding([6, 12])

@@ -109,7 +109,7 @@ struct App {
     queue_index: Option<usize>,
     queue_source: Option<QueueSource>,
     radio_track_ids: HashSet<String>,
-    queue_notice: Option<String>,
+    queue_notice: Option<now_playing::QueueNotice>,
     queue_generation: u64,
     liked: HashSet<String>,
     shuffle: bool,
@@ -4626,6 +4626,22 @@ mod tests {
         let _ = app.update(Message::CollectionScrolled(80.0));
         assert_eq!(app.collection_scroll_for(&album), 320.0);
         assert_eq!(app.collection_scroll_for(&playlist), 80.0);
+    }
+
+    #[test]
+    fn play_next_and_add_to_queue_leave_a_notice_about_what_happened() {
+        let mut app = App {
+            queue: vec![fixture_track("a")].into(),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        let _ = app.update(Message::AddToQueue(fixture_track("b")));
+        assert_eq!(
+            app.queue_notice,
+            Some(now_playing::QueueNotice::AddedToQueue)
+        );
+        let _ = app.update(Message::PlayNext(fixture_track("c")));
+        assert_eq!(app.queue_notice, Some(now_playing::QueueNotice::PlaysNext));
     }
 
     #[test]

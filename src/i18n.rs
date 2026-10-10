@@ -66,6 +66,11 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "STILL UP?" => "BUENAS NOCHES.",
         "JUMP BACK IN" => "SEGUIR ESCUCHANDO",
         "FAVORITES" => "FAVORITOS",
+        "Queue limited to {} entries; the selected track stays first." => {
+            "La cola se limita a {} elementos; la pista elegida sigue primera."
+        }
+        "Added to queue" => "Añadida a la cola",
+        "Plays next" => "Suena a continuación",
         "{} on disk · {} in memory" => "{} en disco · {} en memoria",
         "SUNDAY" => "DOMINGO",
         "MONDAY" => "LUNES",
