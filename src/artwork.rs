@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use iced::widget::image;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap},
     sync::OnceLock,
     time::Duration,
 };
@@ -53,15 +53,28 @@ pub fn max_cached_variant_count(max_dim: u32) -> usize {
 
 /// One shared app-wide LRU. Handles are keyed by source and requested pixel
 /// variant, so a row thumbnail and a player cover do not overwrite each other.
+/// The sizes of one source are kept together, so a lookup reads only that source.
 #[derive(Default)]
 pub struct ArtworkCache {
-    entries: HashMap<(String, u32), image::Handle>,
-    order: VecDeque<(String, u32)>,
+    entries: HashMap<String, BTreeMap<u32, Cached>>,
+    /// Variants in the order they were last used: the least recently used comes first.
+    by_use: BTreeMap<u64, (String, u32)>,
+    /// The last use number handed out.
+    uses: u64,
+    /// Variants held.
+    count: usize,
     bytes: usize,
     /// Temporary budget that replaces `MAX_ARTWORK_BYTES` while set.
     budget_override: Option<usize>,
-    /// When each variant arrived, so covers can fade in instead of popping.
-    loaded_at: HashMap<(String, u32), std::time::Instant>,
+}
+
+/// One decoded variant of a source.
+struct Cached {
+    handle: image::Handle,
+    /// The variant's place in `by_use`.
+    used: u64,
+    /// When the variant arrived, so covers can fade in instead of popping.
+    loaded_at: std::time::Instant,
 }
 
 impl ArtworkCache {
@@ -71,7 +84,20 @@ impl ArtworkCache {
 
     pub fn get_exact(&self, url: &str, max_dim: u32) -> Option<&image::Handle> {
         self.entries
-            .get(&(url.to_owned(), max_dim.clamp(64, LARGE_MAX)))
+            .get(url)?
+            .get(&max_dim.clamp(64, LARGE_MAX))
+            .map(|cached| &cached.handle)
+    }
+
+    /// The closest variant that is at least as large as `max_dim`, or else the largest one.
+    fn variant(&self, url: &str, max_dim: u32) -> Option<&Cached> {
+        let sizes = self.entries.get(url)?;
+        let wanted = max_dim.clamp(64, LARGE_MAX);
+        sizes
+            .range(wanted..)
+            .next()
+            .or_else(|| sizes.iter().next_back())
+            .map(|(_, cached)| cached)
     }
 
     /// Like `get_for`, plus how long ago that variant arrived.
@@ -80,101 +106,86 @@ impl ArtworkCache {
         url: &str,
         max_dim: u32,
     ) -> Option<(&image::Handle, std::time::Duration)> {
-        let wanted = max_dim.clamp(64, LARGE_MAX);
-        let sizes = self
-            .entries
-            .keys()
-            .filter_map(|(cached_url, size)| (cached_url == url).then_some(*size));
-        let size = sizes
-            .clone()
-            .filter(|size| *size >= wanted)
-            .min()
-            .or_else(|| sizes.max())?;
-        let key = (url.to_owned(), size);
-        let age = self
-            .loaded_at
-            .get(&key)
-            .map_or(std::time::Duration::MAX, std::time::Instant::elapsed);
-        self.entries.get(&key).map(|handle| (handle, age))
+        self.variant(url, max_dim)
+            .map(|cached| (&cached.handle, cached.loaded_at.elapsed()))
     }
 
     /// Prefer the closest available variant that is at least as large as the
     /// requested maximum; use the largest smaller variant only as fallback.
     pub fn get_for(&self, url: &str, max_dim: u32) -> Option<&image::Handle> {
-        let wanted = max_dim.clamp(64, LARGE_MAX);
-        let sizes = self
-            .entries
-            .keys()
-            .filter_map(|(cached_url, size)| (cached_url == url).then_some(*size));
-        let size = sizes
-            .clone()
-            .filter(|size| *size >= wanted)
-            .min()
-            .or_else(|| sizes.max())?;
-        self.entries.get(&(url.to_owned(), size))
+        self.variant(url, max_dim).map(|cached| &cached.handle)
     }
 
     pub fn contains_key(&self, url: &str) -> bool {
-        self.entries.keys().any(|(cached, _)| cached == url)
+        self.entries.get(url).is_some_and(|sizes| !sizes.is_empty())
     }
 
     pub fn contains_variant(&self, url: &str, max_dim: u32) -> bool {
         self.entries
-            .contains_key(&(url.to_owned(), max_dim.clamp(64, LARGE_MAX)))
+            .get(url)
+            .is_some_and(|sizes| sizes.contains_key(&max_dim.clamp(64, LARGE_MAX)))
     }
 
+    /// Marks a variant as used now, so that it is kept longest.
     pub fn touch(&mut self, url: &str, max_dim: u32) {
-        let key = (url.to_owned(), max_dim.clamp(64, LARGE_MAX));
-        if self.entries.contains_key(&key)
-            && let Some(index) = self.order.iter().position(|cached| cached == &key)
-            && let Some(key) = self.order.remove(index)
-        {
-            self.order.push_back(key);
-        }
+        let size = max_dim.clamp(64, LARGE_MAX);
+        let Some(cached) = self
+            .entries
+            .get_mut(url)
+            .and_then(|sizes| sizes.get_mut(&size))
+        else {
+            return;
+        };
+        self.uses += 1;
+        self.by_use.remove(&cached.used);
+        cached.used = self.uses;
+        self.by_use.insert(self.uses, (url.to_owned(), size));
     }
 
     pub fn insert(&mut self, url: String, max_dim: u32, handle: image::Handle) {
-        let key = (url, max_dim.clamp(64, LARGE_MAX));
-        if let Some(old) = self.entries.remove(&key) {
-            self.bytes = self.bytes.saturating_sub(handle_bytes(&old));
-        }
-        if let Some(index) = self.order.iter().position(|cached| cached == &key) {
-            self.order.remove(index);
-        }
+        let size = max_dim.clamp(64, LARGE_MAX);
+        // A replaced variant keeps its arrival time, so its cover does not fade in again.
+        let loaded_at = match self.detach(&url, size) {
+            Some(previous) => {
+                self.by_use.remove(&previous.used);
+                previous.loaded_at
+            }
+            None => std::time::Instant::now(),
+        };
+        self.uses += 1;
         self.bytes = self.bytes.saturating_add(handle_bytes(&handle));
-        self.loaded_at
-            .entry(key.clone())
-            .or_insert_with(std::time::Instant::now);
-        self.entries.insert(key.clone(), handle);
-        self.order.push_back(key);
+        self.count += 1;
+        self.by_use.insert(self.uses, (url.clone(), size));
+        self.entries.entry(url).or_default().insert(
+            size,
+            Cached {
+                handle,
+                used: self.uses,
+                loaded_at,
+            },
+        );
         self.evict_to_budget();
     }
 
-    /// Drops every cached variant whose URL `keep` rejects. Used to free memory
+    /// Drops every cached variant whose source `keep` rejects. Used to free memory
     /// around a helper run without blanking the covers that are on screen.
     pub fn retain_urls(&mut self, keep: impl Fn(&str) -> bool) {
-        let mut freed = 0;
-        self.entries.retain(|(url, _), handle| {
-            let kept = keep(url);
-            if !kept {
-                freed += handle_bytes(handle);
-            }
-            kept
-        });
-        self.order.retain(|key| self.entries.contains_key(key));
-        self.loaded_at
-            .retain(|key, _| self.entries.contains_key(key));
-        self.bytes = self.bytes.saturating_sub(freed);
+        let dropped: Vec<(String, u32)> = self
+            .entries
+            .iter()
+            .filter(|(url, _)| !keep(url))
+            .flat_map(|(url, sizes)| sizes.keys().map(move |size| (url.clone(), *size)))
+            .collect();
+        for (url, size) in dropped {
+            self.remove_variant(&url, size);
+        }
     }
 
     /// Drops one cached variant and nothing else, for a cover that is no longer shown.
     pub fn remove_variant(&mut self, url: &str, max_dim: u32) {
-        let key = (url.to_owned(), max_dim.clamp(64, LARGE_MAX));
-        if let Some(removed) = self.entries.remove(&key) {
-            self.bytes = self.bytes.saturating_sub(handle_bytes(&removed));
+        if let Some(cached) = self.detach(url, max_dim.clamp(64, LARGE_MAX)) {
+            self.by_use.remove(&cached.used);
         }
-        self.order.retain(|cached| cached != &key);
-        self.loaded_at.remove(&key);
     }
 
     /// Sets a temporary byte budget (`None` restores the normal one) and evicts to fit it.
@@ -183,32 +194,43 @@ impl ArtworkCache {
         self.evict_to_budget();
     }
 
+    /// Takes one variant out of the map and out of the byte and count totals. Its place in
+    /// `by_use` is left to the caller.
+    fn detach(&mut self, url: &str, size: u32) -> Option<Cached> {
+        let sizes = self.entries.get_mut(url)?;
+        let cached = sizes.remove(&size)?;
+        let empty = sizes.is_empty();
+        if empty {
+            self.entries.remove(url);
+        }
+        self.bytes = self.bytes.saturating_sub(handle_bytes(&cached.handle));
+        self.count = self.count.saturating_sub(1);
+        Some(cached)
+    }
+
     fn evict_to_budget(&mut self) {
         let budget = self.budget_override.unwrap_or(MAX_ARTWORK_BYTES);
-        while self.bytes > budget || self.order.len() > MAX_ARTWORK_ENTRIES {
-            let Some(expired) = self.order.pop_front() else {
+        while self.bytes > budget || self.count > MAX_ARTWORK_ENTRIES {
+            let Some((_, (url, size))) = self.by_use.pop_first() else {
                 break;
             };
-            self.loaded_at.remove(&expired);
-            if let Some(removed) = self.entries.remove(&expired) {
-                self.bytes = self.bytes.saturating_sub(handle_bytes(&removed));
-            }
+            self.detach(&url, size);
         }
     }
 
     pub fn clear(&mut self) {
-        self.loaded_at.clear();
         self.entries.clear();
-        self.order.clear();
+        self.by_use.clear();
+        self.count = 0;
         self.bytes = 0;
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.count
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.count == 0
     }
 
     pub fn bytes(&self) -> usize {
@@ -730,6 +752,22 @@ mod tests {
         cache.retain_urls(|url| url == "visible");
         assert!(cache.contains_key("visible"));
         assert!(!cache.contains_key("offscreen"));
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.bytes(), 2 * 256);
+    }
+
+    #[test]
+    fn the_least_recently_used_variant_is_the_one_evicted_when_the_budget_is_full() {
+        let mut cache = ArtworkCache::default();
+        let handle = || image::Handle::from_rgba(8, 8, vec![0; 256]);
+        cache.set_budget(Some(2 * 256));
+        cache.insert("first".into(), THUMB_MAX, handle());
+        cache.insert("second".into(), THUMB_MAX, handle());
+        cache.touch("first", THUMB_MAX);
+        cache.insert("third".into(), THUMB_MAX, handle());
+        assert!(cache.contains_key("first"));
+        assert!(!cache.contains_key("second"));
+        assert!(cache.contains_key("third"));
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.bytes(), 2 * 256);
     }
