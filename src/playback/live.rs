@@ -3,7 +3,7 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use tokio_util::sync::CancellationToken;
@@ -19,6 +19,13 @@ const NEXT_FRAGMENT_WAIT: Duration = Duration::from_millis(4000);
 const EDGE_POLL_WAIT: Duration = Duration::from_millis(1000);
 /// Failed polls in a row before the broadcast is treated as ended.
 const MAX_FAILED_POLLS: u32 = 5;
+/// Without a new fragment for this long, the broadcast has stalled: fragments come every few seconds.
+const EDGE_STALL_LIMIT: Duration = Duration::from_secs(60);
+
+/// Whether the live edge has stayed on the same fragment for too long.
+fn edge_stalled(since: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(since) >= EDGE_STALL_LIMIT
+}
 /// Pause before retrying a full queue.
 const QUEUE_RETRY: Duration = Duration::from_millis(100);
 
@@ -241,6 +248,8 @@ async fn fetch_fragments(
     let mut sent_init = false;
     let mut next_sequence = 1;
     let mut failed_polls = 0;
+    // When the last new fragment was queued, or the fetch began.
+    let mut last_progress = Instant::now();
     let mut wait = Duration::ZERO;
     loop {
         tokio::select! {
@@ -270,7 +279,16 @@ async fn fetch_fragments(
             continue;
         }
         if last_start.is_some_and(|last| fragment.start <= last) {
-            // The same fragment as the last poll: the edge has not moved.
+            // The same fragment as the last poll: the edge has not moved. A broadcast that stays
+            // there too long has stalled, and the listener is told rather than left in silence.
+            if edge_stalled(last_progress, Instant::now()) {
+                warn!("live edge stopped moving");
+                crate::playback::engine::record_fetch_error(
+                    &fetch_error,
+                    "the live broadcast stopped moving".into(),
+                );
+                return;
+            }
             continue;
         }
         last_start = Some(fragment.start);
@@ -299,6 +317,7 @@ async fn fetch_fragments(
                 Err(TrySendError::Disconnected(_)) => return,
             }
         }
+        last_progress = Instant::now();
         info!(start = fragment.start, "live fragment queued");
     }
 }
@@ -424,6 +443,13 @@ mod tests {
         reader.read_to_end(&mut out).unwrap();
         assert_eq!(out, b"firstsecond");
         assert_eq!(reader.read(&mut [0; 4]).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_live_edge_that_stays_put_for_a_minute_is_stalled() {
+        let since = Instant::now();
+        assert!(!edge_stalled(since, since + Duration::from_secs(59)));
+        assert!(edge_stalled(since, since + Duration::from_secs(60)));
     }
 
     #[test]
