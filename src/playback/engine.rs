@@ -320,6 +320,10 @@ enum Event {
         generation: u64,
         error: EngineError,
     },
+    /// A prefetch could not resolve its track.
+    PrefetchFailed {
+        generation: u64,
+    },
     /// A pause has lasted long enough to release the output device, if it is still that pause.
     OutputIdle {
         serial: u64,
@@ -555,6 +559,10 @@ async fn actor(
     let mut resume_at: Option<Duration> = None;
     // One re-resolution per track; a second refusal is reported as a failure.
     let mut resumed_this_track = false;
+    // The prefetch in flight, tracked so that Play and Stop can cancel it or wait for it.
+    let mut prefetching: Option<Prefetching> = None;
+    // A Play that waits for the prefetch of its track.
+    let mut awaiting: Option<Awaiting> = None;
 
     loop {
         tokio::select! {
@@ -564,20 +572,40 @@ async fn actor(
                     tokio::spawn(async move { resolver.prewarm().await });
                 }
                 Some(Command::Prefetch(track)) => {
-                    let resolver = Arc::clone(&resolver);
-                    let events_tx = events_tx.clone();
-                    let prepared_generation = next_generation();
-                    tokio::spawn(async move {
-                        let mut track = track;
-                        let token = CancellationToken::new();
-                        let Ok(stream) = resolver.resolve(&TrackId(track.video_id.clone()), AudioQuality::Auto, token.clone()).await else {
-                            return;
-                        };
-                        stream.fill_track(&mut track);
-                        if let Some((duration, source)) = prepare_stream(stream, token.clone(), prepared_generation, events_tx.clone(), false).await {
-                            let _ = events_tx.send(Event::PreparedAhead { track, generation: prepared_generation, duration, cancellation: token, source });
+                    // Nothing changes while a Play waits for a prefetch, or while this track is already
+                    // prepared or in flight. Any other prefetch replaces the one before it.
+                    let wanted = awaiting.is_some()
+                        || prefetching.as_ref().is_some_and(|prefetch| prefetch.video_id == track.video_id)
+                        || prepared_ahead.as_ref().is_some_and(|ahead| ahead.track.video_id == track.video_id);
+                    if !wanted {
+                        if let Some(stale) = prefetching.take() {
+                            stale.cancellation.cancel();
                         }
-                    });
+                        if let Some(stale) = prepared_ahead.take() {
+                            stale.discard();
+                        }
+                        let resolver = Arc::clone(&resolver);
+                        let events_tx = events_tx.clone();
+                        let prefetch_generation = next_generation();
+                        let token = CancellationToken::new();
+                        prefetching = Some(Prefetching {
+                            video_id: track.video_id.clone(),
+                            generation: prefetch_generation,
+                            cancellation: token.clone(),
+                            decoder_events: Vec::new(),
+                        });
+                        tokio::spawn(async move {
+                            let mut track = track;
+                            let Ok(stream) = resolver.resolve(&TrackId(track.video_id.clone()), AudioQuality::Auto, token.clone()).await else {
+                                let _ = events_tx.send(Event::PrefetchFailed { generation: prefetch_generation });
+                                return;
+                            };
+                            stream.fill_track(&mut track);
+                            if let Some((duration, source)) = prepare_stream(stream, token.clone(), prefetch_generation, events_tx.clone(), false).await {
+                                let _ = events_tx.send(Event::PreparedAhead { track, generation: prefetch_generation, duration, cancellation: token, source });
+                            }
+                        });
+                    }
                 }
                 Some(Command::Play(track)) => {
                     if let Some(token) = cancellation.take() { token.cancel(); }
@@ -585,18 +613,35 @@ async fn actor(
                     if let Some(output) = output.as_ref() {
                         output.player.clear();
                     }
+                    awaiting = None;
                     // The output stays open between tracks: reopening the device costs time at every change.
-                    let ahead = match prepared_ahead.take() {
-                        Some(ahead) if ahead.track.video_id == track.video_id => Some(ahead),
+                    let prepared = prepared_ahead.take();
+                    let plan = play_plan(
+                        prepared.as_ref().map(|ahead| ahead.track.video_id.as_str()),
+                        prefetching.as_ref().map(|prefetch| prefetch.video_id.as_str()),
+                        &track.video_id,
+                    );
+                    let ahead = match prepared {
+                        Some(ahead) if plan == PlayPlan::Prepared => Some(ahead),
                         Some(stale) => {
                             stale.discard();
                             None
                         }
                         None => None,
                     };
-                    generation = match &ahead {
-                        Some(ahead) => ahead.generation,
-                        None => next_generation(),
+                    // The prefetch of this track is waited for; a prefetch of any other track is cancelled.
+                    let in_flight = match prefetching.take() {
+                        Some(prefetch) if plan == PlayPlan::Awaited => Some(prefetch),
+                        Some(stale) => {
+                            stale.cancellation.cancel();
+                            None
+                        }
+                        None => None,
+                    };
+                    generation = match (&ahead, &in_flight) {
+                        (Some(ahead), _) => ahead.generation,
+                        (None, Some(prefetch)) => prefetch.generation,
+                        (None, None) => next_generation(),
                     };
                     seek_generation = seek_generation.wrapping_add(1);
                     paused_by_user = false;
@@ -616,14 +661,24 @@ async fn actor(
                     let _ = status_tx.send(status.clone());
                     let events_tx = events_tx.clone();
                     let current_generation = generation;
-                    match ahead {
-                        Some(ahead) => {
+                    match (ahead, in_flight) {
+                        (Some(ahead), _) => {
                             // The stream was opened while the previous track played: hand it to the output now.
                             // Its track carries the metadata the resolver filled in, so the UI can show it.
                             cancellation = Some(ahead.cancellation.clone());
                             let _ = events_tx.send(Event::Prepared { generation: ahead.generation, selected_at, track: ahead.track, duration: ahead.duration, source: Ok(ahead.source) });
+                            // Decoder events from while it was prepared apply now that it plays.
+                            for event in ahead.decoder_events {
+                                let _ = events_tx.send(event);
+                            }
                         }
-                        None => {
+                        (None, Some(prefetch)) => {
+                            // The same track is still being prefetched: its stream starts playback when it lands.
+                            cancellation = Some(prefetch.cancellation.clone());
+                            prefetching = Some(prefetch);
+                            awaiting = Some(Awaiting { track, selected_at });
+                        }
+                        (None, None) => {
                             let token = CancellationToken::new();
                             cancellation = Some(token.clone());
                             let resolver = Arc::clone(&resolver);
@@ -700,6 +755,8 @@ async fn actor(
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
                     // Events of the stopped track, including one prepared ahead, must not apply to what follows.
                     if let Some(stale) = prepared_ahead.take() { stale.discard(); }
+                    if let Some(prefetch) = prefetching.take() { prefetch.cancellation.cancel(); }
+                    awaiting = None;
                     generation = next_generation();
                     if let Some(output) = output.as_ref() {
                         output.player.clear();
@@ -749,15 +806,52 @@ async fn actor(
                 None => break,
             },
             event = events.recv() => match event {
-                Some(Event::PreparedAhead { track, generation: ahead_generation, duration, cancellation: token, source }) => match source {
-                    Ok(source) => {
-                        let ahead = PreparedAhead { track, generation: ahead_generation, duration, cancellation: token, source };
-                        if let Some(stale) = prepared_ahead.replace(ahead) {
-                            stale.discard();
+                Some(event) if decoder_event_held(&prefetching, &prepared_ahead, &event) => {
+                    hold_decoder_event(&mut prefetching, &mut prepared_ahead, event);
+                }
+                Some(Event::PreparedAhead { track, generation: ahead_generation, duration, cancellation: token, source }) => {
+                    let tracked = prefetching.as_ref().is_some_and(|prefetch| prefetch.generation == ahead_generation);
+                    if let Some(waiting) = awaiting.take_if(|_| tracked && generation_matches(generation, ahead_generation)) {
+                        // A Play waits for this stream: it starts exactly as a stream prepared ahead would.
+                        let held = prefetching.take().map(|prefetch| prefetch.decoder_events).unwrap_or_default();
+                        let _ = events_tx.send(Event::Prepared { generation: ahead_generation, selected_at: waiting.selected_at, track, duration, source });
+                        for event in held {
+                            let _ = events_tx.send(event);
+                        }
+                    } else if tracked {
+                        let held = prefetching.take().map(|prefetch| prefetch.decoder_events).unwrap_or_default();
+                        match source {
+                            Ok(source) => {
+                                let ahead = PreparedAhead { track, generation: ahead_generation, duration, cancellation: token, source, decoder_events: held };
+                                if let Some(stale) = prepared_ahead.replace(ahead) {
+                                    stale.discard();
+                                }
+                            }
+                            Err(error) => debug!(error = %redact_urls(&format!("{error:?}")), "next track could not be prepared ahead"),
+                        }
+                    } else {
+                        // Its prefetch was superseded or stopped, so no Play wants this stream.
+                        token.cancel();
+                        if let Ok(source) = source {
+                            let _ = source.worker.send(WorkerCommand::Stop);
                         }
                     }
-                    Err(error) => debug!(error = %redact_urls(&format!("{error:?}")), "next track could not be prepared ahead"),
-                },
+                }
+                Some(Event::PrefetchFailed { generation: failed_generation }) => {
+                    let _ = prefetching.take_if(|prefetch| prefetch.generation == failed_generation);
+                    if let Some(waiting) = awaiting.take_if(|_| generation_matches(generation, failed_generation)) {
+                        // The prefetch could not resolve the track, so the waiting Play resolves it.
+                        let token = CancellationToken::new();
+                        cancellation = Some(token.clone());
+                        let resolver = Arc::clone(&resolver);
+                        let events_tx = events_tx.clone();
+                        let current_generation = generation;
+                        tokio::spawn(async move {
+                            let result = resolver.resolve(&TrackId(waiting.track.video_id.clone()), AudioQuality::Auto, token.clone()).await;
+                            let _ = events_tx.send(Event::Resolved { generation: current_generation, selected_at: waiting.selected_at, track: waiting.track, cancellation: token, result });
+                        });
+                    }
+                }
                 Some(Event::Resolved { generation: event_generation, selected_at, track, cancellation: token, result }) if generation_matches(generation, event_generation) => match result {
                     Ok(stream) => {
                         info!(elapsed_ms = selected_at.elapsed().as_millis(), "click to stream resolved");
@@ -1045,12 +1139,93 @@ struct PreparedAhead {
     duration: Option<Duration>,
     cancellation: CancellationToken,
     source: PreparedAudio,
+    /// Decoder events of this stream, kept so they apply if it plays.
+    decoder_events: Vec<Event>,
 }
 
 impl PreparedAhead {
     fn discard(self) {
         self.cancellation.cancel();
         let _ = self.source.worker.send(WorkerCommand::Stop);
+    }
+}
+
+/// A prefetch whose stream is being resolved or opened. Play and Stop can cancel or wait for it.
+struct Prefetching {
+    video_id: String,
+    generation: u64,
+    cancellation: CancellationToken,
+    /// Decoder events of this stream. They arrive before the stream is prepared.
+    decoder_events: Vec<Event>,
+}
+
+/// A Play that waits for the prefetch of its track.
+struct Awaiting {
+    track: Track,
+    selected_at: Instant,
+}
+
+/// How a Play starts its track.
+#[derive(Debug, PartialEq, Eq)]
+enum PlayPlan {
+    /// The stream prepared ahead for this track plays now.
+    Prepared,
+    /// The prefetch of this track is still in flight, and it starts playback when it lands.
+    Awaited,
+    /// Nothing is ready for this track, so it is resolved.
+    Resolve,
+}
+
+fn play_plan(prepared: Option<&str>, prefetching: Option<&str>, requested: &str) -> PlayPlan {
+    if prepared == Some(requested) {
+        PlayPlan::Prepared
+    } else if prefetching == Some(requested) {
+        PlayPlan::Awaited
+    } else {
+        PlayPlan::Resolve
+    }
+}
+
+/// The stream a decoder event belongs to.
+fn decoder_event_generation(event: &Event) -> Option<u64> {
+    match event {
+        Event::TrackEnded { generation } | Event::Failed { generation, .. } => Some(*generation),
+        _ => None,
+    }
+}
+
+/// Whether a decoder event belongs to a stream that is not playing yet. Such events are kept with it.
+fn decoder_event_held(
+    prefetching: &Option<Prefetching>,
+    prepared_ahead: &Option<PreparedAhead>,
+    event: &Event,
+) -> bool {
+    decoder_event_generation(event).is_some_and(|generation| {
+        prefetching
+            .as_ref()
+            .is_some_and(|prefetch| prefetch.generation == generation)
+            || prepared_ahead
+                .as_ref()
+                .is_some_and(|ahead| ahead.generation == generation)
+    })
+}
+
+fn hold_decoder_event(
+    prefetching: &mut Option<Prefetching>,
+    prepared_ahead: &mut Option<PreparedAhead>,
+    event: Event,
+) {
+    let generation = decoder_event_generation(&event);
+    if let Some(prefetch) = prefetching
+        .as_mut()
+        .filter(|prefetch| Some(prefetch.generation) == generation)
+    {
+        prefetch.decoder_events.push(event);
+    } else if let Some(ahead) = prepared_ahead
+        .as_mut()
+        .filter(|ahead| Some(ahead.generation) == generation)
+    {
+        ahead.decoder_events.push(event);
     }
 }
 
@@ -1969,5 +2144,49 @@ mod tests {
         use super::PlaybackState::{Buffering, Paused, Seeking};
         assert!(super::is_valid_transition(Seeking, Paused));
         assert!(super::is_valid_transition(Seeking, Buffering));
+    }
+
+    #[test]
+    fn a_play_uses_the_prepared_stream_or_waits_for_the_prefetch_of_its_track() {
+        use super::PlayPlan::{Awaited, Prepared, Resolve};
+        assert_eq!(super::play_plan(Some("a"), None, "a"), Prepared);
+        assert_eq!(super::play_plan(None, Some("a"), "a"), Awaited);
+        assert_eq!(super::play_plan(Some("b"), Some("a"), "a"), Awaited);
+        assert_eq!(super::play_plan(Some("a"), None, "b"), Resolve);
+        assert_eq!(super::play_plan(None, None, "a"), Resolve);
+    }
+
+    #[test]
+    fn decoder_events_of_a_stream_that_is_not_playing_yet_are_held_for_it() {
+        let prefetching = Some(super::Prefetching {
+            video_id: "a".into(),
+            generation: 7,
+            cancellation: tokio_util::sync::CancellationToken::new(),
+            decoder_events: Vec::new(),
+        });
+        let prepared: Option<super::PreparedAhead> = None;
+        assert!(super::decoder_event_held(
+            &prefetching,
+            &prepared,
+            &super::Event::TrackEnded { generation: 7 }
+        ));
+        assert!(super::decoder_event_held(
+            &prefetching,
+            &prepared,
+            &super::Event::Failed {
+                generation: 7,
+                error: EngineError::Decoder("stream ended early".into()),
+            }
+        ));
+        assert!(!super::decoder_event_held(
+            &prefetching,
+            &prepared,
+            &super::Event::TrackEnded { generation: 8 }
+        ));
+        assert!(!super::decoder_event_held(
+            &None,
+            &prepared,
+            &super::Event::TrackEnded { generation: 7 }
+        ));
     }
 }
