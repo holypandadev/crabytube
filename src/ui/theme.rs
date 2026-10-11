@@ -208,23 +208,60 @@ const WINDOW_GLYPH: f32 = 14.0;
 /// button is hovered. The icon's view box is widened so the glyph keeps its 14 px size in a button
 /// as tall as the header.
 pub(super) fn window_icon<'a>(name: &'static str) -> Element<'a, Message> {
+    boxed_icon(name, BLACK, INK)
+}
+
+/// An icon drawn over a whole button as tall as the header, in `hovered` while the pointer is on
+/// it and in `idle` otherwise.
+pub(super) fn boxed_icon<'a>(
+    name: &'static str,
+    hovered: Color,
+    idle: Color,
+) -> Element<'a, Message> {
     svg(window_icon_handle(name))
         .width(TITLE_BAR_H)
         .height(TITLE_BAR_H)
-        .style(|_, status| svg::Style {
+        .style(move |_, status| svg::Style {
             color: Some(if matches!(status, svg::Status::Hovered) {
-                BLACK
+                hovered
             } else {
-                INK
+                idle
             }),
         })
         .into()
 }
 
+/// How visible the floating Back button is while the pointer is elsewhere.
+pub(super) const FLOATING_IDLE_ALPHA: f32 = 0.45;
+
+/// The floating Back button: a black square with a white outline, faint until it is hovered,
+/// so it marks the way back without covering the artwork under it.
+pub(super) fn floating_button(_: &Theme, status: button::Status) -> button::Style {
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let alpha = if hovered { 1.0 } else { FLOATING_IDLE_ALPHA };
+    button::Style {
+        background: Some(Background::Color(Color {
+            a: if hovered { 1.0 } else { 0.55 },
+            ..BLACK
+        })),
+        text_color: INK,
+        border: Border {
+            color: Color { a: alpha, ..INK },
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 fn window_icon_handle(name: &'static str) -> svg::Handle {
     use std::sync::LazyLock;
-    static HANDLES: LazyLock<[(&str, svg::Handle); 3]> = LazyLock::new(|| {
+    static HANDLES: LazyLock<[(&str, svg::Handle); 4]> = LazyLock::new(|| {
         [
+            (
+                "chev-left",
+                include_str!("../../assets/icons/chev-left.svg"),
+            ),
             ("minus", include_str!("../../assets/icons/minus.svg")),
             ("square", include_str!("../../assets/icons/square.svg")),
             ("close", include_str!("../../assets/icons/close.svg")),
@@ -239,7 +276,7 @@ fn window_icon_handle(name: &'static str) -> svg::Handle {
     HANDLES
         .iter()
         .find(|(key, _)| *key == name)
-        .map_or_else(|| HANDLES[2].1.clone(), |(_, handle)| handle.clone())
+        .map_or_else(|| HANDLES[3].1.clone(), |(_, handle)| handle.clone())
 }
 
 /// The icon source with its 24-unit view box widened to the whole button at the glyph's scale.
