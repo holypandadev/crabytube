@@ -10,7 +10,7 @@ build = "build.rs"
 # `cargo bundle --release` (cargo-bundle) builds the macOS .app with this icon.
 name = "CrabyTube"
 identifier = "app.crabytube.CrabyTube"
-icon = ["packaging/macos/crabytube.icns", "packaging/icons/hicolor/512x512/apps/crabytube.png"]
+icon = ["packaging/macos/crabytube.icns", "packaging/icons/hicolor/512x512/apps/dev.holypanda.CrabyTube.png"]
 category = "public.app-category.music"
 short_description = "Lightweight YouTube Music player"
 

@@ -29,13 +29,9 @@ modules:
       - install -Dm755 target/release/crabytube /app/bin/crabytube
       - install -Dm755 target/release/botguard-helper /app/bin/botguard-helper
       - install -Dm755 target/release/js-challenge-helper /app/bin/js-challenge-helper
-      - install -Dm644 packaging/linux/flatpak/dev.holypanda.CrabyTube.desktop /app/share/applications/dev.holypanda.CrabyTube.desktop
+      - install -Dm644 packaging/linux/dev.holypanda.CrabyTube.desktop /app/share/applications/dev.holypanda.CrabyTube.desktop
       - install -Dm644 packaging/linux/flatpak/dev.holypanda.CrabyTube.metainfo.xml /app/share/metainfo/dev.holypanda.CrabyTube.metainfo.xml
-      - |
-        for dir in packaging/icons/hicolor/*; do
-          size=$(basename "$dir")
-          install -Dm644 "$dir/apps/crabytube.png" "/app/share/icons/hicolor/$size/apps/dev.holypanda.CrabyTube.png"
-        done
+      - mkdir -p /app/share/icons && cp -r packaging/icons/hicolor /app/share/icons/
     sources:
       - type: dir
         path: ../../..

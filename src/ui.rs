@@ -3162,9 +3162,9 @@ pub fn run() -> iced::Result {
             icon: window_icon(),
             #[cfg(target_os = "linux")]
             platform_specific: iced::window::settings::PlatformSpecific {
-                // Matches `crabytube.desktop`, so docks and task switchers
-                // show the app icon on Wayland.
-                application_id: "crabytube".into(),
+                // Matches the desktop entry of the same name, so docks and task
+                // switchers show the app icon on Wayland.
+                application_id: crate::APP_ID.into(),
                 ..Default::default()
             },
             ..Default::default()

@@ -161,8 +161,8 @@ individually.
 
 - **Linux:** MPRIS (`org.mpris.MediaPlayer2.crabytube`) with metadata, artwork and controls; a
   StatusNotifier tray icon with optional close-to-tray; desktop notifications; launch on startup
-  through `~/.config/autostart`. The window's application ID is `crabytube`, matching
-  `packaging/linux/crabytube.desktop`.
+  through `~/.config/autostart`. The window's application ID is `dev.holypanda.CrabyTube`, matching
+  `packaging/linux/dev.holypanda.CrabyTube.desktop`.
 - **Windows:** the icon is embedded by `build.rs` (`winresource`).
 - **macOS:** `cargo bundle` uses the metadata in `[package.metadata.bundle]`.
 - **All platforms:** optional Discord Rich Presence.

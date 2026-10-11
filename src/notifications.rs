@@ -27,10 +27,6 @@ const PORTAL_NOTICE_ID: &str = "track";
 #[cfg(target_os = "linux")]
 const PORTAL_SENT: u32 = 1;
 
-/// The app icon as a Flatpak installs it (see `packaging/linux/flatpak`).
-#[cfg(target_os = "linux")]
-const FLATPAK_ICON: &str = "dev.holypanda.CrabyTube";
-
 /// Sends the notice and returns the id the service assigned. Through the portal the id is a
 /// placeholder, since the portal assigns none. Zero means it was not sent, for example when no
 /// notification service is running.
@@ -93,8 +89,8 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
 
     let connection = session().await?;
     let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
-    // Lets the server match the notification to `crabytube.desktop`.
-    hints.insert("desktop-entry", Value::from("crabytube"));
+    // Lets the server match the notification to the app's desktop entry.
+    hints.insert("desktop-entry", Value::from(crate::APP_ID));
     if let Some(cover) = &notice.cover {
         hints.insert(
             "image-path",
@@ -112,8 +108,8 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
             &(
                 "CrabyTube",
                 notice.replaces_id,
-                // The installed icon name (see `packaging/linux`).
-                "crabytube",
+                // The installed icon name (see `packaging/icons`).
+                crate::APP_ID,
                 summary.as_str(),
                 body.as_str(),
                 Vec::<&str>::new(),
@@ -164,7 +160,7 @@ fn portal_icon(cover: Option<Vec<u8>>) -> zbus::zvariant::Structure<'static> {
 
     match cover {
         Some(bytes) => Structure::from(("bytes", Value::from(bytes))),
-        None => Structure::from(("themed", Value::from(vec![FLATPAK_ICON]))),
+        None => Structure::from(("themed", Value::from(vec![crate::APP_ID]))),
     }
 }
 
@@ -198,7 +194,7 @@ mod tests {
         assert_eq!(
             icon.fields()[1],
             zbus::zvariant::Value::Value(Box::new(zbus::zvariant::Value::from(vec![
-                super::FLATPAK_ICON
+                crate::APP_ID
             ])))
         );
     }

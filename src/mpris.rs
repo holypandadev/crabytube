@@ -287,7 +287,7 @@ impl RootInterface {
 
     #[zbus(property)]
     fn desktop_entry(&self) -> String {
-        "crabytube".into()
+        crate::APP_ID.into()
     }
 
     #[zbus(property)]
