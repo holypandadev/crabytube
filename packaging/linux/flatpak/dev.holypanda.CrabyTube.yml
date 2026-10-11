@@ -21,6 +21,8 @@ build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_HOME: /run/build/crabytube/cargo
+    # The V8 static library the v8 crate links instead of downloading it during the build.
+    RUSTY_V8_ARCHIVE: /run/build/crabytube/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz
 modules:
   - name: crabytube
     buildsystem: simple
@@ -38,3 +40,10 @@ modules:
         skip:
           - .git
           - target
+      # Every crate in Cargo.lock, vendored, plus the two git dependencies. Generated with
+      # flatpak-cargo-generator from Cargo.lock; regenerate it when Cargo.lock changes.
+      - cargo-sources.json
+      - type: file
+        url: https://github.com/denoland/rusty_v8/releases/download/v130.0.7/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz
+        sha256: a6476cb94e9b0247081c465424eb793d77732b8db80848132d78cbb50f34b75d
+        dest-filename: librusty_v8_release_x86_64-unknown-linux-gnu.a.gz
