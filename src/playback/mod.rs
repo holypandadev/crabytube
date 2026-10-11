@@ -40,6 +40,13 @@ pub(crate) fn take_injected_range_failure() -> bool {
     !RANGE_FAILURE_INJECTED.swap(true, std::sync::atomic::Ordering::SeqCst)
 }
 
+/// `CRABYTUBE_FAIL_SEEK=1` (diagnostics only): every seek reports a failure after it has run, so the
+/// notice for a failed seek can be checked on screen. Playback goes on from where it was.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn seek_failure_injected() -> bool {
+    std::env::var_os("CRABYTUBE_FAIL_SEEK").is_some()
+}
+
 /// Whether the mid-track refusal is due: the output has played `CRABYTUBE_FAIL_RANGE_AT` seconds.
 #[cfg(feature = "diagnostics")]
 pub(crate) fn take_injected_playback_failure(played_seconds: f64) -> bool {

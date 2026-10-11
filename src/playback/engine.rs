@@ -826,6 +826,8 @@ async fn actor(
                             let current_generation = generation;
                             tokio::spawn(async move {
                                 let result = response.await.unwrap_or_else(|_| Err("audio decoder stopped during seek".into()));
+                                #[cfg(feature = "diagnostics")]
+                                let result = if crate::playback::seek_failure_injected() { Err("injected seek failure".into()) } else { result };
                                 let _ = events_tx.send(Event::Seeked { generation: current_generation, seek_id: current_seek_generation, requested: position, result });
                             });
                             transition(&mut status, PlaybackState::Seeking);
@@ -972,6 +974,8 @@ async fn actor(
                             let current_generation = generation;
                             tokio::spawn(async move {
                                 let result = response.await.unwrap_or_else(|_| Err("audio decoder stopped during seek".into()));
+                                #[cfg(feature = "diagnostics")]
+                                let result = if crate::playback::seek_failure_injected() { Err("injected seek failure".into()) } else { result };
                                 let _ = events_tx.send(Event::Seeked { generation: current_generation, seek_id: current_seek_generation, requested: position, result });
                             });
                             transition(&mut status, PlaybackState::Seeking);
