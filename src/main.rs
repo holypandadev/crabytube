@@ -1,3 +1,10 @@
+// Release builds on Windows start without a console window. Diagnostics builds keep theirs,
+// because their output goes there.
+#![cfg_attr(
+    all(windows, not(debug_assertions), not(feature = "diagnostics")),
+    windows_subsystem = "windows"
+)]
+
 use tracing::error;
 use tracing_subscriber::EnvFilter;
 
