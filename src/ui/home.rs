@@ -2,7 +2,8 @@
 
 use super::shell::{display_title, fit, meta_text, section_heading};
 use super::theme::{
-    self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, hrule, icon, label,
+    self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, TEXT_TITLE, hrule,
+    icon, label,
 };
 use super::{App, Message};
 use crate::music::{HomeItem, HomeItemKind, Track};
@@ -29,6 +30,10 @@ const CARD_FLOOR_NARROW: f32 = 110.0;
 const BLOCK_SHARE: f32 = 0.74;
 const SEARCH_H: f32 = 54.0;
 const SEARCH_MAX_W: f32 = 640.0;
+/// From this content width the top result sits beside the first songs.
+const TOP_RESULT_SPLIT_W: f32 = 1100.0;
+const TOP_RESULT_GAP: f32 = 24.0;
+const TOP_RESULT_SONGS: usize = 4;
 /// Results page: the field floats over the rows, which scroll underneath it.
 const SEARCH_TOP: f32 = 8.0;
 const SEARCH_MARGIN: f32 = 24.0;
@@ -351,6 +356,11 @@ impl HomeLayout {
     }
 }
 
+/// Live broadcasts come before songs only when the top result is itself a broadcast.
+fn live_first(top: Option<&HomeItem>) -> bool {
+    top.is_some_and(|item| item.kind == HomeItemKind::Live)
+}
+
 /// `3:45` from a subtitle such as `Song • Artist • Album • 3:45`.
 pub(super) fn subtitle_duration(subtitle: &str) -> Option<&str> {
     let last = subtitle.rsplit('•').next()?.trim();
@@ -609,17 +619,16 @@ impl App {
             return self.home_page(area);
         }
         let width = area.width.max(280.0);
-        let search_width = area.width.min(SEARCH_MAX_W);
-        let search_x = ((area.width - search_width) / 2.0).max(0.0);
+        // The field spans the content width, and the heading, the count and every section
+        // start at the same left edge under it.
+        let search_width = width;
+        let search_x = 0.0;
         let query = self.committed_query.trim();
         let mut content = column![Space::new().height(SEARCH_HEADER)].spacing(0);
         let count = self.catalog_results.len();
         content = content
-            .push(
-                text(self.tr("Search results"))
-                    .size(TEXT_SECTION)
-                    .font(MONO),
-            )
+            .push(text(self.tr("Search results")).size(TEXT_TITLE).font(MONO))
+            .push(Space::new().height(4))
             .push(
                 label(
                     if self.search_loading {
@@ -646,24 +655,73 @@ impl App {
                 .spacing(10),
             );
         }
-        if let Some(top) = self.catalog_results.first() {
-            content = content
-                .push(Space::new().height(18))
-                .push(label(self.tr("Top result").into_owned(), TEXT_BODY))
-                .push(Space::new().height(8))
-                .push(self.top_result(top, width));
+        let songs = self.search_songs();
+        let song_queue: Arc<[Track]> = songs.iter().filter_map(|item| item.track.clone()).collect();
+        let song_rows = |range: std::ops::Range<usize>, row_width: f32| {
+            let mut rows = column![].spacing(0);
+            for index in range {
+                if let Some(track) = &songs[index].track {
+                    let duration = songs[index]
+                        .duration
+                        .map(super::format_duration)
+                        .or_else(|| subtitle_duration(&songs[index].subtitle).map(str::to_owned));
+                    rows = rows.push(self.song_row(
+                        track,
+                        duration,
+                        Message::PlayContext(Arc::clone(&song_queue), index),
+                        row_width,
+                        super::messages::RowMenu {
+                            list: "songs",
+                            index,
+                        },
+                    ));
+                }
+            }
+            rows
+        };
+        let section = |title: &'static str| {
+            column![
+                label(self.tr(title).into_owned(), TEXT_BODY),
+                Space::new().height(6),
+                hrule(INK),
+            ]
+        };
+        // Songs shown beside the top result are not listed again below it.
+        let mut songs_below = 0..songs.len();
+        let top = self.catalog_results.first();
+        if let Some(top) = top {
+            content = content.push(Space::new().height(18));
+            if width >= TOP_RESULT_SPLIT_W && !songs.is_empty() {
+                let left = (width * 0.4).floor();
+                let right = width - left - TOP_RESULT_GAP;
+                let beside = songs.len().min(TOP_RESULT_SONGS);
+                songs_below = beside..songs.len();
+                content = content.push(
+                    row![
+                        column![
+                            label(self.tr("Top result").into_owned(), TEXT_BODY),
+                            Space::new().height(8),
+                            self.top_result(top, left),
+                        ]
+                        .width(left),
+                        column![section("Songs"), song_rows(0..beside, right)].width(right),
+                    ]
+                    .spacing(TOP_RESULT_GAP),
+                );
+            } else {
+                content = content
+                    .push(label(self.tr("Top result").into_owned(), TEXT_BODY))
+                    .push(Space::new().height(8))
+                    .push(self.top_result(top, width));
+            }
         }
         let live = self.search_live();
-        if !live.is_empty() {
+        let live_section = (!live.is_empty()).then(|| {
             let queue: Arc<[Track]> = live.iter().filter_map(|item| item.track.clone()).collect();
-            content = content
-                .push(Space::new().height(22))
-                .push(label(self.tr("Live").into_owned(), TEXT_BODY))
-                .push(Space::new().height(6))
-                .push(hrule(INK));
+            let mut block = column![Space::new().height(22), section("Live")];
             for (index, item) in live.iter().enumerate() {
                 if let Some(track) = &item.track {
-                    content = content.push(self.song_row(
+                    block = block.push(self.song_row(
                         track,
                         Some("LIVE".to_owned()),
                         Message::PlayContext(Arc::clone(&queue), index),
@@ -675,33 +733,27 @@ impl App {
                     ));
                 }
             }
-        }
-        let songs = self.search_songs();
-        if !songs.is_empty() {
-            let queue: Arc<[Track]> = songs.iter().filter_map(|item| item.track.clone()).collect();
-            content = content
-                .push(Space::new().height(22))
-                .push(label(self.tr("Songs").into_owned(), TEXT_BODY))
-                .push(Space::new().height(6))
-                .push(hrule(INK));
-            for (index, item) in songs.iter().enumerate() {
-                if let Some(track) = &item.track {
-                    let duration = item
-                        .duration
-                        .map(super::format_duration)
-                        .or_else(|| subtitle_duration(&item.subtitle).map(str::to_owned));
-                    content = content.push(self.song_row(
-                        track,
-                        duration,
-                        Message::PlayContext(Arc::clone(&queue), index),
-                        width,
-                        super::messages::RowMenu {
-                            list: "songs",
-                            index,
-                        },
-                    ));
-                }
-            }
+            block
+        });
+        let songs_section = (!songs_below.is_empty()).then(|| {
+            let title = if songs_below.start > 0 {
+                "More songs"
+            } else {
+                "Songs"
+            };
+            column![
+                Space::new().height(22),
+                section(title),
+                song_rows(songs_below.clone(), width)
+            ]
+        });
+        let (first, second) = if live_first(top) {
+            (live_section, songs_section)
+        } else {
+            (songs_section, live_section)
+        };
+        for block in [first, second].into_iter().flatten() {
+            content = content.push(block);
         }
         for (kind, title) in [
             (HomeItemKind::Album, "Albums"),
@@ -1059,6 +1111,24 @@ fn card<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_broadcasts_come_first_only_after_a_live_top_result() {
+        let item = |kind| HomeItem {
+            title: "Item".into(),
+            subtitle: String::new(),
+            thumbnail_url: None,
+            kind,
+            browse_id: None,
+            browse_target: None,
+            track: None,
+            duration: None,
+        };
+        assert!(live_first(Some(&item(HomeItemKind::Live))));
+        assert!(!live_first(Some(&item(HomeItemKind::Song))));
+        assert!(!live_first(Some(&item(HomeItemKind::Album))));
+        assert!(!live_first(None));
+    }
 
     #[test]
     fn subtitle_duration_reads_only_a_trailing_clock() {

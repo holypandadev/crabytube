@@ -58,6 +58,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         }
         "Added to queue" => "Añadida a la cola",
         "{} up next" => "{} a continuación",
+        "More songs" => "Más canciones",
         "Plays next" => "Suena a continuación",
         "{} on disk · {} in memory" => "{} en disco · {} en memoria",
         "Player {} · BotGuard {} · Home {}" => "Reproductor {} · BotGuard {} · Inicio {}",
