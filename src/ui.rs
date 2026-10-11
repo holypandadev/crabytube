@@ -259,6 +259,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::MprisCommand(_)
         | Message::TrayCommand(_)
         | Message::TrayServiceStarted(_)
+        | Message::ShowWindowRequested
         | Message::ClockTick
         | Message::StatusReading(_)
         | Message::Resized { .. }
@@ -1383,6 +1384,9 @@ impl App {
             | Message::DiagnosticCapture(..)
             | Message::DiagnosticCaptured(..)
             | Message::DiagnosticFrame(..) => return self.update_diagnostics(message),
+            Message::ShowWindowRequested => {
+                return self.show_window_from_tray_task();
+            }
             Message::TrayServiceStarted(Ok(available)) => {
                 self.tray_available = available;
                 self.tray_status = if available {

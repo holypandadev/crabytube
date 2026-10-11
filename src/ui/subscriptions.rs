@@ -44,6 +44,8 @@ impl App {
         let tray =
             iced::Subscription::run_with(self.tray.command_receiver(), crate::tray::command_stream)
                 .map(Message::TrayCommand);
+        let show_requests = Subscription::run(crate::single_instance::show_requests)
+            .map(|()| Message::ShowWindowRequested);
         let display_scale = iced::window::events().filter_map(|(_, event)| match event {
             iced::window::Event::Rescaled(scale_factor) => {
                 Some(Message::DisplayScaleChanged(scale_factor))
@@ -91,6 +93,7 @@ impl App {
             tray,
             iced::window::close_requests().map(|_| Message::CloseRequested),
             display_scale,
+            show_requests,
             iced::window::events().filter_map(|(_, event)| match event {
                 iced::window::Event::Focused => Some(Message::WindowFocusChanged(true)),
                 iced::window::Event::Unfocused => Some(Message::WindowFocusChanged(false)),

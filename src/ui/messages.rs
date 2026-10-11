@@ -203,6 +203,8 @@ pub(super) enum Message {
     PlaybackStatusChanged(PlaybackStatus),
     MprisCommand(crate::mpris::RemoteCommand),
     TrayServiceStarted(Result<bool, String>),
+    /// Another launch asked this instance to show its window.
+    ShowWindowRequested,
     TrayCommand(crate::tray::TrayCommand),
     SelectTrack(Track),
     /// Plays the queue entry at this position. A queue row names its place, so a duplicate plays the row clicked.

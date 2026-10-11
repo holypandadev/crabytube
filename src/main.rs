@@ -115,6 +115,12 @@ fn main() {
 
     crabytube::logging::init();
 
+    // Diagnostics runs use their own throwaway profile and may start beside a running app.
+    #[cfg(not(feature = "diagnostics"))]
+    if !crabytube::single_instance::claim() {
+        return;
+    }
+
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     tracing::debug!(
         arena_max = allocator_settings[0],
