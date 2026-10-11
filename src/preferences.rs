@@ -553,6 +553,30 @@ pub fn quarantine(path: &Path) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// Replaces `to` with `from`. Windows refuses the rename while another process has `to` open, such
+/// as a virus scanner reading it, so the attempt is repeated for a short while.
+fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
+    retry_briefly(|| std::fs::rename(from, to), 5, Duration::from_millis(40))
+}
+
+/// Calls `attempt` until it succeeds, at most `attempts` times with `pause` between calls. When
+/// every attempt fails, the last error is returned.
+fn retry_briefly<T>(
+    mut attempt: impl FnMut() -> std::io::Result<T>,
+    attempts: u32,
+    pause: Duration,
+) -> std::io::Result<T> {
+    let mut result = attempt();
+    for _ in 1..attempts {
+        if result.is_ok() {
+            break;
+        }
+        std::thread::sleep(pause);
+        result = attempt();
+    }
+    result
+}
+
 pub fn write(path: &Path, value: &Snapshot) -> Result<(), String> {
     let parent = path.parent().ok_or("Missing config directory")?;
     crate::storage::create_private_dir_all(parent).map_err(|e| e.to_string())?;
@@ -571,7 +595,7 @@ pub fn write(path: &Path, value: &Snapshot) -> Result<(), String> {
     if path.exists() {
         let _ = std::fs::copy(path, backup_path(path));
     }
-    std::fs::rename(&temp, path).map_err(|e| e.to_string())?;
+    rename_over(&temp, path).map_err(|e| e.to_string())?;
     // Makes the rename itself durable. Best effort: not every platform can sync a folder.
     if let Ok(folder) = std::fs::File::open(parent) {
         let _ = folder.sync_all();
@@ -1179,6 +1203,40 @@ mod tests {
         assert_eq!(track.video_id, "old");
         assert_eq!(track.album, None);
     }
+    #[test]
+    fn a_rename_refused_for_a_moment_is_retried_until_it_succeeds() {
+        let mut refusals = 2;
+        let result = retry_briefly(
+            || {
+                if refusals > 0 {
+                    refusals -= 1;
+                    Err(std::io::Error::other("the file is in use"))
+                } else {
+                    Ok(())
+                }
+            },
+            5,
+            Duration::ZERO,
+        );
+        assert!(result.is_ok());
+        assert_eq!(refusals, 0);
+    }
+
+    #[test]
+    fn a_rename_that_keeps_failing_reports_the_last_error() {
+        let mut calls = 0;
+        let result: std::io::Result<()> = retry_briefly(
+            || {
+                calls += 1;
+                Err(std::io::Error::other(format!("attempt {calls}")))
+            },
+            3,
+            Duration::ZERO,
+        );
+        assert_eq!(calls, 3);
+        assert_eq!(result.unwrap_err().to_string(), "attempt 3");
+    }
+
     #[test]
     fn round_trip_preserves_queue_without_autostart() {
         let mut s = Snapshot::default();
