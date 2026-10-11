@@ -23,6 +23,8 @@ pub(super) const ALERT: Color = Color::from_rgb8(255, 92, 92);
 pub(super) const TRACK: Color = Color::from_rgb8(92, 92, 92);
 /// Selected text in an input field.
 pub(super) const SELECTION: Color = Color::from_rgb8(70, 70, 70);
+/// Secondary text inside an inverted row, which is drawn white: artist and duration. 8.9:1.
+pub(super) const INK_SUBDUED: Color = Color::from_rgb8(74, 74, 74);
 /// Unsung words of the active lyric line, which is drawn white. 5:1 on white.
 pub(super) const UNSUNG_ON_LIGHT: Color = Color::from_rgb8(110, 110, 110);
 /// Secondary text on the white active lyric line: translation and romanization.
@@ -274,16 +276,6 @@ pub(super) fn icon_button(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// Icon button whose outline stays visible, for an opened menu or a toggle.
-pub(super) fn icon_button_active(_: &Theme, _: button::Status) -> button::Style {
-    button::Style {
-        background: None,
-        text_color: INK,
-        border: outline(hairline()),
-        ..Default::default()
-    }
-}
-
 /// Invisible button for whole rows and cards; hovering fills the row.
 pub(super) fn row_button(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
@@ -300,13 +292,61 @@ pub(super) fn row_button(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// The playing row in a list: a permanent hover fill.
+/// The playing row in a list: inverted, white with black text, also while hovered.
 pub(super) fn row_button_current(_: &Theme, _: button::Status) -> button::Style {
     button::Style {
-        background: Some(Background::Color(HOVER)),
-        text_color: INK,
+        background: Some(Background::Color(INK)),
+        text_color: BLACK,
         border: Border::default(),
         ..Default::default()
+    }
+}
+
+/// Text and icon colours of a list row: the playing row is inverted.
+#[derive(Clone, Copy)]
+pub(super) struct RowInk {
+    pub(super) title: Color,
+    pub(super) secondary: Color,
+    pub(super) icon: Color,
+}
+
+pub(super) fn row_ink(current: bool) -> RowInk {
+    if current {
+        RowInk {
+            title: BLACK,
+            secondary: INK_SUBDUED,
+            icon: BLACK,
+        }
+    } else {
+        RowInk {
+            title: INK,
+            secondary: DIM,
+            icon: INK,
+        }
+    }
+}
+
+/// An icon button inside a list row. In the inverted playing row its hover outline is black.
+pub(super) fn row_icon_button(
+    current: bool,
+    open: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let outlined = open || matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: None,
+            text_color: if current { BLACK } else { INK },
+            border: Border {
+                color: match (outlined, current) {
+                    (false, _) => Color::TRANSPARENT,
+                    (true, true) => BLACK,
+                    (true, false) => INK,
+                },
+                width: hairline(),
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
     }
 }
 

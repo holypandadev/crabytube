@@ -853,15 +853,17 @@ impl App {
         let cover = density.result_cover();
         let padding = UiDensity::row_padding(cover, density.result_row_height());
         let text_width = width - cover - 16.0 - 60.0 - 44.0 - 24.0;
+        let ink = theme::row_ink(playing);
         let title = byline(&track.title, &track.artist);
-        let more = button(icon("more", 18.0, INK))
+        let title = if playing {
+            format!("▶ {title}")
+        } else {
+            title
+        };
+        let more = button(icon("more", 18.0, ink.icon))
             .on_press(Message::ToggleRowMenu(menu))
             .padding(6)
-            .style(if open {
-                theme::icon_button_active
-            } else {
-                theme::icon_button
-            });
+            .style(theme::row_icon_button(playing, open));
         // The ••• button sits inside the row, so the hover fill covers the
         // whole line with even padding on both sides.
         let main = button(
@@ -874,9 +876,9 @@ impl App {
                 text(fit(&title, text_width, TEXT_BODY))
                     .size(TEXT_BODY)
                     .font(MONO)
+                    .color(ink.title)
                     .width(Length::Fill),
-                label(if playing { "▶ " } else { "" }, TEXT_CAPTION),
-                label(duration, TEXT_CAPTION).color(DIM),
+                label(duration, TEXT_CAPTION).color(ink.secondary),
                 more,
             ]
             .spacing(16)
@@ -885,7 +887,11 @@ impl App {
         .on_press(play)
         .width(Length::Fill)
         .padding([padding, 8.0])
-        .style(theme::row_button);
+        .style(if playing {
+            theme::row_button_current
+        } else {
+            theme::row_button
+        });
         let mut block = column![main];
         if open {
             block = block.push(self.row_actions(track));

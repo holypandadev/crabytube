@@ -14,6 +14,8 @@ use std::sync::Arc;
 const INDEX_W: f32 = 48.0;
 const DURATION_W: f32 = 96.0;
 const HEART_W: f32 = 44.0;
+/// Width of the ••• button beside the heart.
+const MORE_W: f32 = 30.0;
 const CELL_GAP: f32 = 16.0;
 
 pub(super) fn favorites_cover(density: UiDensity) -> f32 {
@@ -75,6 +77,7 @@ impl App {
         let show_duration = width >= 560.0;
         let fixed = INDEX_W
             + HEART_W
+            + MORE_W
             + if show_duration {
                 DURATION_W + CELL_GAP
             } else {
@@ -109,7 +112,7 @@ impl App {
         if show_duration {
             table_head = table_head.push(column_head("DURATION", DURATION_W));
         }
-        let table_head = table_head.push(Space::new().width(HEART_W));
+        let table_head = table_head.push(Space::new().width(MORE_W + HEART_W));
 
         let mut page = column![
             Space::new().height(8),
@@ -154,25 +157,29 @@ impl App {
         for index in range.clone() {
             let track = &self.favorites[index];
             let current = playing == Some(track.video_id.as_str());
+            let ink = theme::row_ink(current);
+            let menu = super::messages::RowMenu {
+                list: "favorites",
+                index,
+            };
+            let open = self.row_menu.as_ref() == Some(&menu);
             let duration = self
-                .track_duration(&track.video_id)
-                .or_else(|| {
-                    track
-                        .duration_secs
-                        .map(|secs| std::time::Duration::from_secs(u64::from(secs)))
-                })
+                .duration_of(track)
                 .map(format_duration)
                 .unwrap_or_else(|| "—".to_owned());
             let album = track.album.as_deref().unwrap_or("—");
             let cells = row![
-                container(label(
-                    if current {
-                        "▶".to_owned()
-                    } else {
-                        (index + 1).to_string()
-                    },
-                    TEXT_BODY
-                ))
+                container(
+                    label(
+                        if current {
+                            "▶".to_owned()
+                        } else {
+                            (index + 1).to_string()
+                        },
+                        TEXT_BODY
+                    )
+                    .color(ink.title)
+                )
                 .width(INDEX_W),
                 row![
                     self.cover(
@@ -181,14 +188,17 @@ impl App {
                         crate::artwork::THUMB_MAX
                     ),
                     if show_duration {
-                        Element::from(label(
-                            fit(
-                                display_title(&track.title),
-                                title_w - cover - 16.0,
+                        Element::from(
+                            label(
+                                fit(
+                                    display_title(&track.title),
+                                    title_w - cover - 16.0,
+                                    TEXT_BODY,
+                                ),
                                 TEXT_BODY,
-                            ),
-                            TEXT_BODY,
-                        ))
+                            )
+                            .color(ink.title),
+                        )
                     } else {
                         column![
                             label(
@@ -198,12 +208,13 @@ impl App {
                                     TEXT_BODY
                                 ),
                                 TEXT_BODY
-                            ),
+                            )
+                            .color(ink.title),
                             label(
                                 fit(&track.artist, title_w - cover - 16.0, TEXT_CAPTION),
                                 TEXT_CAPTION
                             )
-                            .color(DIM),
+                            .color(ink.secondary),
                         ]
                         .spacing(4)
                         .into()
@@ -217,36 +228,48 @@ impl App {
             .align_y(Alignment::Center);
             let cells = if show_duration {
                 cells.push(
-                    container(label(fit(&track.artist, artist_w, TEXT_BODY), TEXT_BODY))
-                        .width(artist_w),
+                    container(
+                        label(fit(&track.artist, artist_w, TEXT_BODY), TEXT_BODY).color(ink.title),
+                    )
+                    .width(artist_w),
                 )
             } else {
                 cells
             };
             let cells = if show_album {
                 cells.push(
-                    container(label(fit(album, album_w, TEXT_BODY), TEXT_BODY)).width(album_w),
+                    container(
+                        label(fit(album, album_w, TEXT_BODY), TEXT_BODY).color(ink.secondary),
+                    )
+                    .width(album_w),
                 )
             } else {
                 cells
             };
             let cells = if show_duration {
-                cells.push(container(label(duration, TEXT_BODY)).width(DURATION_W))
+                cells.push(
+                    container(label(duration, TEXT_BODY).color(ink.secondary)).width(DURATION_W),
+                )
             } else {
                 cells
             };
             // The heart sits inside the row, so the hover fill runs under it
             // instead of stopping at a black box.
             let heart = container(
-                button(icon("like-filled", 18.0, INK))
+                button(icon("like-filled", 18.0, ink.icon))
                     .on_press(Message::ToggleLike(track.video_id.clone()))
                     .padding(6)
-                    .style(theme::icon_button),
+                    .style(theme::row_icon_button(current, false)),
             )
             .width(HEART_W)
             .center_x(HEART_W);
+            let more = button(icon("more", 18.0, ink.icon))
+                .on_press(Message::ToggleRowMenu(menu))
+                .padding(6)
+                .style(theme::row_icon_button(current, open));
             let line = button(
-                row![cells, Space::new().width(Length::Fill), heart].align_y(Alignment::Center),
+                row![cells, Space::new().width(Length::Fill), more, heart]
+                    .align_y(Alignment::Center),
             )
             .on_press(Message::PlayContext(Arc::clone(&shared), index))
             .width(Length::Fill)
@@ -256,7 +279,13 @@ impl App {
             } else {
                 theme::row_button
             });
-            rows = rows.push(column![line, hrule(RULE)].height(pitch));
+            // An open menu adds its actions under the row; closed rows keep the fixed pitch the
+            // virtual list counts with.
+            rows = rows.push(if open {
+                column![line, self.row_actions(track), hrule(RULE)]
+            } else {
+                column![line, hrule(RULE)].height(pitch)
+            });
         }
         let remaining = count.saturating_sub(range.end);
         if remaining > 0 {

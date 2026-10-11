@@ -8,7 +8,7 @@ use iced::widget::{
     operation::{self, AbsoluteOffset},
     row, scrollable, text,
 };
-use iced::{Alignment, Element, Length, Size, Task};
+use iced::{Alignment, Element, Length, Size, Task, alignment};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -102,6 +102,9 @@ impl CollectionState {
         true
     }
 }
+
+/// Width of the ••• button at the end of a track row.
+const ROW_MORE_W: f32 = 30.0;
 
 impl App {
     pub(super) fn load_collection_more(&mut self) -> Task<Message> {
@@ -245,8 +248,13 @@ impl App {
             ));
         }
         if let Some(summary) = &data.summary {
-            metadata = metadata
-                .push(label(fit(summary, text_width, TEXT_CAPTION), TEXT_CAPTION).color(DIM));
+            metadata = metadata.push(
+                label(
+                    fit(&meta_text(summary), text_width, TEXT_CAPTION),
+                    TEXT_CAPTION,
+                )
+                .color(DIM),
+            );
         }
         let has_tracks = !queue_tracks.is_empty();
         metadata = metadata.push(Space::new().height(8)).push(
@@ -299,13 +307,15 @@ impl App {
         let duration_w = 96.0;
         let index_w = 48.0;
         let cover = self.preferences.ui_density.collection_cover();
-        let title_w = width - index_w - cover - duration_w - 3.0 * 16.0 - 8.0;
+        let title_w = width - index_w - cover - duration_w - ROW_MORE_W - 4.0 * 16.0 - 8.0;
         let table_head = row![
             container(label(self.tr("#").into_owned(), TEXT_CAPTION).color(DIM)).width(index_w),
             container(label(self.tr("TITLE").into_owned(), TEXT_CAPTION).color(DIM))
                 .width(Length::Fill),
             container(label(self.tr("DURATION").into_owned(), TEXT_CAPTION).color(DIM))
-                .width(duration_w),
+                .width(duration_w)
+                .align_x(alignment::Horizontal::Right),
+            Space::new().width(ROW_MORE_W),
         ]
         .spacing(16)
         .padding([0, 4]);
@@ -357,19 +367,33 @@ impl App {
             let entry = &data.tracks[index];
             let track = &entry.track;
             let current = playing == Some(track.video_id.as_str());
+            let ink = theme::row_ink(current);
+            let menu = super::messages::RowMenu {
+                list: "collection",
+                index,
+            };
+            let open = self.row_menu.as_ref() == Some(&menu);
             let duration = entry
                 .duration
                 .map(format_duration)
                 .unwrap_or_else(|| "—".into());
+            let more = button(icon("more", 18.0, ink.icon))
+                .on_press(Message::ToggleRowMenu(menu))
+                .padding(6)
+                .width(ROW_MORE_W)
+                .style(theme::row_icon_button(current, open));
             let cells = row![
-                container(label(
-                    if current {
-                        "▶".to_owned()
-                    } else {
-                        (index + 1).to_string()
-                    },
-                    TEXT_BODY
-                ))
+                container(
+                    label(
+                        if current {
+                            "▶".to_owned()
+                        } else {
+                            (index + 1).to_string()
+                        },
+                        TEXT_BODY
+                    )
+                    .color(ink.title)
+                )
                 .width(index_w),
                 self.cover(
                     track.thumbnail_url.as_deref(),
@@ -380,34 +404,40 @@ impl App {
                     label(
                         fit(display_title(&track.title), title_w, TEXT_BODY),
                         TEXT_BODY
-                    ),
-                    label(fit(&track.artist, title_w, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    )
+                    .color(ink.title),
+                    label(fit(&track.artist, title_w, TEXT_CAPTION), TEXT_CAPTION)
+                        .color(ink.secondary),
                 ]
                 .spacing(4)
                 .width(Length::Fill),
-                container(label(duration, TEXT_BODY)).width(duration_w),
+                container(label(duration, TEXT_BODY).color(ink.secondary))
+                    .width(duration_w)
+                    .align_x(alignment::Horizontal::Right),
+                more,
             ]
             .spacing(16)
             .align_y(Alignment::Center);
-            rows = rows.push(
-                column![
-                    button(cells)
-                        .on_press(Message::PlayCollection(
-                            Arc::clone(&queue_tracks),
-                            index,
-                            queue_source.clone(),
-                        ))
-                        .width(Length::Fill)
-                        .padding([10, 4])
-                        .style(if current {
-                            theme::row_button_current
-                        } else {
-                            theme::row_button
-                        }),
-                    hrule(RULE),
-                ]
-                .height(pitch),
-            );
+            let line = button(cells)
+                .on_press(Message::PlayCollection(
+                    Arc::clone(&queue_tracks),
+                    index,
+                    queue_source.clone(),
+                ))
+                .width(Length::Fill)
+                .padding([10, 4])
+                .style(if current {
+                    theme::row_button_current
+                } else {
+                    theme::row_button
+                });
+            // An open menu adds its actions under the row; closed rows keep the fixed pitch the
+            // virtual list counts with.
+            rows = rows.push(if open {
+                column![line, self.row_actions(track), hrule(RULE)]
+            } else {
+                column![line, hrule(RULE)].height(pitch)
+            });
         }
         let remaining = data.tracks.len().saturating_sub(range.end);
         if remaining > 0 {

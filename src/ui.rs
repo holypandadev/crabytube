@@ -5176,6 +5176,19 @@ mod tests {
     }
 
     #[test]
+    fn a_row_shows_the_length_the_track_carries_when_none_was_learned() {
+        let mut app = App::default();
+        let mut track = fixture_track("radio");
+        assert_eq!(app.duration_of(&track), None);
+        track.duration_secs = Some(215);
+        assert_eq!(app.duration_of(&track), Some(Duration::from_secs(215)));
+        // A length learned from playback or the results wins over the one the track carries.
+        app.known_durations
+            .insert("radio".into(), Duration::from_secs(216));
+        assert_eq!(app.duration_of(&track), Some(Duration::from_secs(216)));
+    }
+
+    #[test]
     fn typing_leaves_the_committed_query_of_the_results_on_screen_alone() {
         let mut app = App {
             page: Page::Search,

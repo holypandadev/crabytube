@@ -241,7 +241,7 @@ impl App {
             let entry = &self.queue[index];
             let current = self.queue_index == Some(index);
             let duration = self
-                .track_duration(&entry.video_id)
+                .duration_of(entry)
                 .map(format_duration)
                 .unwrap_or_default();
             let menu = super::messages::RowMenu {
@@ -249,19 +249,17 @@ impl App {
                 index,
             };
             let open = self.row_menu.as_ref() == Some(&menu);
-            let marker: Element<'_, Message> = if current {
-                label("▶", TEXT_CAPTION).into()
+            let ink = theme::row_ink(current);
+            let title = display_title(&entry.title);
+            let title = if current {
+                format!("▶ {title}")
             } else {
-                Space::new().width(0).into()
+                title.to_owned()
             };
-            let more = button(super::theme::icon("more", 18.0, INK))
+            let more = button(super::theme::icon("more", 18.0, ink.icon))
                 .on_press(Message::ToggleRowMenu(menu))
                 .padding(6)
-                .style(if open {
-                    theme::icon_button_active
-                } else {
-                    theme::icon_button
-                });
+                .style(theme::row_icon_button(current, open));
             let main = button(
                 row![
                     self.cover(
@@ -270,19 +268,16 @@ impl App {
                         crate::artwork::THUMB_MAX
                     ),
                     column![
-                        row![
-                            marker,
-                            text(fit(display_title(&entry.title), text_width, TEXT_BODY))
-                                .size(TEXT_BODY)
-                                .font(MONO)
-                        ]
-                        .spacing(8),
+                        text(fit(&title, text_width, TEXT_BODY))
+                            .size(TEXT_BODY)
+                            .font(MONO)
+                            .color(ink.title),
                         label(fit(&entry.artist, text_width, TEXT_CAPTION), TEXT_CAPTION)
-                            .color(DIM),
+                            .color(ink.secondary),
                     ]
                     .spacing(6)
                     .width(Length::Fill),
-                    label(duration, TEXT_BODY),
+                    label(duration, TEXT_CAPTION).color(ink.secondary),
                     more,
                 ]
                 .spacing(20)

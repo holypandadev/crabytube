@@ -670,6 +670,16 @@ impl App {
         })
     }
 
+    /// A track's length: one learned from playback, a collection or the results, otherwise the
+    /// one the track carries, as radio and saved tracks do. Nothing is fetched to find it.
+    pub(super) fn duration_of(&self, track: &Track) -> Option<Duration> {
+        self.track_duration(&track.video_id).or_else(|| {
+            track
+                .duration_secs
+                .map(|secs| Duration::from_secs(u64::from(secs)))
+        })
+    }
+
     /// The playback messages of `update_inner`, which routes them here.
     pub(super) fn update_playback(&mut self, message: Message) -> Task<Message> {
         match message {
