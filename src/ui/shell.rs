@@ -621,18 +621,23 @@ impl App {
             (width * 0.28).clamp(150.0, 420.0)
         };
         let track = self.shown_track();
-        let status = match self.playback_status.state {
-            PlaybackState::Resolving => Some(self.tr("Loading…").into_owned()),
-            PlaybackState::Buffering => Some(self.tr("Buffering…").into_owned()),
-            PlaybackState::Error => Some(
-                self.tr(self
-                    .playback_status
-                    .error
-                    .as_deref()
-                    .unwrap_or("Playback failed"))
-                    .into_owned(),
-            ),
-            _ => None,
+        // A seek that failed shows its notice for a moment, ahead of the playback state.
+        let status = if self.seek_notice.is_some() {
+            Some(self.tr("Couldn't seek there").into_owned())
+        } else {
+            match self.playback_status.state {
+                PlaybackState::Resolving => Some(self.tr("Loading…").into_owned()),
+                PlaybackState::Buffering => Some(self.tr("Buffering…").into_owned()),
+                PlaybackState::Error => Some(
+                    self.tr(self
+                        .playback_status
+                        .error
+                        .as_deref()
+                        .unwrap_or("Playback failed"))
+                        .into_owned(),
+                ),
+                _ => None,
+            }
         };
         let text_width = (side - 52.0 - 12.0 - 44.0 - 20.0).max(40.0);
         let title = track.map_or_else(

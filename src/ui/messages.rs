@@ -179,6 +179,7 @@ pub(super) enum Message {
     CopyToClipboard(String),
     /// Hides the "Copied" notice, unless a newer copy has replaced it (the value is that copy's number).
     CopyNoticeExpired(u64),
+    SeekNoticeExpired(u64),
     /// Fires once a resize settles; see the `Resized` handler.
     ResizeWorkDue(u64),
     /// Diagnostics-only: one step of the `--scroll-test` sweep.

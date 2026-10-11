@@ -241,6 +241,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Import" => "Importar",
         "Launch on startup" => "Abrir al iniciar sesión",
         "Loading…" => "Cargando…",
+        "Couldn't seek there" => "No se pudo saltar a ese punto",
         "[ LOADING ]" => "[ CARGANDO ]",
         "[ LOADING LYRICS ]" => "[ CARGANDO LETRAS ]",
         "[ LOADING RADIO ]" => "[ CARGANDO RADIO ]",

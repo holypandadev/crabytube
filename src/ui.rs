@@ -185,6 +185,11 @@ struct App {
     /// Set while the "Copied" notice shows; the value is the number of the copy that set it.
     copy_notice: Option<u64>,
     copy_notice_count: u64,
+    /// The engine's seek failures already shown. A new failure shows the short seek notice.
+    seek_failures_seen: u32,
+    /// Set while the seek notice shows; the value is the number of the failure that set it.
+    seek_notice: Option<u64>,
+    seek_notice_count: u64,
     /// A destructive settings change that waits for a second press. It is dropped by any other press.
     confirmation: Option<PendingConfirmation>,
     confirmation_count: u64,
@@ -294,6 +299,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::VolumeSaveDue(_)
         | Message::PrewarmPlayback
         | Message::CopyNoticeExpired(_)
+        | Message::SeekNoticeExpired(_)
         | Message::LyricsScrolled(_)
         | Message::SearchScrolled { .. }
         | Message::LibraryScrolled(_)
@@ -1489,6 +1495,11 @@ impl App {
                     self.copy_notice = None;
                 }
             }
+            Message::SeekNoticeExpired(count) => {
+                if self.seek_notice == Some(count) {
+                    self.seek_notice = None;
+                }
+            }
             Message::SearchFor(query) => {
                 self.invalidate_suggestions();
                 self.search_committed = !query.trim().is_empty();
@@ -2009,6 +2020,9 @@ impl App {
             artwork_selected_retried: false,
             copy_notice: None,
             copy_notice_count: 0,
+            seek_failures_seen: 0,
+            seek_notice: None,
+            seek_notice_count: 0,
             confirmation: None,
             confirmation_count: 0,
             hovered_chip: None,
@@ -4706,6 +4720,49 @@ mod tests {
             result: Err("the portal failed".into()),
         }));
         assert!(app.preferences.startup, "an error on disabling keeps it on");
+    }
+
+    #[test]
+    fn a_failed_seek_shows_a_short_notice_and_keeps_playing() {
+        let mut app = App {
+            playback_status: PlaybackStatus {
+                track: Some(song("Track")),
+                position: Duration::from_secs(40),
+                duration: Some(Duration::from_secs(200)),
+                state: PlaybackState::Playing,
+                ..PlaybackStatus::default()
+            },
+            ..App::default()
+        };
+        // The engine reports a seek that failed and left the position playing.
+        let reported = PlaybackStatus {
+            seek_failures: 1,
+            ..app.playback_status.clone()
+        };
+        drop(app.update_playback_status(reported));
+        assert_eq!(
+            app.playback_status.state,
+            PlaybackState::Playing,
+            "a failed seek pauses nothing"
+        );
+        let shown = app.seek_notice.expect("the failure shows a notice");
+        assert_eq!(
+            crate::i18n::translate(
+                crate::preferences::UiLanguage::Spanish,
+                "Couldn't seek there"
+            ),
+            "No se pudo saltar a ese punto"
+        );
+
+        // The same count again is not a new failure, so the notice keeps its number.
+        drop(app.update_playback_status(app.playback_status.clone()));
+        assert_eq!(app.seek_notice, Some(shown));
+
+        // Only the notice's own timer clears it.
+        drop(app.update(Message::SeekNoticeExpired(shown.wrapping_add(1))));
+        assert!(app.seek_notice.is_some());
+        drop(app.update(Message::SeekNoticeExpired(shown)));
+        assert!(app.seek_notice.is_none());
     }
 
     #[test]

@@ -7,6 +7,8 @@ use crate::preferences::{MAX_RECENT_PLAYS, RecentCollection, RecentPlay};
 const KARAOKE_MIN_WAIT: Duration = Duration::from_millis(60);
 /// Longest wait before the app looks again, so the progress bar moves between lines.
 const KARAOKE_MAX_WAIT: Duration = Duration::from_millis(1000);
+/// How long the notice about a seek that failed stays in the player bar.
+const SEEK_NOTICE_TIME: Duration = Duration::from_secs(3);
 
 impl App {
     /// Adds the track that just started playing to "Jump back in", once per start. A track that
@@ -54,6 +56,7 @@ impl App {
         let previous_position = self.playback_status.position;
         let previous_track = self.playback_status.track.clone();
         self.playback_status = status;
+        let seek_notice = self.note_seek_failures();
         self.playback_status_at = std::time::Instant::now();
         self.record_playing_track();
         // A position that moves back within the same track is a seek or a restart, whatever started it.
@@ -83,6 +86,7 @@ impl App {
         // Follow first, so the branches below cannot skip the lyric scroll.
         let resync = self.lyric_active.is_some() && self.take_lyrics_resync();
         let mut tasks = vec![self.follow_lyrics_task(old_active, resync)];
+        tasks.extend(seek_notice);
         tasks.append(&mut metadata_tasks);
 
         // Search tracks may not have a duration until the existing playback
@@ -119,6 +123,23 @@ impl App {
             tasks.push(self.load_radio());
         }
         Task::batch(tasks)
+    }
+
+    /// Shows a short notice for each seek the engine reports as failed. Playback goes on from where it
+    /// was, so this pauses nothing. Returns the task that clears the notice again.
+    fn note_seek_failures(&mut self) -> Option<Task<Message>> {
+        let failures = self.playback_status.seek_failures;
+        if failures == self.seek_failures_seen {
+            return None;
+        }
+        self.seek_failures_seen = failures;
+        self.seek_notice_count = self.seek_notice_count.wrapping_add(1);
+        let count = self.seek_notice_count;
+        self.seek_notice = Some(count);
+        Some(Task::perform(
+            async { tokio::time::sleep(SEEK_NOTICE_TIME).await },
+            move |()| Message::SeekNoticeExpired(count),
+        ))
     }
 
     /// The next wake-up for synced lyrics: at the next word, not on a fixed tick. Nothing is

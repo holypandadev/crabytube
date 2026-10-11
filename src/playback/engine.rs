@@ -63,6 +63,9 @@ pub struct PlaybackStatus {
     pub output_device: Option<String>,
     pub resolved_format: Option<ResolvedAudioFormat>,
     pub error: Option<String>,
+    /// Seeks that failed and left the current position playing. Counts up, so a reader that
+    /// remembers the last value sees each failure once.
+    pub seek_failures: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,6 +102,7 @@ impl Default for PlaybackStatus {
             output_device: None,
             resolved_format: None,
             error: None,
+            seek_failures: 0,
         }
     }
 }
@@ -1017,6 +1021,7 @@ async fn actor(
                         (Err(error), Some(audio), output) => {
                             // The output was cleared for the seek, so the unchanged source is queued again.
                             warn!(%error, "seek failed; continuing from the current position");
+                            status.seek_failures = status.seek_failures.wrapping_add(1);
                             audio.first_sample_output.store(false, Ordering::Relaxed);
                             observed_underruns = audio.underruns.load(Ordering::Relaxed);
                             status.position = position(&audio.cursor, audio.rate, audio.channels);
