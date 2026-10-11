@@ -781,18 +781,6 @@ impl App {
                 self.preferences.repeat = self.repeat;
                 self.persist();
             }
-            Message::ToggleAutoplay => {
-                self.autoplay = !self.autoplay;
-                if !self.autoplay {
-                    if let Some(token) = self.radio_cancel.take() {
-                        token.cancel();
-                    }
-                    self.radio_generation = self.radio_generation.wrapping_add(1);
-                    self.radio_loading = false;
-                    self.radio_attempted_for = None;
-                }
-                self.persist();
-            }
             Message::TogglePlayback => match self.playback_status.state {
                 PlaybackState::Playing | PlaybackState::Buffering | PlaybackState::Seeking => {
                     self.playback.pause()

@@ -295,7 +295,6 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::PrewarmPlayback
         | Message::CopyNoticeExpired(_)
         | Message::LyricsScrolled(_)
-        | Message::HomeScrolled(_)
         | Message::SearchScrolled { .. }
         | Message::LibraryScrolled(_)
         | Message::QueueScrolled(_)
@@ -618,7 +617,6 @@ impl App {
             | Message::SeekTo(..)
             | Message::ToggleShuffle
             | Message::CycleRepeat
-            | Message::ToggleAutoplay
             | Message::TogglePlayback
             | Message::NextTrack
             | Message::PrevTrack
@@ -1112,10 +1110,6 @@ impl App {
             Message::ClearBotGuardCache => {
                 return self.clear_cache_task(crate::storage::CacheKind::BotGuard);
             }
-            Message::RefreshCacheUsage => {
-                self.storage_notice = Some("Refreshing cache sizes…".into());
-                return self.refresh_storage_cache_usage_task();
-            }
             Message::StorageUsageLoaded { generation, usage } => {
                 if generation != self.storage_generation {
                     return Task::none();
@@ -1361,10 +1355,6 @@ impl App {
             | Message::FadeFrame(..) => {
                 return self.update_artwork(message);
             }
-            Message::HomeScrolled(offset) => {
-                self.home_scroll = offset;
-                return self.scroll_preload_task();
-            }
             Message::SearchScrolled { offset, near_end } => {
                 self.search_scroll = offset;
                 let more = if near_end {
@@ -1507,7 +1497,6 @@ impl App {
                 let search = self.start_search(query, false);
                 return Task::batch([navigation, search]);
             }
-            Message::LoadMoreCatalog => return self.load_more_catalog_task(),
             Message::SuggestionChosen(suggestion) => {
                 self.invalidate_suggestions();
                 self.search_query = suggestion.clone();

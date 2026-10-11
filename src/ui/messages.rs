@@ -47,9 +47,6 @@ pub(super) enum Preference {
 }
 
 #[derive(Clone, Debug)]
-// Some variants have no sender in the interface. Their handlers stay with the queue, lyrics,
-// scroll and cache logic they drive.
-#[allow(dead_code)]
 pub(super) enum Message {
     StartDrag,
     /// Resize from a window edge (the window has no system decorations).
@@ -59,6 +56,8 @@ pub(super) enum Message {
     CloseWindow,
     CloseRequested,
     QuitApp,
+    /// Moves a queue entry. No control in the interface sends it at the moment.
+    #[allow(dead_code)]
     MoveQueue(usize, usize),
     RemoveFromQueue(usize),
     ClearUpcomingQueue,
@@ -88,7 +87,6 @@ pub(super) enum Message {
     ToggleLike(String),
     ToggleShuffle,
     CycleRepeat,
-    ToggleAutoplay,
     SetNowPlayingTab(NowPlayingTab),
     Back,
     Forward,
@@ -100,7 +98,6 @@ pub(super) enum Message {
     ClearHomeCache,
     ClearPlayerJsCache,
     ClearBotGuardCache,
-    RefreshCacheUsage,
     // Async storage worker results. Disk walks/deletes never run in
     // `update`; they complete here with generation-guarded results.
     StorageUsageLoaded {
@@ -136,6 +133,8 @@ pub(super) enum Message {
     ImportLocalData,
     LyricsScrolled(AbsoluteOffset),
     ResumeLyricsFollow,
+    /// Steps the current song's lyrics offset. No control in the interface sends it at the moment.
+    #[allow(dead_code)]
     AdjustLyricsOffset(i64),
     RetryCollection,
     RetryCollectionMore,
@@ -148,7 +147,6 @@ pub(super) enum Message {
         result: Result<BrowseMore, String>,
     },
     CollectionScrolled(f32),
-    HomeScrolled(AbsoluteOffset),
     SearchScrolled {
         offset: AbsoluteOffset,
         /// The list is close enough to its end to ask for the next page of results.
@@ -225,7 +223,6 @@ pub(super) enum Message {
     SearchEscape(bool),
     SearchSubmitted,
     SearchFor(String),
-    LoadMoreCatalog,
     SuggestionChosen(String),
     DismissSuggestions,
     KeyPressed(iced::keyboard::Event),
