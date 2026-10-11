@@ -34,6 +34,8 @@ const SEARCH_MAX_W: f32 = 640.0;
 const TOP_RESULT_SPLIT_W: f32 = 1100.0;
 const TOP_RESULT_GAP: f32 = 24.0;
 const TOP_RESULT_SONGS: usize = 4;
+/// Room the carousel arrows and the shortest rule take beside the shelf name.
+const SHELF_ARROWS_W: f32 = 120.0;
 /// Results page: the field floats over the rows, which scroll underneath it.
 const SEARCH_TOP: f32 = 8.0;
 const SEARCH_MARGIN: f32 = 24.0;
@@ -394,20 +396,24 @@ impl App {
 
     /// The search field alone, without suggestions.
     fn search_field(&self, width: f32, hint: bool) -> Element<'_, Message> {
+        // The placeholder is cut with an ellipsis rather than mid-word when the field is narrow:
+        // the room left by the padding, the icon, the gaps and the hint or clear button.
+        let placeholder = fit(
+            self.tr_static("Search artist, album, tracks"),
+            width - 2.0 * 18.0 - 20.0 - 2.0 * 14.0 - 44.0 - 8.0,
+            TEXT_BODY,
+        );
         container(
             row![
                 icon("search", 20.0, INK),
-                text_input(
-                    self.tr_static("Search artist, album, tracks"),
-                    &self.search_query
-                )
-                .id("search-field")
-                .on_input(Message::SearchChanged)
-                .on_submit(Message::SearchSubmitted)
-                .font(MONO)
-                .size(TEXT_BODY)
-                .padding([10, 4])
-                .style(theme::input_style),
+                text_input(&placeholder, &self.search_query)
+                    .id("search-field")
+                    .on_input(Message::SearchChanged)
+                    .on_submit(Message::SearchSubmitted)
+                    .font(MONO)
+                    .size(TEXT_BODY)
+                    .padding([10, 4])
+                    .style(theme::input_style),
                 if self.search_query.is_empty() {
                     // The shortcut hint only where there is room and a keyboard.
                     let hint = hint && width >= NARROW_W;
@@ -605,7 +611,16 @@ impl App {
             .width(layout.row_width)
             .height(layout.card + 10.0 + 20.0 + 18.0);
         column![
-            section_heading(self.home_picks.title.clone(), Some(arrows.into())),
+            // One line: a long shelf name is cut before the arrows rather than wrapped, so the
+            // layout's heights hold.
+            section_heading(
+                fit(
+                    &self.home_picks.title,
+                    layout.row_width - SHELF_ARROWS_W,
+                    TEXT_SECTION
+                ),
+                Some(arrows.into())
+            ),
             Space::new().height(18),
             strip,
         ]
