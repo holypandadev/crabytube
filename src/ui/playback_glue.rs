@@ -881,6 +881,7 @@ impl App {
                 ]);
             }
             Message::SetVolume(volume) => {
+                self.volume_rail.touch(std::time::Instant::now());
                 self.preferences.volume = volume;
                 if !self.preferences.muted {
                     self.playback.set_volume(volume);

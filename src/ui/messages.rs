@@ -268,6 +268,12 @@ pub(super) enum Message {
     },
     CarouselScrolled(f32),
     CarouselFrame(std::time::Instant),
+    /// The volume button of Now Playing: opens the rail, or mutes while it is open.
+    ToggleVolumeRail,
+    /// Redraws while the volume rail opens or closes.
+    VolumeRailFrame(std::time::Instant),
+    /// Closes the volume rail once it has not been touched for a while.
+    VolumeRailIdle,
     /// Redraws while covers fade in.
     FadeFrame(std::time::Instant),
     ToggleRowMenu(RowMenu),

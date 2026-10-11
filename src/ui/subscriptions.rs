@@ -68,6 +68,11 @@ impl App {
         } else {
             Subscription::none()
         };
+        let volume_rail = if self.volume_rail.animating() {
+            iced::window::frames().map(Message::VolumeRailFrame)
+        } else {
+            Subscription::none()
+        };
         let fades = if self.fade_until.is_some() {
             iced::window::frames().map(Message::FadeFrame)
         } else {
@@ -78,6 +83,7 @@ impl App {
             clock,
             status,
             carousel,
+            volume_rail,
             fades,
             playback_status,
             playback,

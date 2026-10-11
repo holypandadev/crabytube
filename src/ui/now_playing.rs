@@ -4,7 +4,7 @@
 use super::shell::{display_title, fit};
 use super::theme::{
     self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION,
-    TEXT_TITLE, UNSUNG_ON_LIGHT, hrule, label,
+    TEXT_TITLE, UNSUNG_ON_LIGHT, hrule, icon, label,
 };
 use super::{App, Message, NowPlayingTab, format_duration, layout};
 use crate::preferences::UiDensity;
@@ -27,22 +27,90 @@ const TRANSPORT_ICON: f32 = 22.0;
 /// Width of that transport: five buttons with 7 px padding (icons of 18, 22, 28, 22 and 18 px)
 /// and four 14 px gaps.
 const TRANSPORT_W: f32 = 234.0;
-/// The mute button and the gaps around the volume rail.
-const VOLUME_CHROME_W: f32 = 48.0;
-/// The shortest volume rail worth showing beside the transport.
-const VOLUME_RAIL_MIN: f32 = 60.0;
-/// Width the controls row needs: the centred transport with the shortest volume rail on each
-/// side, so the transport stays centred. A narrower artwork puts the volume on a row of its own,
-/// which takes `VOLUME_ROW_H`.
-const CONTROLS_W: f32 = TRANSPORT_W + 2.0 * (VOLUME_CHROME_W + VOLUME_RAIL_MIN);
-const VOLUME_ROW_H: f32 = 40.0;
+/// The favorite and volume buttons at the two ends of the controls row.
+const END_BUTTON_W: f32 = 32.0;
+const END_ICON: f32 = 18.0;
+/// Gap between the volume rail and its button.
+const RAIL_GAP: f32 = 8.0;
+/// A rail shorter than this opens on a row of its own under the controls.
+const RAIL_MIN: f32 = 40.0;
+/// How long the volume rail takes to open or close, and how long it stays open untouched.
+const RAIL_EASE_MS: f32 = 160.0;
+pub(super) const RAIL_IDLE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Length of the volume rail beside the transport in a row `width` wide, or `None` when it does
-/// not fit and the volume takes a row of its own. The rail never grows past the player bar's.
-fn volume_rail_beside(width: f32) -> Option<f32> {
-    let side = ((width - TRANSPORT_W) / 2.0).floor();
-    let rail = (side - VOLUME_CHROME_W).min(super::shell::VOLUME_W);
-    (rail >= VOLUME_RAIL_MIN).then_some(rail)
+/// The volume rail of Now Playing. It opens from the volume button, eases in and out, and closes
+/// once it has not been touched for `RAIL_IDLE`.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct VolumeRail {
+    /// How far it is open: 0 closed, 1 open.
+    pub(super) amount: f32,
+    from: f32,
+    to: f32,
+    started: Option<std::time::Instant>,
+    /// When it was last opened or moved.
+    touched: Option<std::time::Instant>,
+    /// A check for closing it is on its way.
+    pub(super) check_pending: bool,
+}
+
+impl VolumeRail {
+    pub(super) fn is_open(&self) -> bool {
+        self.to > 0.5
+    }
+
+    pub(super) fn animating(&self) -> bool {
+        self.started.is_some()
+    }
+
+    fn ease_to(&mut self, to: f32, now: std::time::Instant, reduced_motion: bool) {
+        self.to = to;
+        if reduced_motion {
+            self.amount = to;
+            self.started = None;
+        } else {
+            self.from = self.amount;
+            self.started = Some(now);
+        }
+    }
+
+    pub(super) fn open(&mut self, now: std::time::Instant, reduced_motion: bool) {
+        self.touched = Some(now);
+        self.ease_to(1.0, now, reduced_motion);
+    }
+
+    pub(super) fn close(&mut self, now: std::time::Instant, reduced_motion: bool) {
+        self.touched = None;
+        self.ease_to(0.0, now, reduced_motion);
+    }
+
+    /// Moving the rail or pressing its button keeps it open for another `RAIL_IDLE`.
+    pub(super) fn touch(&mut self, now: std::time::Instant) {
+        if self.is_open() {
+            self.touched = Some(now);
+        }
+    }
+
+    /// Time left before the rail closes, or `None` when it should close now.
+    pub(super) fn idle_left(&self, now: std::time::Instant) -> Option<std::time::Duration> {
+        let touched = self.touched?;
+        RAIL_IDLE
+            .checked_sub(now.saturating_duration_since(touched))
+            .filter(|left| !left.is_zero())
+    }
+
+    pub(super) fn step(&mut self, now: std::time::Instant) {
+        let Some(started) = self.started else {
+            return;
+        };
+        let elapsed_ms = now.saturating_duration_since(started).as_secs_f32() * 1000.0;
+        let t = (elapsed_ms / RAIL_EASE_MS).clamp(0.0, 1.0);
+        let eased = 1.0 - (1.0 - t).powi(3);
+        self.amount = self.from + (self.to - self.from) * eased;
+        if t >= 1.0 {
+            self.amount = self.to;
+            self.started = None;
+        }
+    }
 }
 
 /// Edge of the artwork and width of the side panel, or `None` when the page is stacked. The
@@ -54,13 +122,7 @@ fn now_playing_geometry(area: Size) -> Option<(f32, f32)> {
     }
     let widest = ((content - COLUMN_GAP) * 0.48).floor();
     let height = (area.height - 24.0).max(240.0);
-    let mut art = widest.min(height - ART_CHROME_H).max(160.0).floor();
-    if art < CONTROLS_W {
-        art = widest
-            .min(height - ART_CHROME_H - VOLUME_ROW_H)
-            .max(160.0)
-            .floor();
-    }
+    let art = widest.min(height - ART_CHROME_H).max(160.0).floor();
     Some((art, content - COLUMN_GAP - art))
 }
 
@@ -116,29 +178,7 @@ impl App {
                     container(self.seek_row(TEXT_CAPTION)).width(art),
                 ]
                 .width(art);
-                left = match volume_rail_beside(art) {
-                    // The transport is centred under the seek rail and the volume ends where the
-                    // rail ends; an empty zone as wide as the volume's keeps the transport centred.
-                    Some(rail) => left.push(
-                        row![
-                            Space::new().width(Length::Fill),
-                            self.transport_controls(TRANSPORT_ICON, true),
-                            container(self.volume_control(Some(rail)))
-                                .width(Length::Fill)
-                                .align_right(Length::Fill),
-                        ]
-                        .width(art)
-                        .align_y(Alignment::Center),
-                    ),
-                    None => left
-                        .push(
-                            container(self.transport_controls(TRANSPORT_ICON, true)).center_x(art),
-                        )
-                        .push(
-                            container(self.volume_control(Some(super::shell::VOLUME_W)))
-                                .center_x(art),
-                        ),
-                };
+                left = left.push(self.controls_row(track, art));
                 row![
                     container(left).width(art).height(Length::Fill),
                     container(self.side_panel(right_width))
@@ -163,9 +203,7 @@ impl App {
                     .spacing(20)
                     .align_y(Alignment::Center),
                     self.seek_row(TEXT_CAPTION),
-                    container(self.transport_controls(TRANSPORT_ICON, true)).center_x(Length::Fill),
-                    container(self.volume_control(Some(super::shell::VOLUME_W)))
-                        .center_x(Length::Fill),
+                    self.controls_row(track, width),
                     container(self.side_panel(width)).height(Length::Fill),
                 ]
                 .spacing(12)
@@ -180,7 +218,7 @@ impl App {
         track: &'a crate::music::Track,
         width: f32,
     ) -> Element<'a, Message> {
-        let text_width = width - 44.0;
+        let text_width = width;
         let mut meta = Vec::new();
         if let Some(album) = track.album.as_deref().filter(|album| !album.is_empty()) {
             meta.push(album.to_owned());
@@ -191,7 +229,7 @@ impl App {
             meta.push(source.title.clone());
             meta.push(self.tr_string(format!("{} songs", source.track_count)));
         }
-        row![
+        column![
             column![
                 text(fit(display_title(&track.title), text_width, TEXT_TITLE))
                     .size(TEXT_TITLE)
@@ -205,11 +243,73 @@ impl App {
             ]
             .spacing(4)
             .width(Length::Fill),
-            self.like_button(Some(track.video_id.as_str()), 24.0),
         ]
         .width(width)
-        .align_y(Alignment::Start)
         .into()
+    }
+
+    /// Favorite on the left, the transport in the middle and the volume button on the right, so
+    /// the row is symmetric. The volume rail opens leftwards from its button; where there is no room
+    /// for it beside the transport it opens on a row of its own under the controls.
+    fn controls_row<'a>(
+        &'a self,
+        track: &'a crate::music::Track,
+        width: f32,
+    ) -> Element<'a, Message> {
+        let room = ((width - TRANSPORT_W) / 2.0 - END_BUTTON_W - RAIL_GAP)
+            .floor()
+            .min(super::shell::VOLUME_W);
+        let beside = room >= RAIL_MIN;
+        let open = self.volume_rail.amount > 0.01;
+        let muted = self.preferences.muted;
+        let volume_button = button(icon(
+            if muted { "volume-off" } else { "volume" },
+            END_ICON,
+            INK,
+        ))
+        .on_press(Message::ToggleVolumeRail)
+        .padding(7)
+        .style(if self.volume_rail.is_open() {
+            theme::icon_button_active
+        } else {
+            theme::icon_button
+        });
+        let mut volume = row![].spacing(RAIL_GAP).align_y(Alignment::Center);
+        if beside && open {
+            volume = volume.push(self.volume_rail_slider(room * self.volume_rail.amount));
+        }
+        volume = volume.push(volume_button);
+        let line = row![
+            container(self.like_button(Some(track.video_id.as_str()), END_ICON))
+                .width(Length::Fill)
+                .align_left(Length::Fill),
+            self.transport_controls(TRANSPORT_ICON, true),
+            container(volume)
+                .width(Length::Fill)
+                .align_right(Length::Fill),
+        ]
+        .width(width)
+        .align_y(Alignment::Center);
+        if beside || !open {
+            return line.into();
+        }
+        column![
+            line,
+            container(self.volume_rail_slider(super::shell::VOLUME_W * self.volume_rail.amount))
+                .center_x(width),
+        ]
+        .spacing(6)
+        .into()
+    }
+
+    fn volume_rail_slider(&self, width: f32) -> Element<'_, Message> {
+        iced::widget::slider(0.0..=1.0, self.preferences.volume, Message::SetVolume)
+            .on_release(Message::PersistState)
+            .step(0.01_f32)
+            .width(width.max(1.0))
+            .height(theme::SLIDER_H)
+            .style(theme::seek_style)
+            .into()
     }
 
     fn side_panel(&self, width: f32) -> Element<'_, Message> {
@@ -601,24 +701,28 @@ mod tests {
     }
 
     #[test]
-    fn a_short_page_gives_the_volume_a_row_of_its_own_under_a_smaller_artwork() {
-        let (art, _) = now_playing_geometry(Size::new(1354.0, 560.0)).unwrap();
-        assert!(art < CONTROLS_W, "{art}");
+    fn the_volume_rail_opens_eases_and_closes_after_two_untouched_seconds() {
+        let start = std::time::Instant::now();
+        let mut rail = VolumeRail::default();
+        assert!(!rail.is_open());
+        rail.open(start, false);
+        assert!(rail.is_open() && rail.animating());
+        rail.step(start + std::time::Duration::from_millis(80));
+        assert!(rail.amount > 0.0 && rail.amount < 1.0, "{}", rail.amount);
+        rail.step(start + std::time::Duration::from_millis(200));
+        assert_eq!(rail.amount, 1.0);
+        assert!(!rail.animating());
+        // Moving it a second later keeps it open two more seconds.
+        let moved = start + std::time::Duration::from_secs(1);
+        rail.touch(moved);
         assert!(
-            art + ART_CHROME_H + VOLUME_ROW_H <= 560.0 - 24.0 + 1.0,
-            "{art}"
+            rail.idle_left(start + std::time::Duration::from_secs(2))
+                .is_some()
         );
-    }
-
-    #[test]
-    fn the_volume_rail_shortens_beside_the_transport_before_it_takes_a_row() {
-        assert_eq!(
-            volume_rail_beside(700.0),
-            Some(super::super::shell::VOLUME_W)
-        );
-        let short = volume_rail_beside(500.0).unwrap();
-        assert!((VOLUME_RAIL_MIN..super::super::shell::VOLUME_W).contains(&short));
-        assert_eq!(volume_rail_beside(CONTROLS_W - 2.0), None);
+        assert_eq!(rail.idle_left(moved + RAIL_IDLE), None);
+        rail.close(moved + RAIL_IDLE, true);
+        assert_eq!(rail.amount, 0.0);
+        assert!(!rail.is_open());
     }
 
     #[test]

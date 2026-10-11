@@ -210,6 +210,7 @@ struct App {
     home_picks: home::HomePicks,
     /// Smooth scrolling of the Home carousel.
     carousel: home::Carousel,
+    volume_rail: now_playing::VolumeRail,
     /// Size of the page area below the tabs, as laid out (see `shell_view`).
     area: iced::Size,
     /// Interface zoom that keeps proportions when the window grows (see `ui_zoom_for`).
@@ -271,6 +272,8 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ArtworkRetryDue
         | Message::ScrollPreloadDue
         | Message::CarouselFrame(_)
+        | Message::VolumeRailFrame(_)
+        | Message::VolumeRailIdle
         | Message::FadeFrame(_)
         | Message::LyricsLoaded { .. }
         | Message::LyricsProgress { .. }
@@ -1800,6 +1803,28 @@ impl App {
                     );
                 }
             }
+            Message::ToggleVolumeRail => {
+                let now = std::time::Instant::now();
+                if self.volume_rail.is_open() {
+                    self.volume_rail.touch(now);
+                    return self.update(Message::Preference(Preference::Muted(
+                        !self.preferences.muted,
+                    )));
+                }
+                self.volume_rail.open(now, self.preferences.reduced_motion);
+                return self.volume_rail_check(now_playing::RAIL_IDLE);
+            }
+            Message::VolumeRailFrame(now) => self.volume_rail.step(now),
+            Message::VolumeRailIdle => {
+                self.volume_rail.check_pending = false;
+                let now = std::time::Instant::now();
+                if self.volume_rail.is_open() {
+                    match self.volume_rail.idle_left(now) {
+                        Some(left) => return self.volume_rail_check(left),
+                        None => self.volume_rail.close(now, self.preferences.reduced_motion),
+                    }
+                }
+            }
             Message::CarouselFrame(now) => {
                 let x = self.carousel.step(now);
                 return operation::scroll_to(home::CAROUSEL_ID, AbsoluteOffset { x, y: 0.0 });
@@ -2001,6 +2026,7 @@ impl App {
             home_more_cancel: None,
             home_picks: home::HomePicks::default(),
             carousel: home::Carousel::default(),
+            volume_rail: now_playing::VolumeRail::default(),
             area: estimated_area(1024.0, 768.0),
             ui_zoom: 1.0,
             os_window: (1024.0, 768.0),
@@ -2161,6 +2187,17 @@ impl App {
         Arc::make_mut(&mut self.search_history).clear();
         Arc::make_mut(&mut self.recent).clear();
         self.persist();
+    }
+
+    /// Asks to close the volume rail after `wait`, unless a check is already on its way.
+    fn volume_rail_check(&mut self, wait: Duration) -> Task<Message> {
+        if self.volume_rail.check_pending {
+            return Task::none();
+        }
+        self.volume_rail.check_pending = true;
+        Task::perform(async move { tokio::time::sleep(wait).await }, |()| {
+            Message::VolumeRailIdle
+        })
     }
 
     /// Shows a destructive change for a second press. It clears itself after five seconds.
@@ -5178,6 +5215,25 @@ mod tests {
         let _ = app.update(Message::DismissSuggestions);
         assert_eq!(app.suggest_request_id, before);
         assert!(!app.show_suggestions);
+    }
+
+    #[test]
+    fn the_volume_button_opens_the_rail_and_mutes_only_while_it_is_open() {
+        let mut app = App::default();
+        app.preferences.reduced_motion = true;
+        let _ = app.update(Message::ToggleVolumeRail);
+        assert!(app.volume_rail.is_open());
+        assert!(!app.preferences.muted, "opening does not mute");
+        assert!(app.volume_rail.check_pending, "a close check is on its way");
+        let _ = app.update(Message::ToggleVolumeRail);
+        assert!(app.preferences.muted);
+        assert!(app.volume_rail.is_open());
+        let _ = app.update(Message::SetVolume(0.4));
+        assert!(
+            app.volume_rail
+                .idle_left(std::time::Instant::now())
+                .is_some()
+        );
     }
 
     #[test]
