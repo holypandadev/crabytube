@@ -2272,9 +2272,11 @@ impl App {
         self.library_notice = None;
         self.liked = self.favorites.iter().map(|t| t.video_id.clone()).collect();
         self.persist();
-        iced::window::latest().and_then(move |id| {
-            iced::window::resize(id, iced::Size::new(window_width, window_height))
-        })
+        let size = requested_window_size(
+            (window_width, window_height),
+            self.preferences.scale_with_window,
+        );
+        iced::window::latest().and_then(move |id| iced::window::resize(id, size))
     }
 
     fn current_lyrics_offset(&self) -> i64 {
@@ -2990,13 +2992,29 @@ fn initial_window_size() -> iced::Size {
         (
             snapshot.preferences.window_width,
             snapshot.preferences.window_height,
+            snapshot.preferences.scale_with_window,
         )
     });
-    let (width, height) = match saved {
-        Some((width, height)) => layout::clamped_window(width, height),
-        None => layout::default_window_size(),
+    let (width, height, scale_with_window) = match saved {
+        Some((width, height, scale)) => {
+            let (width, height) = layout::clamped_window(width, height);
+            (width, height, scale)
+        }
+        None => {
+            let (width, height) = layout::default_window_size();
+            (width, height, Preferences::default().scale_with_window)
+        }
     };
-    iced::Size::new(width, height)
+    requested_window_size((width, height), scale_with_window)
+}
+
+/// The size to hand to Iced so the window ends up `os_size` big. Iced multiplies every size it
+/// is given (at creation and in resize requests) by the interface zoom, so the zoom that
+/// `os_size` itself produces is divided out first. Without this the window grows by the zoom on
+/// each launch.
+fn requested_window_size(os_size: (f32, f32), scale_with_window: bool) -> iced::Size {
+    let zoom = ui_zoom_for(os_size.0, os_size.1, scale_with_window);
+    iced::Size::new(os_size.0 / zoom, os_size.1 / zoom)
 }
 
 /// Collections kept in memory for instant back navigation.
@@ -3189,6 +3207,28 @@ pub fn run() -> iced::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_requested_window_size_undoes_the_interface_zoom() {
+        // At or below the design size nothing is scaled.
+        assert_eq!(
+            requested_window_size((1024.0, 768.0), true),
+            iced::Size::new(1024.0, 768.0)
+        );
+        // Above it Iced multiplies the request by the zoom, which lands on the saved size.
+        for os_size in [(1440.0, 900.0), (1814.0, 1134.0), (2559.0, 1599.0)] {
+            let zoom = ui_zoom_for(os_size.0, os_size.1, true);
+            assert!(zoom > 1.0);
+            let requested = requested_window_size(os_size, true);
+            assert!((requested.width * zoom - os_size.0).abs() < 0.01);
+            assert!((requested.height * zoom - os_size.1).abs() < 0.01);
+        }
+        // With the zoom off the size is passed through.
+        assert_eq!(
+            requested_window_size((1440.0, 900.0), false),
+            iced::Size::new(1440.0, 900.0)
+        );
+    }
 
     #[test]
     fn reset_keeps_the_chosen_language() {
