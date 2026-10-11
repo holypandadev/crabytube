@@ -904,11 +904,6 @@ pub(super) fn section_heading<'a>(
     line.into()
 }
 
-#[allow(dead_code)]
-pub(super) fn spacer<'a>(height: f32) -> Element<'a, Message> {
-    Space::new().height(height).into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::{App, Page};

@@ -46,7 +46,6 @@ use messages::{
     Confirmation, Message, NowPlayingTab, Page, PendingConfirmation, Preference, RowMenu,
 };
 
-#[allow(dead_code)]
 struct App {
     lyrics: Option<crate::lyrics::Lyrics>,
     lyrics_error: Option<String>,
@@ -73,7 +72,6 @@ struct App {
     /// The track the last notification announced, and the notification it replaces.
     announced_track: Option<String>,
     track_notice_id: u32,
-    window_geometry_generation: u64,
     storage_notice: Option<String>,
     storage_cache_usage: crate::storage::CacheUsage,
     // Disk I/O runs in a worker Task; these guard stale completions and
@@ -89,7 +87,6 @@ struct App {
     volume_save_generation: u64,
     /// Path the unreadable saved state was moved to at startup, shown in Storage.
     state_recovery: Option<String>,
-    youtube_session: YouTubeSession,
     favorites: Arc<Vec<Track>>,
     favorites_context: Arc<[Track]>,
     library_notice: Option<String>,
@@ -757,23 +754,6 @@ impl App {
                     self.window_scale_factor = scale_factor;
                     return self.preload_current_page_artwork();
                 }
-            }
-            Message::PersistWindowGeometry(generation) => {
-                if generation == self.window_geometry_generation {
-                    self.persist();
-                    return self.preload_current_page_artwork();
-                }
-            }
-            Message::RestoreWindowSize => {
-                let (width, height) = layout::default_window_size();
-                self.preferences.window_width = width;
-                self.preferences.window_height = height;
-                self.window_width = width;
-                self.window_height = height;
-                self.window_geometry_generation = self.window_geometry_generation.wrapping_add(1);
-                self.persist();
-                return iced::window::latest()
-                    .and_then(move |id| iced::window::resize(id, iced::Size::new(width, height)));
             }
             Message::RetryLyrics => {
                 if let Some(t) = self.playback_status.track.clone() {
@@ -1941,7 +1921,6 @@ impl App {
             window_focused: None,
             announced_track: None,
             track_notice_id: 0,
-            window_geometry_generation: 0,
             storage_notice: None,
             storage_cache_usage: crate::storage::CacheUsage::default(),
             storage_loading: false,
@@ -1956,7 +1935,6 @@ impl App {
             persistence: None,
             volume_save_generation: 0,
             state_recovery: None,
-            youtube_session: session,
             favorites: Arc::default(),
             favorites_context: Arc::from([]),
             library_notice: None,
@@ -2283,7 +2261,6 @@ impl App {
         self.preferences.window_height = window_height;
         self.window_width = window_width;
         self.window_height = window_height;
-        self.window_geometry_generation = self.window_geometry_generation.wrapping_add(1);
         self.apply_preferences();
         self.sync_discord_presence(true);
         self.queue = snapshot.queue;

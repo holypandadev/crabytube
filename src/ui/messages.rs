@@ -47,6 +47,8 @@ pub(super) enum Preference {
 }
 
 #[derive(Clone, Debug)]
+// Some variants have no sender in the interface. Their handlers stay with the queue, lyrics,
+// scroll and cache logic they drive.
 #[allow(dead_code)]
 pub(super) enum Message {
     StartDrag,
@@ -65,8 +67,6 @@ pub(super) enum Message {
         height: f32,
     },
     DisplayScaleChanged(f32),
-    PersistWindowGeometry(u64),
-    RestoreWindowSize,
     LyricsLoaded {
         generation: u64,
         result: Result<crate::lyrics::Lyrics, String>,
