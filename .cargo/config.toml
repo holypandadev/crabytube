@@ -1,0 +1,4 @@
+# Windows builds link the C runtime statically, so the executables do not need the Visual C++
+# redistributable on the PC they run on. Only the MSVC targets are affected.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

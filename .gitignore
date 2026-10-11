@@ -6,7 +6,8 @@
 
 # Dependency and tool caches
 node_modules/
-.cargo/
+.cargo/*
+!.cargo/config.toml
 .deno/
 .cache/
 **/.cargo-ok
