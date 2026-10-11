@@ -115,7 +115,6 @@ struct App {
     repeat: RepeatMode,
     autoplay: bool,
     now_playing_tab: NowPlayingTab,
-    now_playing_return: Option<Page>,
     search_query: String,
     search_committed: bool,
     /// The query behind the results on screen. Typing does not change it until a search starts.
@@ -989,29 +988,11 @@ impl App {
                             && let Some(track) = self.playback_status.track.clone()
                         {
                             let lyrics = self.load_lyrics(track);
-                            if !matches!(self.page, Page::NowPlaying) {
-                                self.now_playing_return = Some(self.page.clone());
-                            }
-                            let navigation = self.navigate_internal(Page::NowPlaying, false);
+                            let navigation = self.navigate(Page::NowPlaying);
                             return Task::batch([navigation, lyrics]);
                         }
                     }
-                    if !matches!(self.page, Page::NowPlaying) {
-                        self.now_playing_return = Some(self.page.clone());
-                    }
-                    return self.navigate_internal(Page::NowPlaying, false);
-                }
-            }
-            Message::CloseNowPlaying => {
-                if let Some(previous) = self.now_playing_return.take() {
-                    if self.history.last() == Some(&previous) {
-                        self.history.pop();
-                    }
-                    let task = self.navigate_internal(previous, false);
-                    return task;
-                } else {
-                    let task = self.navigate_internal(Page::Home, false);
-                    return task;
+                    return self.navigate(Page::NowPlaying);
                 }
             }
             Message::ToggleLike(video_id) => {
@@ -1069,19 +1050,27 @@ impl App {
                 return self.navigate(Page::CollectionDetail(target));
             }
             Message::Back => {
-                if let Some(page) = self.history.pop() {
-                    self.forward.push(self.page.clone());
-                    return self.navigate_internal(page, false);
+                if self.back_available() {
+                    while let Some(page) = self.history.pop() {
+                        if self.can_show(&page) {
+                            self.forward.push(self.page.clone());
+                            return self.navigate_internal(page, false);
+                        }
+                    }
                 }
             }
             Message::Forward => {
-                if let Some(page) = self.forward.pop() {
-                    self.history.push(self.page.clone());
-                    if self.history.len() > 40 {
-                        let excess = self.history.len() - 40;
-                        self.history.drain(0..excess);
+                if self.forward_available() {
+                    while let Some(page) = self.forward.pop() {
+                        if self.can_show(&page) {
+                            self.history.push(self.page.clone());
+                            if self.history.len() > 40 {
+                                let excess = self.history.len() - 40;
+                                self.history.drain(0..excess);
+                            }
+                            return self.navigate_internal(page, false);
+                        }
                     }
-                    return self.navigate_internal(page, false);
                 }
             }
             Message::ChipHovered(query) => self.hovered_chip = query,
@@ -1961,7 +1950,6 @@ impl App {
             repeat: RepeatMode::Off,
             autoplay: true,
             now_playing_tab: NowPlayingTab::Queue,
-            now_playing_return: None,
             search_query: String::new(),
             search_committed: false,
             committed_query: String::new(),
@@ -2136,14 +2124,19 @@ impl App {
         )
     }
 
-    /// Escape when the search field does not have the focus: closes the row menu, leaves Now
-    /// Playing, leaves Settings and leaves a collection.
+    /// Escape when the search field does not have the focus: closes the row menu, or goes back from
+    /// Now Playing, Settings or a collection.
     fn escape_outside_search(&mut self) -> Task<Message> {
         if self.row_menu.is_some() {
             self.row_menu = None;
-        } else if matches!(self.page, Page::NowPlaying) {
-            return self.update(Message::CloseNowPlaying);
-        } else if matches!(self.page, Page::Settings | Page::CollectionDetail(_)) {
+        } else if matches!(self.page, Page::NowPlaying) && !self.back_available() {
+            // Nothing to go back to: Now Playing is left for Home, and Forward can return to it.
+            self.forward.push(self.page.clone());
+            return self.navigate_internal(Page::Home, false);
+        } else if matches!(
+            self.page,
+            Page::NowPlaying | Page::Settings | Page::CollectionDetail(_)
+        ) {
             return self.update(Message::Back);
         }
         Task::none()
@@ -2665,6 +2658,20 @@ impl App {
         )
     }
 
+    /// Whether a page can be shown now. Now Playing needs a track, so its history entries are
+    /// passed over while there is none.
+    fn can_show(&self, page: &Page) -> bool {
+        !matches!(page, Page::NowPlaying) || self.shown_track().is_some()
+    }
+
+    fn back_available(&self) -> bool {
+        self.history.iter().any(|page| self.can_show(page))
+    }
+
+    fn forward_available(&self) -> bool {
+        self.forward.iter().any(|page| self.can_show(page))
+    }
+
     fn navigate(&mut self, page: Page) -> Task<Message> {
         self.navigate_internal(page, true)
     }
@@ -2675,10 +2682,6 @@ impl App {
         }
         if matches!(page, Page::NowPlaying) && self.shown_track().is_none() {
             return Task::none();
-        }
-        // Remember where Now Playing was opened from, so closing it returns there.
-        if matches!(page, Page::NowPlaying) && !matches!(self.page, Page::NowPlaying) {
-            self.now_playing_return = Some(self.page.clone());
         }
         if remember_current {
             self.history.push(self.page.clone());
@@ -3382,7 +3385,7 @@ mod tests {
     }
 
     #[test]
-    fn now_playing_returns_to_the_page_it_was_opened_from() {
+    fn opening_now_playing_records_the_page_it_came_from() {
         let mut app = App {
             page: Page::Library,
             playback_status: crate::playback::PlaybackStatus {
@@ -3399,12 +3402,10 @@ mod tests {
             ..App::default()
         };
 
-        let _ = app.navigate_internal(Page::NowPlaying, true);
-        assert_eq!(app.now_playing_return, Some(Page::Library));
-
-        // Leaving Now Playing for another page must not overwrite the origin.
-        let _ = app.navigate_internal(Page::Home, true);
-        assert_eq!(app.now_playing_return, Some(Page::Library));
+        let _ = app.update(Message::OpenNowPlaying);
+        assert_eq!(app.page, Page::NowPlaying);
+        assert_eq!(app.history, vec![Page::Library]);
+        assert!(app.forward.is_empty());
     }
 
     #[test]
@@ -4022,7 +4023,7 @@ mod tests {
             ..App::default()
         };
         let _ = app.update(Message::Navigate(Page::CollectionDetail(target.clone())));
-        assert!(matches!(app.back_target(), Some(Message::Back)));
+        assert!(app.back_available());
         let _ = app.update(Message::Back);
         assert_eq!(app.page, Page::Search);
         assert_eq!(app.search_scroll.y, 480.0, "the results keep their scroll");
@@ -4112,13 +4113,123 @@ mod tests {
         app.playback_status.track = Some(song("Track"));
         let _ = app.update(Message::OpenNowPlaying);
         assert_eq!(app.page, Page::NowPlaying);
-        assert!(matches!(app.back_target(), Some(Message::CloseNowPlaying)));
-        let _ = app.update(Message::CloseNowPlaying);
+        assert!(app.back_available());
+        let _ = app.update(Message::Back);
         assert_eq!(app.page, Page::Search);
         assert!(
-            App::default().back_target().is_none(),
+            !App::default().back_available(),
             "Home has nowhere to go back to"
         );
+    }
+
+    #[test]
+    fn back_and_forward_walk_through_now_playing_without_losing_or_repeating_pages() {
+        let target = crate::music::BrowseTarget {
+            browse_id: "MPREb_fixture".into(),
+            params: None,
+            page_type: None,
+        };
+        let mut app = App {
+            page: Page::Home,
+            ..App::default()
+        };
+        app.playback_status.track = Some(song("Track"));
+        let _ = app.update(Message::Navigate(Page::CollectionDetail(target.clone())));
+        let _ = app.update(Message::Navigate(Page::Search));
+        let _ = app.update(Message::OpenNowPlaying);
+        assert_eq!(app.page, Page::NowPlaying);
+        assert_eq!(
+            app.history,
+            vec![
+                Page::Home,
+                Page::CollectionDetail(target.clone()),
+                Page::Search
+            ]
+        );
+        assert!(app.forward.is_empty());
+
+        let _ = app.update(Message::Back);
+        assert_eq!(app.page, Page::Search);
+        assert_eq!(app.forward, vec![Page::NowPlaying]);
+        let _ = app.update(Message::Back);
+        assert_eq!(app.page, Page::CollectionDetail(target.clone()));
+        assert_eq!(app.history, vec![Page::Home]);
+        assert_eq!(app.forward, vec![Page::NowPlaying, Page::Search]);
+
+        let _ = app.update(Message::Forward);
+        assert_eq!(app.page, Page::Search);
+        assert_eq!(
+            app.history,
+            vec![Page::Home, Page::CollectionDetail(target.clone())]
+        );
+        assert_eq!(app.forward, vec![Page::NowPlaying]);
+        let _ = app.update(Message::Forward);
+        assert_eq!(app.page, Page::NowPlaying);
+        assert_eq!(
+            app.history,
+            vec![Page::Home, Page::CollectionDetail(target), Page::Search]
+        );
+        assert!(app.forward.is_empty());
+    }
+
+    #[test]
+    fn forward_to_now_playing_is_dimmed_without_a_track_and_returns_with_one() {
+        let mut app = App {
+            page: Page::Search,
+            ..App::default()
+        };
+        app.playback_status.track = Some(song("Track"));
+        let _ = app.update(Message::OpenNowPlaying);
+        let _ = app.update(Message::Back);
+        assert_eq!(app.forward, vec![Page::NowPlaying]);
+        assert!(app.forward_available());
+
+        app.playback_status.track = None;
+        assert!(!app.forward_available());
+        let _ = app.update(Message::Forward);
+        assert_eq!(app.page, Page::Search);
+        assert_eq!(
+            app.forward,
+            vec![Page::NowPlaying],
+            "the entry waits for a track"
+        );
+
+        app.playback_status.track = Some(song("Track"));
+        assert!(app.forward_available());
+        let _ = app.update(Message::Forward);
+        assert_eq!(app.page, Page::NowPlaying);
+    }
+
+    #[test]
+    fn a_now_playing_entry_is_passed_over_when_no_track_can_show_it() {
+        let mut app = App {
+            page: Page::Home,
+            ..App::default()
+        };
+        app.playback_status.track = Some(song("Track"));
+        let _ = app.update(Message::OpenNowPlaying);
+        let _ = app.update(Message::Navigate(Page::Search));
+        assert_eq!(app.history, vec![Page::Home, Page::NowPlaying]);
+
+        app.playback_status.track = None;
+        assert!(app.back_available(), "Home is still there");
+        let _ = app.update(Message::Back);
+        assert_eq!(app.page, Page::Home);
+        assert!(app.history.is_empty());
+        assert_eq!(app.forward, vec![Page::Search]);
+    }
+
+    #[test]
+    fn escape_leaves_now_playing_for_the_page_it_came_from() {
+        let mut app = App {
+            page: Page::Library,
+            ..App::default()
+        };
+        app.playback_status.track = Some(song("Track"));
+        let _ = app.update(Message::OpenNowPlaying);
+        let _ = app.escape_outside_search();
+        assert_eq!(app.page, Page::Library);
+        assert_eq!(app.forward, vec![Page::NowPlaying]);
     }
 
     #[test]

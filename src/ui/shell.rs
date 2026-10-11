@@ -108,12 +108,7 @@ impl App {
             Page::Home => (Tab::Home, true),
             Page::Library => (Tab::Favorites, true),
             Page::Settings => (Tab::Settings, true),
-            Page::NowPlaying => (
-                self.now_playing_return
-                    .as_ref()
-                    .map_or(Tab::Home, Tab::of_page),
-                false,
-            ),
+            Page::NowPlaying => (self.history.last().map_or(Tab::Home, Tab::of_page), false),
             Page::Search | Page::CollectionDetail(_) => (Tab::Home, false),
         }
     }
@@ -166,19 +161,6 @@ impl App {
             .padding(0)
             .style(theme::text_link(color))
             .into()
-    }
-
-    /// Where Back leads beyond the page history: the page a collection was opened from, or
-    /// the page Now Playing was opened from. `None` when there is nowhere to go.
-    pub(super) fn back_target(&self) -> Option<Message> {
-        match &self.page {
-            Page::CollectionDetail(_) => (!self.history.is_empty()).then_some(Message::Back),
-            Page::NowPlaying => self
-                .now_playing_return
-                .as_ref()
-                .map(|_| Message::CloseNowPlaying),
-            _ => None,
-        }
     }
 
     pub(super) fn shell_view(&self) -> Element<'_, Message> {
@@ -344,10 +326,8 @@ impl App {
             row
         };
         // Back and Forward frame the tabs. Each is faint while there is nowhere to go.
-        let back = self
-            .back_target()
-            .or_else(|| (!self.history.is_empty()).then_some(Message::Back));
-        let forward = (!self.forward.is_empty()).then_some(Message::Forward);
+        let back = self.back_available().then_some(Message::Back);
+        let forward = self.forward_available().then_some(Message::Forward);
         let mut line = row![self.nav_arrow("chev-left", back, height), row];
         line = line.push(self.nav_arrow("chev-right", forward, height));
         if second_row {
@@ -967,7 +947,7 @@ mod tests {
         };
         assert!(app.tab_origin() == (Tab::Favorites, true));
         app.page = Page::NowPlaying;
-        app.now_playing_return = Some(Page::Library);
+        app.history = vec![Page::Library];
         assert!(app.tab_origin() == (Tab::Favorites, false));
         app.page = Page::Search;
         assert!(app.tab_origin() == (Tab::Home, false));

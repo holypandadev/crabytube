@@ -83,7 +83,6 @@ pub(super) enum Message {
     Navigate(Page),
     OpenCollection(BrowseTarget),
     OpenNowPlaying,
-    CloseNowPlaying,
     ToggleLike(String),
     ToggleShuffle,
     CycleRepeat,
