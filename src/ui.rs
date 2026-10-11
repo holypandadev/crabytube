@@ -100,7 +100,6 @@ struct App {
     /// Video ID of the last track whose successor was prefetched.
     prefetch_requested: Option<String>,
     collection_scroll: f32,
-    home_scroll: AbsoluteOffset,
     search_scroll: AbsoluteOffset,
     library_scroll: AbsoluteOffset,
     queue_scroll: AbsoluteOffset,
@@ -1935,7 +1934,6 @@ impl App {
             collection_scrolls: VecDeque::new(),
             prefetch_requested: None,
             collection_scroll: 0.0,
-            home_scroll: AbsoluteOffset::default(),
             search_scroll: AbsoluteOffset::default(),
             library_scroll: AbsoluteOffset::default(),
             queue: Arc::default(),
@@ -2710,11 +2708,8 @@ impl App {
         self.page = page.clone();
         if self.page == Page::Home {
             self.enter_home();
-            tracing::info!(scroll_y = self.home_scroll.y, "returned to cached Home");
-            Task::batch([
-                operation::scroll_to("home-content", self.home_scroll),
-                self.preload_current_page_artwork(),
-            ])
+            tracing::info!("returned to cached Home");
+            self.preload_current_page_artwork()
         } else if self.page == Page::Search {
             Task::batch([
                 operation::scroll_to("search-content", self.search_scroll),
@@ -4453,9 +4448,9 @@ mod tests {
         drop(task);
     }
     #[test]
-    fn home_detail_back_keeps_shelves_scroll_and_artwork_and_cancels_request() {
+    fn home_detail_back_keeps_shelves_and_artwork_and_cancels_request() {
         use crate::music::{BrowseTarget, HomeShelf};
-        use iced::widget::{image, operation::AbsoluteOffset};
+        use iced::widget::image;
         let mut app = App {
             home_shelves: vec![HomeShelf {
                 title: "Existing Home".into(),
@@ -4475,7 +4470,6 @@ mod tests {
                 }],
             }],
             home_loading: false,
-            home_scroll: AbsoluteOffset { x: 0.0, y: 480.0 },
             ..App::default()
         };
         let shelves = app.home_shelves.clone();
@@ -4499,7 +4493,6 @@ mod tests {
         assert_eq!(app.page, Page::Home);
         assert!(cancellation.is_cancelled());
         assert_eq!(app.home_shelves[0].title, "Existing Home");
-        assert_eq!(app.home_scroll.y, 480.0);
         assert!(app.artwork_cache.contains_key("fixture-art"));
         assert!(!app.home_loading);
         let _ = app.update(Message::CollectionLoaded {
@@ -5730,13 +5723,9 @@ mod tests {
         assert!(!first_requested.is_empty());
         let first_gen = app.artwork_generation;
         drop(first);
-        // 60×1px scrolls with identical visible URLs: coalesced, no cancel,
-        // no generation bump, no duplicate fetch.
+        // Sixty repeated preloads of an unchanged window: coalesced, no cancel, no generation
+        // bump, no duplicate fetch.
         for _ in 0..60 {
-            app.home_scroll.y += 1.0;
-            // Nudge back so the visible shelf window is unchanged (same
-            // shelves/columns); only the pixel offset moved.
-            app.home_scroll.y -= 1.0;
             let task = app.preload_current_page_artwork();
             assert_eq!(app.artwork_generation, first_gen);
             assert_eq!(app.artwork_requested, first_requested);
