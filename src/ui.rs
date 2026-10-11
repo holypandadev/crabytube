@@ -191,6 +191,8 @@ struct App {
     /// A destructive settings change that waits for a second press. It is dropped by any other press.
     confirmation: Option<PendingConfirmation>,
     confirmation_count: u64,
+    /// The recent-search chip under the pointer, which shows its ×.
+    hovered_chip: Option<String>,
     artwork_cancel: Option<CancellationToken>,
     // Per-URL in-flight tokens so scroll reconciliation can keep useful
     // work and cancel only URLs that left the window of interest.
@@ -297,7 +299,8 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::LibraryScrolled(_)
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
-        | Message::CarouselScrolled(_) => true,
+        | Message::CarouselScrolled(_)
+        | Message::ChipHovered(_) => true,
         Message::KeyPressed(
             iced::keyboard::Event::KeyReleased { .. } | iced::keyboard::Event::ModifiersChanged(_),
         ) => true,
@@ -1086,6 +1089,7 @@ impl App {
                     return self.navigate_internal(page, false);
                 }
             }
+            Message::ChipHovered(query) => self.hovered_chip = query,
             Message::RemoveSearchHistoryItem(item) => {
                 Arc::make_mut(&mut self.search_history).retain(|past| past != &item);
                 self.persist();
@@ -1983,6 +1987,7 @@ impl App {
             copy_notice_count: 0,
             confirmation: None,
             confirmation_count: 0,
+            hovered_chip: None,
             artwork_cancel: None,
             artwork_batch_tokens: HashMap::new(),
             artwork_request_id: 0,

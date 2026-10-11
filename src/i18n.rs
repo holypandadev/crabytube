@@ -53,11 +53,11 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "GOOD EVENING." => "BUENAS NOCHES.",
         "STILL UP?" => "BUENAS NOCHES.",
         "Jump back in" => "Seguir escuchando",
-        "FAVORITES" => "FAVORITOS",
         "Queue limited to {} entries; the selected track stays first." => {
             "La cola se limita a {} elementos; la pista elegida sigue primera."
         }
         "Added to queue" => "Añadida a la cola",
+        "{} up next" => "{} a continuación",
         "Plays next" => "Suena a continuación",
         "{} on disk · {} in memory" => "{} en disco · {} en memoria",
         "Player {} · BotGuard {} · Home {}" => "Reproductor {} · BotGuard {} · Inicio {}",
@@ -583,7 +583,6 @@ mod tests {
 
     #[test]
     fn the_storage_and_status_labels_are_translated() {
-        assert_eq!(translate(UiLanguage::Spanish, "FAVORITES"), "FAVORITOS");
         assert_eq!(
             translate(UiLanguage::Spanish, "{} on disk · {} in memory"),
             "{} en disco · {} en memoria"

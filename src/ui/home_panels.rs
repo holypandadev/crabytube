@@ -7,15 +7,15 @@ use super::home::{
 };
 use super::shell::{fit, section_heading};
 use super::theme::{
-    self, DIM, FADED, MONO, MONO_BOLD, RULE, TEXT_BODY, TEXT_CAPTION, hrule, label,
+    self, BLACK, DIM, FADED, MONO, MONO_BOLD, RULE, TEXT_BODY, TEXT_CAPTION, hrule, icon, label,
 };
 use super::{App, Message, format_duration};
 use crate::local_clock::LocalClock;
 use crate::preferences::RecentPlay;
 use crate::process_stats::{self, ProcessReading};
 use futures_util::{SinkExt, Stream};
-use iced::widget::{Space, button, column, container, row, scrollable, text};
-use iced::{Alignment, Element, Length, Padding};
+use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
+use iced::{Alignment, Color, Element, Length, Padding};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +28,10 @@ const JUMP_COLUMN_GAP: f32 = 16.0;
 const CHIP_TEXT_SIZE: f32 = TEXT_CAPTION;
 /// Estimated advance of one monospace character at chip size, and the chip's padding and border.
 const CHIP_CHAR_W: f32 = 8.0;
-const CHIP_PADDING: f32 = 26.0;
+const CHIP_PADDING: f32 = 26.0 + CHIP_CLOSE + CHIP_CLOSE_GAP;
+/// The × that removes a recent search; its room is kept even while it is hidden.
+const CHIP_CLOSE: f32 = 10.0;
+const CHIP_CLOSE_GAP: f32 = 8.0;
 const CHIP_GAP: f32 = 8.0;
 /// Button padding (12 px each side), its border and the gap before it, beside the failed-refresh text.
 const REFRESH_RETRY_EXTRA: f32 = 38.0;
@@ -187,10 +190,27 @@ impl App {
                 .take(layout.chips)
                 .map(|query| {
                     let shown = fit(&query, layout.search_width * 0.8, CHIP_TEXT_SIZE);
-                    button(text(shown).size(CHIP_TEXT_SIZE).font(MONO))
-                        .on_press(Message::SearchFor(query))
-                        .padding([6, 12])
-                        .style(theme::outline_button)
+                    // The chip inverts while hovered, and only then shows its ×.
+                    let hovered = self.hovered_chip.as_deref() == Some(query.as_str());
+                    let remove = button(icon(
+                        "close",
+                        CHIP_CLOSE,
+                        if hovered { BLACK } else { Color::TRANSPARENT },
+                    ))
+                    .on_press(Message::RemoveSearchHistoryItem(query.clone()))
+                    .padding(0)
+                    .style(theme::bare_button);
+                    let chip = button(
+                        row![text(shown).size(CHIP_TEXT_SIZE).font(MONO), remove]
+                            .spacing(CHIP_CLOSE_GAP)
+                            .align_y(Alignment::Center),
+                    )
+                    .on_press(Message::SearchFor(query.clone()))
+                    .padding([6, 12])
+                    .style(theme::outline_button);
+                    mouse_area(chip)
+                        .on_enter(Message::ChipHovered(Some(query)))
+                        .on_exit(Message::ChipHovered(None))
                         .into()
                 })
                 .collect();
@@ -292,9 +312,9 @@ impl App {
         .into()
     }
 
-    /// The status line at the foot of Home: memory and CPU of this process, and the number of
-    /// favorites on the left; the version on the right.
-    pub(super) fn status_line(&self) -> Element<'_, Message> {
+    /// The status line at the foot of Home: memory and CPU of this process on the left, the
+    /// version on the right.
+    pub(super) fn status_line(&self, width: f32) -> Element<'_, Message> {
         let version = format!("v{}", env!("CARGO_PKG_VERSION"));
         column![
             hrule(RULE),
@@ -306,22 +326,22 @@ impl App {
             ]
             .align_y(Alignment::Center),
         ]
-        .width(Length::Fill)
+        .width(width)
         .height(STATUS_H)
         .into()
     }
 
+    /// Memory and CPU, or nothing before the first reading.
     fn status_text(&self) -> String {
-        let favorites = format!("{} {}", self.favorites.len(), self.tr_static("FAVORITES"));
         match self.process_reading {
             Some(reading) => {
                 let cpu = match reading.cpu_percent {
                     Some(cpu) => format!("CPU {cpu}%"),
                     None => "CPU --".to_owned(),
                 };
-                format!("RAM {} MB · {cpu} · {favorites}", reading.mib)
+                format!("RAM {} MB · {cpu}", reading.mib)
             }
-            None => favorites,
+            None => String::new(),
         }
     }
 
@@ -390,6 +410,26 @@ fn time_to_next_minute(now: std::time::SystemTime) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_status_line_shows_memory_and_cpu_and_nothing_before_a_reading() {
+        let mut app = App::default();
+        assert_eq!(app.status_text(), "");
+        app.process_reading = Some(ProcessReading {
+            mib: 45,
+            cpu_percent: Some(1),
+        });
+        assert_eq!(app.status_text(), "RAM 45 MB · CPU 1%");
+    }
+
+    #[test]
+    fn a_hovered_chip_is_remembered_until_the_pointer_leaves() {
+        let mut app = App::default();
+        let _ = app.update(Message::ChipHovered(Some("daft punk".into())));
+        assert_eq!(app.hovered_chip.as_deref(), Some("daft punk"));
+        let _ = app.update(Message::ChipHovered(None));
+        assert_eq!(app.hovered_chip, None);
+    }
 
     #[test]
     fn the_clock_wakes_just_after_each_minute_begins() {

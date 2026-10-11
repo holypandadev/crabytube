@@ -93,6 +93,8 @@ pub(super) enum Message {
     Back,
     Forward,
     RemoveSearchHistoryItem(String),
+    /// The pointer entered a recent-search chip, or left it (`None`).
+    ChipHovered(Option<String>),
     ClearArtworkCache,
     ClearLyricsCache,
     ClearHomeCache,

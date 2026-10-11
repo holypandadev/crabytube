@@ -158,7 +158,8 @@ pub(super) struct HomeLayout {
     pub visible: usize,
     pub card: f32,
     pub card_gap: f32,
-    /// Width of the card row (and of the carousel block, which is centered).
+    /// Width of the page's one column, centred: the card strip, the search field and every panel
+    /// start and end at its edges.
     pub row_width: f32,
     pub search_width: f32,
     pub narrow: bool,
@@ -249,6 +250,10 @@ impl HomeLayout {
         card = card
             .min((page_h - fixed - 32.0).max(CARD_MIN * 0.75))
             .floor();
+        // The card row at this size sets the one column every part of the page shares. Covers
+        // that shrink later for the panels leave it as it is: the strip keeps the column's width
+        // and shows more of the next card.
+        let column = (across * (card + card_gap) - card_gap).min(width).floor();
         let greeting_font = (width * 0.035)
             .clamp(28.0, 44.0)
             .min(page_h * 0.06)
@@ -301,8 +306,8 @@ impl HomeLayout {
             visible: across as usize,
             card,
             card_gap,
-            row_width: across * (card + card_gap) - card_gap,
-            search_width: width.min(SEARCH_MAX_W),
+            row_width: column,
+            search_width: column,
             narrow,
             top,
             gap,
@@ -519,15 +524,15 @@ impl App {
                 .push(Space::new().height(CHIPS_GAP))
                 .push(self.recent_chips_view(&layout));
         }
-        page = page.push(Space::new().height(layout.gap)).push(carousel);
         if layout.jump > 0 {
             page = page
                 .push(Space::new().height(JUMP_GAP))
                 .push(self.jump_view(&layout));
         }
+        page = page.push(Space::new().height(layout.gap)).push(carousel);
         page = page
             .push(Space::new().height(Length::Fill))
-            .push(self.status_line());
+            .push(container(self.status_line(layout.row_width)).center_x(Length::Fill));
         self.with_suggestions(
             page.into(),
             layout.search_width,
