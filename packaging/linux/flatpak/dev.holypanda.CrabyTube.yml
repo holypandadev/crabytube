@@ -19,6 +19,11 @@ finish-args:
   - --filesystem=xdg-run/app/com.discordapp.Discord
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
+  # The SDK's default CFLAGS end in -O2. aws-lc-sys compiles its CPU Jitter RNG at -O0 and stops
+  # with an error when an optimisation flag from CFLAGS comes after it. The SDK's other hardening
+  # flags are kept; C code gets the release profile's level instead, which is -Os (opt-level "z").
+  cflags-override: true
+  cflags: "-pipe -g -Wp,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -fexceptions -fstack-protector-strong -grecord-gcc-switches -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer"
   env:
     CARGO_HOME: /run/build/crabytube/cargo
     # The V8 static library the v8 crate links instead of downloading it during the build.
