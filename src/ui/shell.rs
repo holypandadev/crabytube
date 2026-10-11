@@ -1,7 +1,7 @@
 //! Window chrome shared by every page: title bar, top tabs and player bar.
 
 use super::theme::{
-    self, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, PLAYER_H, RULE, TEXT_BODY, TEXT_CAPTION,
+    self, BLACK, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, PLAYER_H, RULE, TEXT_BODY, TEXT_CAPTION,
     TEXT_SECTION, TEXT_TITLE, TITLE_BAR_H, hrule, icon, label, vrule,
 };
 use super::{App, Message, Page, Preference, format_duration};
@@ -376,11 +376,6 @@ impl App {
             .or_else(|| self.queue_index.and_then(|index| self.queue.get(index)))
     }
 
-    /// Shuffle, previous, play/pause, next and repeat at the given icon size.
-    pub(super) fn transport(&self, size: f32) -> Element<'_, Message> {
-        self.transport_controls(size, true)
-    }
-
     /// Transport buttons; `full` adds shuffle and repeat.
     fn transport_controls(&self, size: f32, full: bool) -> Element<'_, Message> {
         let can_prev = self.prev_queue_index().is_some() || self.playback_status.track.is_some();
@@ -393,25 +388,23 @@ impl App {
                     .padding(7)
                     .style(theme::icon_button)
             };
-        let shuffle = control(
-            "shuffle",
-            small,
-            if self.shuffle { INK } else { FADED },
-            Some(Message::ToggleShuffle),
-        );
-        let repeat = control(
-            if self.repeat == RepeatMode::One {
-                "repeat-one"
-            } else {
-                "repeat"
-            },
-            small,
-            if self.repeat == RepeatMode::Off {
-                FADED
-            } else {
-                INK
-            },
-            Some(Message::CycleRepeat),
+        // A toggle that is on is white and boxed; off, it is grey and bare, so its state does not
+        // rest on the grey alone.
+        let toggle = |name: &'static str, on: bool, message: Message| {
+            button(icon(name, small, if on { INK } else { FADED }))
+                .on_press(message)
+                .padding(7)
+                .style(if on {
+                    theme::icon_button_active
+                } else {
+                    theme::icon_button
+                })
+        };
+        let shuffle = toggle("shuffle", self.shuffle, Message::ToggleShuffle);
+        let repeat = toggle(
+            self.repeat_icon(),
+            self.repeat != RepeatMode::Off,
+            Message::CycleRepeat,
         );
         let mut controls = row![];
         if full {
@@ -441,6 +434,108 @@ impl App {
             controls = controls.push(repeat);
         }
         controls.spacing(14).align_y(Alignment::Center).into()
+    }
+
+    fn repeat_icon(&self) -> &'static str {
+        if self.repeat == RepeatMode::One {
+            "repeat-one"
+        } else {
+            "repeat"
+        }
+    }
+
+    /// The transport of Now Playing: a large inverted play button between 44 px controls, and
+    /// shuffle and repeat boxed while they are on.
+    pub(super) fn now_playing_transport(&self) -> Element<'_, Message> {
+        let can_prev = self.prev_queue_index().is_some() || self.playback_status.track.is_some();
+        let can_next = self.next_queue_index().is_some();
+        let square = |content: Element<'static, Message>, edge: f32| {
+            container(content)
+                .width(edge)
+                .height(edge)
+                .center_x(edge)
+                .center_y(edge)
+        };
+        let control = |name: &'static str, color: Color, message: Option<Message>, on: bool| {
+            button(square(icon(name, CONTROL_ICON, color), CONTROL_EDGE))
+                .on_press_maybe(message)
+                .padding(0)
+                .style(if on {
+                    theme::icon_button_active
+                } else {
+                    theme::icon_button
+                })
+        };
+        let play = button(square(
+            icon(
+                if self.is_playing() { "pause" } else { "play" },
+                PLAY_ICON,
+                BLACK,
+            ),
+            PLAY_EDGE,
+        ))
+        .on_press_maybe(
+            self.can_toggle_playback()
+                .then_some(Message::TogglePlayback),
+        )
+        .padding(0)
+        .style(theme::play_button);
+        let repeat_on = self.repeat != RepeatMode::Off;
+        row![
+            control(
+                "shuffle",
+                if self.shuffle { INK } else { FADED },
+                Some(Message::ToggleShuffle),
+                self.shuffle,
+            ),
+            control(
+                "prev",
+                if can_prev { INK } else { FADED },
+                can_prev.then_some(Message::PrevTrack),
+                false,
+            ),
+            play,
+            control(
+                "next",
+                if can_next { INK } else { FADED },
+                can_next.then_some(Message::NextTrack),
+                false,
+            ),
+            control(
+                self.repeat_icon(),
+                if repeat_on { INK } else { FADED },
+                Some(Message::CycleRepeat),
+                repeat_on,
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    /// The mute button and, with `rail`, the volume rail beside it. The player bar and Now Playing
+    /// share it.
+    pub(super) fn volume_control(&self, rail: bool) -> Element<'_, Message> {
+        let muted = self.preferences.muted;
+        let mut control = row![
+            button(icon(if muted { "volume-off" } else { "volume" }, 18.0, INK))
+                .on_press(Message::Preference(Preference::Muted(!muted)))
+                .padding(7)
+                .style(theme::icon_button),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        if rail {
+            control = control.push(
+                slider(0.0..=1.0, self.preferences.volume, Message::SetVolume)
+                    .on_release(Message::PersistState)
+                    .step(0.01_f32)
+                    .width(VOLUME_W)
+                    .height(theme::SLIDER_H)
+                    .style(theme::seek_style),
+            );
+        }
+        control.into()
     }
 
     /// Elapsed time, seek rail and total time. A live broadcast has no rail and no
@@ -644,25 +739,7 @@ impl App {
         ]
         .spacing(2)
         .width(Length::Fill);
-        let muted = self.preferences.muted;
-        let mut right = row![
-            button(icon(if muted { "volume-off" } else { "volume" }, 18.0, INK))
-                .on_press(Message::Preference(Preference::Muted(!muted)))
-                .padding(7)
-                .style(theme::icon_button),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        if !compact {
-            right = right.push(
-                slider(0.0..=1.0, self.preferences.volume, Message::SetVolume)
-                    .on_release(Message::PersistState)
-                    .step(0.01_f32)
-                    .width(VOLUME_W)
-                    .height(theme::SLIDER_H)
-                    .style(theme::seek_style),
-            );
-        }
+        let right = self.volume_control(!compact);
         let right_width = if compact { 44.0 } else { side };
         container(
             row![
@@ -681,6 +758,11 @@ impl App {
 }
 
 const VOLUME_W: f32 = 104.0;
+/// Now Playing's transport: 44 px controls with 20 px icons around a 56 px play button.
+const CONTROL_EDGE: f32 = 44.0;
+const CONTROL_ICON: f32 = 20.0;
+const PLAY_EDGE: f32 = 56.0;
+const PLAY_ICON: f32 = 24.0;
 
 /// The header bar: tabs, Back and the window buttons are this tall.
 pub(super) const HEADER_H: f32 = TITLE_BAR_H;

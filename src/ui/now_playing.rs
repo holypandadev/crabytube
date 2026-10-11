@@ -4,7 +4,7 @@
 use super::shell::{display_title, fit};
 use super::theme::{
     self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION,
-    TEXT_TITLE, UNSUNG_ON_LIGHT, hrule, label, vrule,
+    TEXT_TITLE, UNSUNG_ON_LIGHT, hrule, label,
 };
 use super::{App, Message, NowPlayingTab, format_duration, layout};
 use crate::preferences::UiDensity;
@@ -16,14 +16,34 @@ const STACK_BELOW: f32 = 760.0;
 /// Room beside the clear button's label for its padding (12 px each side), its border and the gap
 /// before it, so a queue notice never runs under the button.
 const CLEAR_BUTTON_EXTRA: f32 = 30.0;
+/// The row under the tabs with the queue count and the clear button.
+const QUEUE_HEADER_H: f32 = 40.0;
 
-/// Widths of the artwork column and the side panel, or `None` when stacked.
-fn now_playing_columns(content: f32) -> Option<(f32, f32)> {
+/// Height of everything in the artwork column but the artwork: the title block, the seek row and
+/// the transport, with their gaps.
+const ART_CHROME_H: f32 = 210.0;
+/// Width of the transport with the volume beside it; a narrower artwork puts the volume on a row
+/// of its own, which takes `VOLUME_ROW_H`.
+const CONTROLS_W: f32 = 440.0;
+const VOLUME_ROW_H: f32 = 52.0;
+
+/// Edge of the artwork and width of the side panel, or `None` when the page is stacked. The
+/// artwork starts at the page margin and the panel takes the rest after the gap.
+fn now_playing_geometry(area: Size) -> Option<(f32, f32)> {
+    let content = area.width.max(320.0);
     if content < STACK_BELOW {
         return None;
     }
-    let left = ((content - COLUMN_GAP) * 0.48).floor();
-    Some((left, content - COLUMN_GAP - left))
+    let widest = ((content - COLUMN_GAP) * 0.48).floor();
+    let height = (area.height - 24.0).max(240.0);
+    let mut art = widest.min(height - ART_CHROME_H).max(160.0).floor();
+    if art < CONTROLS_W {
+        art = widest
+            .min(height - ART_CHROME_H - VOLUME_ROW_H)
+            .max(160.0)
+            .floor();
+    }
+    Some((art, content - COLUMN_GAP - art))
 }
 
 /// A short message about the queue, shown above it until the queue changes again.
@@ -37,8 +57,7 @@ pub(super) enum QueueNotice {
 
 impl App {
     pub(super) fn now_playing_panel_width(&self) -> f32 {
-        let width = self.area.width.max(320.0);
-        now_playing_columns(width).map_or(width, |(_, right)| right)
+        now_playing_geometry(self.area).map_or(self.area.width.max(320.0), |(_, right)| right)
     }
 
     /// Width available to one lyric line inside the panel.
@@ -65,11 +84,9 @@ impl App {
             .spacing(8)
             .into();
         };
-        let height = (area.height - 24.0).max(240.0);
-        match now_playing_columns(area.width.max(320.0)) {
-            Some((left_width, right_width)) => {
-                let art = left_width.min(height - 190.0).max(160.0).floor();
-                let left = column![
+        match now_playing_geometry(area) {
+            Some((art, right_width)) => {
+                let mut left = column![
                     self.cover(
                         track.thumbnail_url.as_deref(),
                         art,
@@ -79,15 +96,24 @@ impl App {
                     self.track_header(track, art),
                     Space::new().height(14),
                     container(self.seek_row(TEXT_CAPTION)).width(art),
-                    container(self.transport(22.0)).width(art).center_x(art),
                 ]
-                .width(left_width)
-                .align_x(Alignment::Center);
+                .width(art);
+                left = if art >= CONTROLS_W {
+                    left.push(
+                        container(
+                            row![self.now_playing_transport(), self.volume_control(true)]
+                                .spacing(16)
+                                .align_y(Alignment::Center),
+                        )
+                        .width(art)
+                        .center_x(art),
+                    )
+                } else {
+                    left.push(container(self.now_playing_transport()).center_x(art))
+                        .push(container(self.volume_control(true)).center_x(art))
+                };
                 row![
-                    container(left)
-                        .width(left_width)
-                        .height(Length::Fill)
-                        .center_x(left_width),
+                    container(left).width(art).height(Length::Fill),
                     container(self.side_panel(right_width))
                         .width(right_width)
                         .height(Length::Fill),
@@ -110,7 +136,8 @@ impl App {
                     .spacing(20)
                     .align_y(Alignment::Center),
                     self.seek_row(TEXT_CAPTION),
-                    container(self.transport(20.0)).center_x(Length::Fill),
+                    container(self.now_playing_transport()).center_x(Length::Fill),
+                    container(self.volume_control(true)).center_x(Length::Fill),
                     container(self.side_panel(width)).height(Length::Fill),
                 ]
                 .spacing(12)
@@ -169,16 +196,13 @@ impl App {
             .height(38)
             .style(theme::tab_style(self.now_playing_tab == which))
         };
-        let tabs = container(
-            row![
-                tab("Up next", NowPlayingTab::Queue),
-                vrule(38.0, INK),
-                tab("Lyrics", NowPlayingTab::Lyrics),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .padding(theme::hairline())
-        .style(theme::boxed);
+        // One frame: the panel's outline. The tabs have none of their own; the active one is
+        // filled.
+        let tabs = row![
+            tab("Up next", NowPlayingTab::Queue),
+            tab("Lyrics", NowPlayingTab::Lyrics),
+        ]
+        .align_y(Alignment::Center);
         let body = match self.now_playing_tab {
             NowPlayingTab::Queue => self.up_next(width - 2.0 * PANEL_PADDING),
             NowPlayingTab::Lyrics => self.lyrics_view(),
@@ -186,7 +210,6 @@ impl App {
         container(
             column![
                 container(tabs).padding(PANEL_PADDING),
-                hrule(INK),
                 container(body)
                     .padding([0.0, PANEL_PADDING])
                     .height(Length::Fill),
@@ -332,27 +355,33 @@ impl App {
         let clear_label = self.tr("Clear up next").into_owned();
         let clear_width =
             clear_label.chars().count() as f32 * TEXT_CAPTION * 0.6 + CLEAR_BUTTON_EXTRA;
-        let notice: Element<'_, Message> = match self.queue_notice {
-            Some(notice) => container(label(
-                fit(
-                    &self.queue_notice_text(notice),
-                    width - clear_width,
-                    TEXT_CAPTION,
-                ),
-                TEXT_CAPTION,
-            ))
-            .width(Length::Fill)
-            .into(),
-            None => Space::new().width(Length::Fill).into(),
+        // The count of what comes next, or a notice about the last change to the queue while one
+        // is set. Either is cut short, never wrapped, so the list keeps its place.
+        let status = match self.queue_notice {
+            Some(notice) => self.queue_notice_text(notice),
+            None => self
+                .tr_static("{} up next")
+                .replacen("{}", &upcoming.to_string(), 1),
         };
-        let header = row![
-            notice,
-            button(label(clear_label, TEXT_CAPTION))
-                .on_press_maybe((upcoming > 0).then_some(Message::ClearUpcomingQueue))
-                .padding([6, 12])
-                .style(theme::outline_button),
-        ]
-        .align_y(Alignment::Center);
+        let header = container(
+            row![
+                container(
+                    label(
+                        fit(&status, width - clear_width, TEXT_CAPTION),
+                        TEXT_CAPTION
+                    )
+                    .color(DIM)
+                )
+                .width(Length::Fill),
+                button(label(clear_label, TEXT_CAPTION))
+                    .on_press_maybe((upcoming > 0).then_some(Message::ClearUpcomingQueue))
+                    .padding([6, 12])
+                    .style(theme::outline_button),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .height(QUEUE_HEADER_H)
+        .center_y(QUEUE_HEADER_H);
         let list = scrollable(rows)
             .id("queue-content")
             .on_scroll(|viewport| Message::QueueScrolled(viewport.absolute_offset()))
@@ -527,5 +556,34 @@ impl App {
             );
         }
         content.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_artwork_starts_at_the_margin_and_the_panel_takes_the_rest() {
+        let area = Size::new(1354.0, 669.0);
+        let (art, panel) = now_playing_geometry(area).unwrap();
+        assert_eq!(art + COLUMN_GAP + panel, area.width);
+        // The artwork leaves room for the title block, the seek row and the transport.
+        assert!(art + ART_CHROME_H <= area.height - 24.0 + 1.0, "{art}");
+    }
+
+    #[test]
+    fn a_short_page_gives_the_volume_a_row_of_its_own_under_a_smaller_artwork() {
+        let (art, _) = now_playing_geometry(Size::new(1354.0, 560.0)).unwrap();
+        assert!(art < CONTROLS_W, "{art}");
+        assert!(
+            art + ART_CHROME_H + VOLUME_ROW_H <= 560.0 - 24.0 + 1.0,
+            "{art}"
+        );
+    }
+
+    #[test]
+    fn narrow_pages_stack() {
+        assert!(now_playing_geometry(Size::new(600.0, 800.0)).is_none());
     }
 }

@@ -276,6 +276,31 @@ pub(super) fn icon_button(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// Icon button whose outline stays visible, for an opened menu or a toggle that is on.
+pub(super) fn icon_button_active(_: &Theme, _: button::Status) -> button::Style {
+    button::Style {
+        background: None,
+        text_color: INK,
+        border: outline(hairline()),
+        ..Default::default()
+    }
+}
+
+/// The large play button of Now Playing: a white square with a black icon, grey when there is
+/// nothing to play.
+pub(super) fn play_button(_: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(if status == button::Status::Disabled {
+            FADED
+        } else {
+            INK
+        })),
+        text_color: BLACK,
+        border: Border::default(),
+        ..Default::default()
+    }
+}
+
 /// Invisible button for whole rows and cards; hovering fills the row.
 pub(super) fn row_button(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
