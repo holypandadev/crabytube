@@ -555,7 +555,7 @@ pub fn quarantine(path: &Path) -> Result<PathBuf, String> {
 
 /// Replaces `to` with `from`. Windows refuses the rename while another process has `to` open, such
 /// as a virus scanner reading it, so the attempt is repeated for a short while.
-fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
     retry_briefly(|| std::fs::rename(from, to), 5, Duration::from_millis(40))
 }
 

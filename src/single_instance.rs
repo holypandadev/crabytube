@@ -3,7 +3,8 @@
 //!
 //! The first process holds an exclusive lock on a file in the config folder; the operating system
 //! releases it when the process ends, however it ends. On Unix the first process also listens on
-//! a socket next to the lock, which a later launch connects to as its request.
+//! a socket next to the lock, which a later launch connects to as its request. Elsewhere it
+//! listens on a loopback port, recorded in a file next to the lock, and the request is the same.
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -89,10 +90,7 @@ fn claim_in(folder: &Path) -> Claim {
         Err(std::fs::TryLockError::WouldBlock) => return Claim::Duplicate,
         Err(std::fs::TryLockError::Error(_)) => return Claim::Unavailable,
     }
-    #[cfg(unix)]
     let requests = listen(folder);
-    #[cfg(not(unix))]
-    let requests = None;
     Claim::First(Held {
         _lock: lock,
         requests,
@@ -136,7 +134,76 @@ fn notify_running(folder: &Path) {
 }
 
 #[cfg(not(unix))]
-fn notify_running(_folder: &Path) {}
+fn notify_running(folder: &Path) {
+    loopback::notify(folder);
+}
+
+/// Platforms without Unix sockets listen on a loopback port instead.
+#[cfg(not(unix))]
+fn listen(folder: &Path) -> Option<UnboundedReceiver<()>> {
+    loopback::listen(folder)
+}
+
+/// The transport for platforms without Unix sockets. The first instance listens on the loopback
+/// address, on a port the system picks, and writes that port to a file beside the lock. A later
+/// launch connects to the port. The connection is the whole request: it is dropped unread, so no
+/// data is exchanged. Only processes on this machine can reach the port.
+#[cfg_attr(unix, allow(dead_code))]
+mod loopback {
+    use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+    use std::path::Path;
+    use std::time::Duration;
+
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+
+    pub(super) const PORT_FILE: &str = "instance.port";
+    const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+
+    /// Starts the thread that turns each connection into one request, and records the port.
+    pub(super) fn listen(folder: &Path) -> Option<UnboundedReceiver<()>> {
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        write_port(folder, port).ok()?;
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        std::thread::Builder::new()
+            .name("crabytube-instance".into())
+            .spawn(move || forward_connections(listener, sender))
+            .ok()?;
+        Some(receiver)
+    }
+
+    /// Asks a running instance to show its window. Failures are ignored, as on Unix.
+    pub(super) fn notify(folder: &Path) {
+        let Some(port) = read_port(folder) else {
+            return;
+        };
+        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        let _ = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT);
+    }
+
+    fn forward_connections(listener: TcpListener, sender: UnboundedSender<()>) {
+        for connection in listener.incoming() {
+            // The connection is the request. It is dropped here without reading from it.
+            if connection.is_ok() && sender.send(()).is_err() {
+                break;
+            }
+        }
+    }
+
+    fn write_port(folder: &Path, port: u16) -> std::io::Result<()> {
+        let temporary = folder.join(format!("{PORT_FILE}.tmp"));
+        std::fs::write(&temporary, port.to_string())?;
+        crate::preferences::rename_over(&temporary, &folder.join(PORT_FILE))
+    }
+
+    fn read_port(folder: &Path) -> Option<u16> {
+        std::fs::read_to_string(folder.join(PORT_FILE))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -177,6 +244,49 @@ mod tests {
             tokio::time::timeout(std::time::Duration::from_secs(5), requests.recv()).await
         });
         assert_eq!(received, Ok(Some(())));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_loopback_listener_records_its_port_beside_the_lock() {
+        let dir = scratch("port-file");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _requests = loopback::listen(&dir).expect("a loopback listener");
+        let recorded = std::fs::read_to_string(dir.join(loopback::PORT_FILE)).unwrap();
+        assert!(
+            recorded.trim().parse::<u16>().is_ok_and(|port| port != 0),
+            "the port file holds {recorded:?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_later_launch_reaches_the_first_one_over_loopback() {
+        let dir = scratch("loopback");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut requests = loopback::listen(&dir).expect("a loopback listener");
+        loopback::notify(&dir);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let received = runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), requests.recv()).await
+        });
+        assert_eq!(received, Ok(Some(())));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_garbled_or_dead_port_file_is_ignored_without_blocking() {
+        let dir = scratch("stale-port");
+        std::fs::create_dir_all(&dir).unwrap();
+        loopback::notify(&dir);
+        std::fs::write(dir.join(loopback::PORT_FILE), "not a port").unwrap();
+        loopback::notify(&dir);
+        // Port 1 has no listener, so the connection is refused at once.
+        std::fs::write(dir.join(loopback::PORT_FILE), "1").unwrap();
+        loopback::notify(&dir);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
