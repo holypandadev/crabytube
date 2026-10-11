@@ -2713,9 +2713,18 @@ impl App {
         } else if let Page::CollectionDetail(target) = page {
             self.load_collection(target)
         } else if self.page == Page::NowPlaying {
+            // A restored track has only its small cover, read at startup for the player bar. Now
+            // Playing shows it large, so the large one is asked for now that the page is open.
+            let large_cover = if self.playback_status.track.is_none() {
+                let url = self.playing_cover_url().map(str::to_owned);
+                self.load_artwork(url)
+            } else {
+                Task::none()
+            };
             Task::batch([
                 operation::scroll_to("queue-content", self.queue_scroll),
                 self.preload_current_page_artwork(),
+                large_cover,
             ])
         } else {
             Task::none()
@@ -5215,6 +5224,24 @@ mod tests {
         let _ = app.update(Message::DismissSuggestions);
         assert_eq!(app.suggest_request_id, before);
         assert!(!app.show_suggestions);
+    }
+
+    #[test]
+    fn now_playing_asks_for_the_large_cover_of_a_restored_track() {
+        let mut track = fixture_track("restored");
+        track.thumbnail_url = Some("https://example.invalid/cover.jpg".into());
+        let mut app = App {
+            queue: Arc::new(vec![track]),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        assert!(app.playback_status.track.is_none());
+        let _ = app.update(Message::Navigate(Page::NowPlaying));
+        assert_eq!(app.page, Page::NowPlaying);
+        assert!(
+            app.artwork_cancel.is_some(),
+            "the large cover is requested when Now Playing opens"
+        );
     }
 
     #[test]

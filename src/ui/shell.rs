@@ -187,10 +187,16 @@ impl App {
         let page = sensor(responsive(move |area| self.page_view(area)))
             .on_show(Message::AreaMeasured)
             .on_resize(Message::AreaMeasured);
+        let gutter = gutter_for(self.window_width);
         let content = container(page)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding([0.0, gutter_for(self.window_width)]);
+            .padding(iced::Padding {
+                top: PAGE_TOP,
+                right: gutter,
+                bottom: 0.0,
+                left: gutter,
+            });
         let mut body = column![self.header(), content];
         // The player bar appears once something is loaded.
         if !matches!(self.page, Page::NowPlaying) && self.shown_track().is_some() {
@@ -496,7 +502,12 @@ impl App {
             .seek_preview
             .unwrap_or(self.playback_status.position.as_secs_f32())
             .clamp(0.0, max_position.max(0.0));
-        let total = self.playback_status.duration.unwrap_or_default();
+        // A restored track has no stream yet; its known length is shown until it plays.
+        let total = self
+            .playback_status
+            .duration
+            .or_else(|| self.shown_track().and_then(|track| self.duration_of(track)))
+            .unwrap_or_default();
         row![
             label(
                 format_duration(std::time::Duration::from_secs_f32(shown)),
@@ -693,7 +704,9 @@ pub(super) const VOLUME_W: f32 = 104.0;
 /// The header bar: tabs, Back and the window buttons are this tall.
 pub(super) const HEADER_H: f32 = TITLE_BAR_H;
 /// The second row that holds the tabs when they do not fit in the bar.
-pub(super) const TAB_ROW_H: f32 = 40.0;
+pub(super) const TAB_ROW_H: f32 = 36.0;
+/// Space between the header and the top of every page.
+const PAGE_TOP: f32 = 20.0;
 const TAB_UNDERLINE: f32 = 2.0;
 /// Room on each side of a tab label in the bar.
 const TAB_PADDING: f32 = 16.0;

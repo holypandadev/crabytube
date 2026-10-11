@@ -58,8 +58,8 @@ pub(super) const FONT_BOLD_BYTES: &[u8] =
 /// Page gutters and the vertical rhythm shared by every page.
 pub(super) const GUTTER: f32 = 32.0;
 /// Height of the header bar, which holds the brand, the tabs and the window buttons.
-pub(super) const TITLE_BAR_H: f32 = 44.0;
-pub(super) const PLAYER_H: f32 = 84.0;
+pub(super) const TITLE_BAR_H: f32 = 36.0;
+pub(super) const PLAYER_H: f32 = 68.0;
 
 /// Outline width in layout units: one physical pixel at the current interface
 /// zoom, so outlines stay hairline-thin when the whole interface is scaled up.
@@ -600,9 +600,9 @@ mod tests {
     #[test]
     fn a_window_icon_keeps_its_glyph_size_in_a_button_as_tall_as_the_header() {
         let padded = padded_icon(include_str!("../../assets/icons/close.svg"));
-        // 44 px of button at 14 px per 24 units is a 75.43-unit view box, centred on the glyph.
+        // 36 px of button at 14 px per 24 units is a 61.71-unit view box, centred on the glyph.
         assert!(
-            padded.contains("viewBox=\"-25.714 -25.714 75.429 75.429\""),
+            padded.contains("viewBox=\"-18.857 -18.857 61.714 61.714\""),
             "{padded}"
         );
         assert!(!padded.contains("width=\"24\""));

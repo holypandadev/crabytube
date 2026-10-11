@@ -27,8 +27,9 @@ const TRANSPORT_ICON: f32 = 22.0;
 /// Width of that transport: five buttons with 7 px padding (icons of 18, 22, 28, 22 and 18 px)
 /// and four 14 px gaps.
 const TRANSPORT_W: f32 = 234.0;
-/// The favorite and volume buttons at the two ends of the controls row.
+/// The favorite and volume buttons on either side of the transport, and the gap to it.
 const END_BUTTON_W: f32 = 32.0;
+const GROUP_GAP: f32 = 14.0;
 const END_ICON: f32 = 18.0;
 /// Gap between the volume rail and its button.
 const RAIL_GAP: f32 = 8.0;
@@ -248,15 +249,16 @@ impl App {
         .into()
     }
 
-    /// Favorite on the left, the transport in the middle and the volume button on the right, so
-    /// the row is symmetric. The volume rail opens leftwards from its button; where there is no room
-    /// for it beside the transport it opens on a row of its own under the controls.
+    /// One centred group: favorite, the transport and the volume button, each next to the other.
+    /// The volume rail opens to the right of its button, into the free side of the row, so the
+    /// group does not move; where that side has no room the rail opens on a row under it.
     fn controls_row<'a>(
         &'a self,
         track: &'a crate::music::Track,
         width: f32,
     ) -> Element<'a, Message> {
-        let room = ((width - TRANSPORT_W) / 2.0 - END_BUTTON_W - RAIL_GAP)
+        let group_w = TRANSPORT_W + 2.0 * (END_BUTTON_W + GROUP_GAP);
+        let room = ((width - group_w) / 2.0 - RAIL_GAP)
             .floor()
             .min(super::shell::VOLUME_W);
         let beside = room >= RAIL_MIN;
@@ -274,19 +276,21 @@ impl App {
         } else {
             theme::icon_button
         });
-        let mut volume = row![].spacing(RAIL_GAP).align_y(Alignment::Center);
-        if beside && open {
-            volume = volume.push(self.volume_rail_slider(room * self.volume_rail.amount));
-        }
-        volume = volume.push(volume_button);
-        let line = row![
-            container(self.like_button(Some(track.video_id.as_str()), END_ICON))
-                .width(Length::Fill)
-                .align_left(Length::Fill),
+        let group = row![
+            self.like_button(Some(track.video_id.as_str()), END_ICON),
             self.transport_controls(TRANSPORT_ICON, true),
-            container(volume)
-                .width(Length::Fill)
-                .align_right(Length::Fill),
+            volume_button,
+        ]
+        .spacing(GROUP_GAP)
+        .align_y(Alignment::Center);
+        let mut right = row![Space::new().width(RAIL_GAP)].align_y(Alignment::Center);
+        if beside && open {
+            right = right.push(self.volume_rail_slider(room * self.volume_rail.amount));
+        }
+        let line = row![
+            Space::new().width(Length::Fill),
+            group,
+            container(right).width(Length::Fill),
         ]
         .width(width)
         .align_y(Alignment::Center);
