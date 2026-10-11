@@ -32,7 +32,7 @@ const PORTAL_SENT: u32 = 1;
 /// notification service is running.
 #[cfg(target_os = "linux")]
 pub async fn show(notice: TrackNotice) -> u32 {
-    let sent = if in_flatpak() {
+    let sent = if crate::flatpak::in_flatpak() {
         send_portal(&notice).await.map(|()| PORTAL_SENT)
     } else {
         send(&notice).await
@@ -74,12 +74,6 @@ fn forget_session() {
     if let Ok(mut slot) = SESSION.lock() {
         *slot = None;
     }
-}
-
-/// Flatpak places this file at the root of every sandbox.
-#[cfg(target_os = "linux")]
-fn in_flatpak() -> bool {
-    std::path::Path::new("/.flatpak-info").exists()
 }
 
 #[cfg(target_os = "linux")]

@@ -97,6 +97,7 @@ impl TrayRemote {
             };
             let handle = tray
                 .assume_sni_available(true)
+                .disable_dbus_name(disables_item_name(crate::flatpak::in_flatpak()))
                 .spawn()
                 .await
                 .map_err(|error| error.to_string())?;
@@ -169,6 +170,13 @@ impl CrabyTray {
         }
         .into()
     }
+}
+
+/// Whether the item leaves out its well-known `org.kde.StatusNotifierItem-*` name and registers
+/// under its unique name only. A Flatpak sandbox may not claim that name. Outside one, the item
+/// keeps the name it has always had.
+fn disables_item_name(in_flatpak: bool) -> bool {
+    in_flatpak
 }
 
 impl Tray for CrabyTray {
@@ -244,6 +252,12 @@ impl Tray for CrabyTray {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_item_keeps_its_bus_name_outside_flatpak() {
+        assert!(!disables_item_name(false));
+        assert!(disables_item_name(true));
+    }
 
     #[tokio::test]
     async fn tray_command_stream_delivers_actions_without_polling() {
