@@ -96,6 +96,48 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Nothing playing" => "No se está reproduciendo nada",
         "Buffering…" => "Cargando…",
         "Playback failed" => "Falló la reproducción",
+        "A temporary network problem interrupted playback. Try again." => {
+            "Un problema temporal de red interrumpió la reproducción. Inténtalo de nuevo."
+        }
+        "CrabyTube is missing a file it needs. Reinstall it to restore playback." => {
+            "A CrabyTube le falta un archivo que necesita. Reinstálalo para recuperar la reproducción."
+        }
+        "YouTube configuration could not be loaded. Try again shortly." => {
+            "No se pudo cargar la configuración de YouTube. Inténtalo de nuevo en unos minutos."
+        }
+        "This track is unavailable for playback." => {
+            "Esta canción no está disponible para reproducirse."
+        }
+        "This live broadcast can't be played right now." => {
+            "Este directo no se puede reproducir ahora."
+        }
+        "YouTube could not validate this playback session." => {
+            "YouTube no pudo validar esta sesión de reproducción."
+        }
+        "YouTube's player response could not be processed." => {
+            "No se pudo procesar la respuesta del reproductor de YouTube."
+        }
+        "YouTube rejected the audio stream. Try again later." => {
+            "YouTube rechazó el flujo de audio. Inténtalo más tarde."
+        }
+        "YouTube could not provide this track right now." => {
+            "YouTube no puede ofrecer esta canción ahora mismo."
+        }
+        "This track has no supported audio format." => {
+            "Esta canción no tiene un formato de audio compatible."
+        }
+        "This audio format could not be decoded." => {
+            "No se pudo decodificar este formato de audio."
+        }
+        "No audio output device is available." => {
+            "No hay ningún dispositivo de salida de audio disponible."
+        }
+        "Playback could not continue." => "La reproducción no pudo continuar.",
+        "Playback was cancelled." => "La reproducción se canceló.",
+        "The audio stream could not be reached or was cut off by YouTube. Try again later." => {
+            "No se pudo acceder al flujo de audio, o YouTube lo cortó. Inténtalo más tarde."
+        }
+        "Playback entered an invalid state." => "La reproducción entró en un estado no válido.",
         "Retry" => "Reintentar",
         "Could not refresh Home: {}" => "No se pudo actualizar Inicio: {}",
         "This collection type is not supported yet." => {

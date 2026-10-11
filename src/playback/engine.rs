@@ -1962,6 +1962,29 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_engine_error_message_has_a_spanish_entry() {
+        use crate::preferences::UiLanguage;
+        let errors = [
+            super::EngineError::Network(String::new()),
+            super::EngineError::Decoder(String::new()),
+            super::EngineError::Worker(String::new()),
+        ];
+        for error in &errors {
+            let message = super::engine_error_message(error);
+            assert_ne!(
+                crate::i18n::translate(UiLanguage::Spanish, message),
+                message,
+                "no Spanish entry for {message:?}"
+            );
+        }
+        let invalid_state = "Playback entered an invalid state.";
+        assert_ne!(
+            crate::i18n::translate(UiLanguage::Spanish, invalid_state),
+            invalid_state
+        );
+    }
+
     use std::{
         num::{NonZeroU16, NonZeroU32},
         sync::{

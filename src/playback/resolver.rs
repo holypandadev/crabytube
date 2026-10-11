@@ -2232,6 +2232,35 @@ fn quality_allows(quality: AudioQuality, bitrate: u64) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn every_stream_error_message_has_a_spanish_entry() {
+        let errors = [
+            StreamError::Network(String::new()),
+            StreamError::Installation(String::new()),
+            StreamError::Config(String::new()),
+            StreamError::PlayerUnavailable(String::new()),
+            StreamError::LiveUnsupported,
+            StreamError::AuthenticationRequired(String::new()),
+            StreamError::PoToken(String::new()),
+            StreamError::Cipher(String::new()),
+            StreamError::MediaRejected(String::new()),
+            StreamError::Resolution(String::new()),
+            StreamError::UnsupportedFormat,
+            StreamError::Decoder(String::new()),
+            StreamError::AudioDevice(String::new()),
+            StreamError::Playback(String::new()),
+            StreamError::Cancelled,
+        ];
+        for error in errors {
+            let message = error.user_message();
+            assert_ne!(
+                crate::i18n::translate(crate::preferences::UiLanguage::Spanish, &message),
+                message,
+                "no Spanish entry for {message:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_retry_waits_at_most_a_second_for_the_server_and_backs_off_otherwise() {
         let url = "https://music.youtube.com/youtubei/v1/browse";
         assert_eq!(
