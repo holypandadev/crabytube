@@ -133,3 +133,14 @@ pub(super) fn join_helpers(child: &tokio::process::Child) {
 
 #[cfg(not(windows))]
 pub(super) fn join_helpers(_child: &tokio::process::Child) {}
+
+/// Stops a helper from opening a console window of its own. A release build on Windows has no
+/// console, so Windows would open one for each console program the app starts. Elsewhere it does
+/// nothing.
+#[cfg(windows)]
+pub(super) fn hide_console_window(command: &mut tokio::process::Command) {
+    command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub(super) fn hide_console_window(_command: &mut tokio::process::Command) {}

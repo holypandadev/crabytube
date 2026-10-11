@@ -1830,6 +1830,7 @@ async fn run_js_helper_once(
             command.env(key, value);
         }
     }
+    super::process_job::hide_console_window(&mut command);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

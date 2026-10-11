@@ -346,6 +346,7 @@ impl BotguardHelper {
 
         let (need_session, need_content) = needs;
         let mut command = helper_command()?;
+        super::process_job::hide_console_window(&mut command);
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
