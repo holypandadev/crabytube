@@ -646,14 +646,17 @@ fn cap_string(value: &mut String, max_bytes: usize) {
 }
 /// A single writer coalesces rapid UI edits and preserves ordering.
 pub struct Persistence {
-    pending: Arc<(Mutex<PendingSnapshot>, Condvar)>,
+    pending: SharedPending,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 #[derive(Default)]
 struct PendingSnapshot {
     latest: Option<Snapshot>,
     closed: bool,
+    /// Set by the writer thread once it has written everything and is about to end.
+    finished: bool,
 }
+type SharedPending = Arc<(Mutex<PendingSnapshot>, Condvar)>;
 impl Persistence {
     pub fn start(path: PathBuf) -> Self {
         let pending = Arc::new((Mutex::new(PendingSnapshot::default()), Condvar::new()));
@@ -671,6 +674,8 @@ impl Persistence {
                     state = next;
                 }
                 if state.latest.is_none() && state.closed {
+                    state.finished = true;
+                    wake.notify_all();
                     break;
                 }
                 let Some(mut snapshot) = state.latest.take() else {
@@ -696,6 +701,8 @@ impl Persistence {
                 }
             }
         });
+        #[cfg(target_os = "macos")]
+        flush_at_exit(&pending);
         Self {
             pending,
             worker: Some(worker),
@@ -723,6 +730,45 @@ impl Drop for Persistence {
         }
     }
 }
+/// Closes the writer and waits, up to `timeout`, until it has written the last snapshot.
+#[cfg(any(target_os = "macos", test))]
+fn close_and_wait(pending: &SharedPending, timeout: Duration) {
+    let (lock, wake) = &**pending;
+    let Ok(mut state) = lock.lock() else {
+        return;
+    };
+    state.closed = true;
+    wake.notify_all();
+    let _ = wake.wait_timeout_while(state, timeout, |state| !state.finished);
+}
+
+/// Cmd+Q ends a macOS app through `exit()` without unwinding, so `Persistence` is never
+/// dropped and a save made in the last moments would be lost. An exit handler flushes the
+/// writers instead.
+#[cfg(target_os = "macos")]
+fn flush_at_exit(pending: &SharedPending) {
+    use std::sync::Once;
+    static WRITERS: Mutex<Vec<SharedPending>> = Mutex::new(Vec::new());
+    static REGISTER: Once = Once::new();
+    unsafe extern "C" {
+        fn atexit(callback: extern "C" fn()) -> std::ffi::c_int;
+    }
+    extern "C" fn flush_all() {
+        if let Ok(writers) = WRITERS.lock() {
+            for pending in writers.iter() {
+                close_and_wait(pending, Duration::from_secs(2));
+            }
+        }
+    }
+    if let Ok(mut writers) = WRITERS.lock() {
+        writers.push(Arc::clone(pending));
+    }
+    REGISTER.call_once(|| {
+        // SAFETY: `flush_all` is a plain function that stays valid for the whole process.
+        unsafe { atexit(flush_all) };
+    });
+}
+
 /// Register this installed desktop binary with the current user's session.
 pub fn set_startup(enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
@@ -1298,6 +1344,23 @@ mod tests {
         });
         drop(persistence);
         assert_eq!(*load(&path).unwrap().history, vec!["latest"]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn closing_the_writer_without_dropping_it_still_saves_the_pending_snapshot() {
+        let path = std::env::temp_dir().join(format!(
+            "crabytube-persistence-exit-test-{}.json",
+            std::process::id()
+        ));
+        let persistence = Persistence::start(path.clone());
+        persistence.save(Snapshot {
+            history: vec!["last".into()].into(),
+            ..Snapshot::default()
+        });
+        close_and_wait(&persistence.pending, Duration::from_secs(5));
+        assert_eq!(*load(&path).unwrap().history, vec!["last"]);
+        drop(persistence);
         let _ = std::fs::remove_file(path);
     }
 }
