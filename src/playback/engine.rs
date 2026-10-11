@@ -500,7 +500,7 @@ fn seek_ends_track(target: Duration, duration: Option<Duration>) -> bool {
 }
 
 /// Error text for the logs. Media URLs are signed, so every http(s) URL in the text becomes `<url>`.
-fn redact_urls(text: &str) -> String {
+pub(crate) fn redact_urls(text: &str) -> String {
     let mut redacted = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("http") {

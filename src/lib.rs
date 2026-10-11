@@ -3,6 +3,7 @@
 pub const APP_ID: &str = "dev.holypanda.CrabyTube";
 
 pub mod i18n;
+pub mod logging;
 pub mod music;
 pub mod network;
 pub mod notifications;

@@ -19,6 +19,7 @@ pub use resolver::{
     StreamResolver, TrackId, ValidatedPlaybackResolution, YouTubeStreamResolver,
 };
 
+pub(crate) use engine::redact_urls;
 pub(crate) use resolver::parse_ytcfg;
 
 #[cfg(feature = "diagnostics")]
