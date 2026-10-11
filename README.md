@@ -84,10 +84,12 @@ application menu.
   YouTube and Google servers (catalog, artwork, audio and the BotGuard challenge), and the lyrics
   services LRCLIB and Better Lyrics (see below).
   Discord Rich Presence (off by default) talks only to the Discord client running on your computer.
-- Lyrics are requested from LRCLIB and Better Lyrics (api.betterlyrics.org). A request carries the
-  track's title, artist, album, duration and YouTube video ID. Lyrics are requested when the Lyrics
-  tab is open, and also near the end of a track for the next track in the queue, so they are ready
-  when that track starts. Fetched lyrics are cached on this computer for 30 days.
+- Lyrics come from two services. LRCLIB (lrclib.net) receives the track's title and artist. Better
+  Lyrics (api.betterlyrics.org) receives the title, the artist, the album and the duration when they
+  are known, and the YouTube video ID; its QQ Music and Kugou lookups go through the same service.
+  Lyrics are requested when the Lyrics tab is open, and also during the last 30 seconds of a track
+  for the next track in the queue, so they are ready when that track starts. Fetched lyrics are
+  cached on this computer for 30 days.
 - The track that plays and the next one are downloaded to a temporary folder in the cache directory
   while they play. Files left behind by a crash are removed when CrabyTube starts, once they are old
   enough not to be in use.
