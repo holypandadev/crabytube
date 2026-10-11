@@ -37,7 +37,7 @@ rustypipe-botguard = { path = "botguard-helper/vendor/rustypipe-botguard" }
 
 [dependencies]
 async-trait = "0.1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "http2", "system-proxy"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time", "process", "io-util"] }
 tokio-util = { version = "0.7", features = ["rt"] }
