@@ -61,7 +61,7 @@ fn mib(bytes: u64, language: UiLanguage) -> String {
 
 impl App {
     /// `top` is the height of the floating tabs above the page; the content scrolls under them.
-    pub(super) fn settings_page(&self, area: Size, top: f32) -> Element<'_, Message> {
+    pub(super) fn settings_page(&self, area: Size) -> Element<'_, Message> {
         let width = area.width.max(300.0);
         let two_columns = width >= TWO_COLUMNS_FROM;
         let box_width = if two_columns {
@@ -141,7 +141,7 @@ impl App {
             };
         scrollable(
             column![
-                Space::new().height(top + 8.0),
+                Space::new().height(8.0),
                 header,
                 reset_confirmation,
                 Space::new().height(28),

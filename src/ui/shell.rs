@@ -1,8 +1,8 @@
 //! Window chrome shared by every page: title bar, top tabs and player bar.
 
 use super::theme::{
-    self, BLACK, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, NAV_H, PLAYER_H, TEXT_BODY,
-    TEXT_CAPTION, TEXT_SECTION, TEXT_TITLE, TITLE_BAR_H, hrule, icon, label, vrule,
+    self, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, PLAYER_H, RULE, TEXT_BODY, TEXT_CAPTION,
+    TEXT_SECTION, TEXT_TITLE, TITLE_BAR_H, hrule, icon, label, vrule,
 };
 use super::{App, Message, Page, Preference, format_duration};
 use crate::music::Track;
@@ -11,7 +11,7 @@ use crate::preferences::RepeatMode;
 use iced::widget::{
     Space, button, column, container, image, mouse_area, responsive, row, sensor, slider, svg, text,
 };
-use iced::{Alignment, Background, Border, Color, Element, Length, Size};
+use iced::{Alignment, Color, Element, Length, Size};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -88,17 +88,33 @@ enum Tab {
     Settings,
 }
 
+impl Tab {
+    /// The tab a page belongs to; pages reached from Home belong to Home.
+    fn of_page(page: &Page) -> Self {
+        match page {
+            Page::Library => Self::Favorites,
+            Page::Settings => Self::Settings,
+            _ => Self::Home,
+        }
+    }
+}
+
 impl App {
-    /// The highlighted tab. Now Playing highlights none, so Home reads as a
-    /// way back rather than the current page.
-    fn active_tab(&self) -> Option<Tab> {
-        match self.page {
-            Page::Library => Some(Tab::Favorites),
-            Page::Settings => Some(Tab::Settings),
-            Page::Home => Some(Tab::Home),
-            // Playlists, albums, search results and Now Playing are reached from
-            // Home but are not Home; a lit Home tab would hide the way back.
-            Page::NowPlaying | Page::Search | Page::CollectionDetail(_) => None,
+    /// The tab that is underlined, and whether its page is the one on screen. A page reached from a
+    /// tab (a playlist, results, Now Playing) keeps that tab underlined in a dimmer colour, so the
+    /// header still says where it was opened from.
+    fn tab_origin(&self) -> (Tab, bool) {
+        match &self.page {
+            Page::Home => (Tab::Home, true),
+            Page::Library => (Tab::Favorites, true),
+            Page::Settings => (Tab::Settings, true),
+            Page::NowPlaying => (
+                self.now_playing_return
+                    .as_ref()
+                    .map_or(Tab::Home, Tab::of_page),
+                false,
+            ),
+            Page::Search | Page::CollectionDetail(_) => (Tab::Home, false),
         }
     }
 
@@ -122,18 +138,14 @@ impl App {
 
     /// The page for the area it actually gets, so layout never depends on a
     /// possibly stale window size.
-    /// `area` is the whole page layer, including the band under the floating tabs. Pages whose
-    /// content scrolls start their scroll content below the tabs and let it pass underneath;
-    /// the others are laid out in the area below the tabs.
     fn page_view(&self, area: Size) -> Element<'_, Message> {
-        let below = below_nav(area);
         match &self.page {
-            Page::Search => self.search_page(area, NAV_H),
-            Page::Settings => self.settings_page(area, NAV_H),
-            Page::Library => under_tabs(self.favorites_page(below)),
-            Page::NowPlaying => under_tabs(self.now_playing_page(below)),
-            Page::CollectionDetail(_) => under_tabs(self.collection_content(below)),
-            Page::Home => under_tabs(self.home_page(below)),
+            Page::Search => self.search_page(area),
+            Page::Settings => self.settings_page(area),
+            Page::Library => self.favorites_page(area),
+            Page::NowPlaying => self.now_playing_page(area),
+            Page::CollectionDetail(_) => self.collection_content(area),
+            Page::Home => self.home_page(area),
         }
     }
 
@@ -156,7 +168,7 @@ impl App {
             .into()
     }
 
-    /// Where the Back button in the navigation row leads: the page a collection was opened from, or
+    /// Where the Back button in the header leads: the page a collection was opened from, or
     /// the page Now Playing was opened from. `None` when there is nowhere to go.
     pub(super) fn back_target(&self) -> Option<Message> {
         match &self.page {
@@ -172,22 +184,14 @@ impl App {
     pub(super) fn shell_view(&self) -> Element<'_, Message> {
         // The sensor reports the measured area to `update`, which sizes
         // artwork requests, carousel steps and virtual lists from it.
-        // The reported area is the part below the floating tabs.
         let page = sensor(responsive(move |area| self.page_view(area)))
-            .on_show(|size| Message::AreaMeasured(below_nav(size)))
-            .on_resize(|size| Message::AreaMeasured(below_nav(size)));
-        // The tabs float over the page: only their own boxes are opaque, so scrolled content
-        // stays visible around them instead of being cut by a full-width band.
-        let content = iced::widget::stack![
-            container(page)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding([0.0, gutter_for(self.window_width)]),
-            self.top_nav(),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill);
-        let mut body = column![self.title_bar(), content];
+            .on_show(Message::AreaMeasured)
+            .on_resize(Message::AreaMeasured);
+        let content = container(page)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding([0.0, gutter_for(self.window_width)]);
+        let mut body = column![self.header(), content];
         // The player bar appears once something is loaded.
         if !matches!(self.page, Page::NowPlaying) && self.shown_track().is_some() {
             body = body.push(hrule(INK)).push(
@@ -204,176 +208,152 @@ impl App {
         iced::widget::stack![framed, resize_grips()].into()
     }
 
-    fn title_bar(&self) -> Element<'_, Message> {
-        let dot = |message: Message, glyph: &'static str| {
-            button(
-                container(text(glyph).size(TEXT_CAPTION).font(MONO_BOLD))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .on_press(message)
-            .width(14)
-            .height(14)
-            .padding(0)
-            .style(|_, status| {
-                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                button::Style {
-                    background: Some(Background::Color(if hovered { BLACK } else { INK })),
-                    text_color: if hovered { INK } else { Color::TRANSPARENT },
-                    border: Border {
-                        color: INK,
-                        width: theme::hairline(),
-                        radius: 7.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-        };
-        let brand = row![
-            svg(logo_handle()).width(20).height(20),
-            svg(wordmark_handle())
-                .width(WORDMARK_H * WORDMARK_ASPECT)
-                .height(WORDMARK_H)
-                .style(|_, _| svg::Style { color: Some(INK) }),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        let drag = mouse_area(
-            container(Space::new())
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .on_press(Message::StartDrag)
-        .on_double_click(Message::ToggleMaximize);
-        let bar = if cfg!(target_os = "macos") {
-            row![
-                dot(Message::CloseWindow, "×"),
-                dot(Message::MinimizeWindow, "–"),
-                dot(Message::ToggleMaximize, "+"),
-                Space::new().width(10),
-                brand,
-                drag,
-            ]
-        } else {
-            row![
-                brand,
-                drag,
-                dot(Message::MinimizeWindow, "–"),
-                dot(Message::ToggleMaximize, "+"),
-                dot(Message::CloseWindow, "×"),
-            ]
-        };
-        column![
-            container(bar.spacing(8).align_y(Alignment::Center))
-                .height(TITLE_BAR_H)
-                .padding([0.0, 14.0])
-                .center_y(TITLE_BAR_H),
-            hrule(INK),
-        ]
-        .into()
-    }
-
-    fn top_nav(&self) -> Element<'_, Message> {
+    /// The header: one bar with the brand and Back on the left, the tabs centred on the window
+    /// and the window buttons on the right (on macOS they come first, on the left). The empty parts
+    /// move the window and a double click maximizes it. When the three zones do not fit side by
+    /// side, the wordmark goes and the tabs take a second row of their own.
+    fn header(&self) -> Element<'_, Message> {
+        let inline = self.tabs_fit_inline();
         let narrow = self.window_width < super::home::NARROW_W;
-        // Phone-width windows use the short name for the favorites tab.
-        let favorites = if narrow {
-            "Favorites"
-        } else {
-            "Favorite songs"
-        };
-        let titles = ["Home", favorites, "Settings"];
-        let active = self.active_tab();
-        let widest = titles
-            .iter()
-            .map(|title| self.tr(title).chars().count())
-            .max()
-            .unwrap_or(8) as f32;
-        let gutter = gutter_for(self.window_width);
-        let back = self.back_target();
-        // The Back button sits at the left of this row and an equal space at
-        // the right keeps the tabs centred.
-        let back_width = if narrow { 40.0 } else { BACK_W };
-        let reserved = if back.is_some() {
-            2.0 * (back_width + 8.0)
-        } else {
-            0.0
-        };
-        // JetBrains Mono advances 0.6 em per glyph. On narrow windows the
-        // three tabs share the available width and the labels shrink to fit.
-        let room = ((self.window_width - 2.0 * gutter - reserved - 4.0) / 3.0).floor();
-        let tab_width = (widest * 14.0 * 0.6 + 56.0).ceil().min(room);
-        let label_size = ((tab_width - 12.0) / (widest * 0.6))
-            .clamp(10.0, 14.0)
-            .floor();
-        let tab = |title: &'static str, page: Page, which: Tab| {
-            button(
-                container(label(
-                    fit(&self.tr(title), tab_width - 8.0, label_size),
-                    label_size,
-                ))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
+        let mut brand = row![svg(logo_handle()).width(LOGO_W).height(LOGO_W)]
+            .spacing(10)
+            .align_y(Alignment::Center);
+        if !narrow {
+            brand = brand.push(
+                svg(wordmark_handle())
+                    .width(WORDMARK_H * WORDMARK_ASPECT)
+                    .height(WORDMARK_H)
+                    .style(|_, _| svg::Style { color: Some(INK) }),
+            );
+        }
+        let drag = || {
+            mouse_area(
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(Length::Fill),
             )
-            .on_press(Message::Navigate(page))
-            .width(tab_width)
-            .height(40)
-            .padding(0)
-            .style(theme::tab_style(active == Some(which)))
+            .on_press(Message::StartDrag)
+            .on_double_click(Message::ToggleMaximize)
         };
-        let tabs = container(
-            row![
-                tab("Home", Page::Home, Tab::Home),
-                vrule(40.0, INK),
-                tab(favorites, Page::Library, Tab::Favorites),
-                vrule(40.0, INK),
-                tab("Settings", Page::Settings, Tab::Settings),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .padding(theme::hairline())
-        .style(theme::boxed);
-        let back: Element<'_, Message> = match back {
-            Some(target) => {
-                let content: Element<'_, Message> = if narrow {
-                    icon("chev-left", 18.0, INK)
-                } else {
-                    row![
-                        icon("chev-left", 16.0, INK),
-                        label(self.tr("Back").into_owned(), TEXT_BODY)
-                    ]
-                    .spacing(10)
-                    .align_y(Alignment::Center)
-                    .into()
-                };
+        let mut left = row![].height(HEADER_H).align_y(Alignment::Center);
+        let mut right = row![].height(HEADER_H).align_y(Alignment::Center);
+        if cfg!(target_os = "macos") {
+            left = left.push(window_buttons(true));
+        }
+        left = left.push(Space::new().width(BRAND_INSET)).push(brand);
+        if let Some(target) = self.back_target() {
+            left = left.push(Space::new().width(BACK_GAP)).push(
                 button(
-                    container(content)
+                    container(icon("chev-left", 16.0, INK))
                         .center_x(Length::Fill)
                         .center_y(Length::Fill),
                 )
                 .on_press(target)
-                .width(back_width)
-                .height(42)
+                .width(HEADER_H)
+                .height(HEADER_H)
                 .padding(0)
-                .style(theme::outline_button)
-                .into()
-            }
-            None => Space::new().into(),
+                .style(theme::icon_button),
+            );
+        }
+        left = left.push(drag());
+        right = right.push(drag());
+        if !cfg!(target_os = "macos") {
+            right = right.push(window_buttons(false));
+        }
+        let mut bar = row![container(left).width(Length::Fill)];
+        if inline {
+            bar = bar.push(self.tab_row(false));
+        }
+        bar = bar.push(container(right).width(Length::Fill));
+        let mut header = column![bar.height(HEADER_H)];
+        if !inline {
+            header = header.push(hrule(RULE)).push(self.tab_row(true));
+        }
+        header.push(hrule(INK)).into()
+    }
+
+    /// Whether the tabs fit in the bar between the two side zones, which are equal so that the
+    /// tabs sit at the centre of the window.
+    fn tabs_fit_inline(&self) -> bool {
+        if self.window_width < super::home::NARROW_W {
+            return false;
+        }
+        let buttons = 3.0 * (HEADER_H + 1.0);
+        let mut brand = BRAND_INSET + LOGO_W + 10.0 + WORDMARK_H * WORDMARK_ASPECT;
+        if self.back_target().is_some() {
+            brand += BACK_GAP + HEADER_H;
+        }
+        let (left, right) = if cfg!(target_os = "macos") {
+            (buttons + brand, 0.0)
+        } else {
+            (brand, buttons)
         };
-        container(
-            row![
-                container(back).width(Length::Fill),
-                tabs,
-                Space::new().width(Length::Fill),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(NAV_H)
-        .padding([0.0, gutter])
-        .center_y(NAV_H)
-        .into()
+        let tabs: f32 = self
+            .tab_labels(false)
+            .iter()
+            .map(|title| tab_width(title))
+            .sum();
+        self.window_width >= 2.0 * left.max(right) + tabs + 2.0 * SIDE_GAP
+    }
+
+    /// The three tab labels in the interface language. The second row uses the short name for
+    /// Favorites.
+    fn tab_labels(&self, second_row: bool) -> [String; 3] {
+        let favorites = if second_row {
+            "Favorites"
+        } else {
+            "Favorite songs"
+        };
+        ["Home", favorites, "Settings"].map(|title| self.tr(title).into_owned())
+    }
+
+    /// The tabs as text with an underline: in the bar each is as wide as its label, in the second
+    /// row they share the width equally.
+    fn tab_row(&self, second_row: bool) -> Element<'_, Message> {
+        let (origin, current) = self.tab_origin();
+        let height = if second_row { TAB_ROW_H } else { HEADER_H };
+        let labels = self.tab_labels(second_row);
+        let tabs = [
+            (Page::Home, Tab::Home),
+            (Page::Library, Tab::Favorites),
+            (Page::Settings, Tab::Settings),
+        ]
+        .into_iter()
+        .zip(labels)
+        .map(|((page, which), title)| {
+            let marked = origin == which;
+            let underline = match (marked, current) {
+                (true, true) => INK,
+                (true, false) => DIM,
+                (false, _) => Color::TRANSPARENT,
+            };
+            let width = if second_row {
+                Length::Fill
+            } else {
+                Length::Fixed(tab_width(&title))
+            };
+            button(column![
+                container(label(title, TEXT_BODY))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(TAB_UNDERLINE)
+                    .style(theme::filled(underline)),
+            ])
+            .on_press(Message::Navigate(page))
+            .width(width)
+            .height(height)
+            .padding(0)
+            .style(theme::header_tab(marked && current))
+            .into()
+        });
+        let row = iced::widget::Row::with_children(tabs).height(height);
+        if second_row {
+            row.width(Length::Fill).into()
+        } else {
+            row.into()
+        }
     }
 
     pub(super) fn is_playing(&self) -> bool {
@@ -702,17 +682,61 @@ impl App {
 
 const VOLUME_W: f32 = 104.0;
 
-/// Width of the Back button in the navigation row.
-const BACK_W: f32 = 112.0;
+/// The header bar: tabs, Back and the window buttons are this tall.
+pub(super) const HEADER_H: f32 = TITLE_BAR_H;
+/// The second row that holds the tabs when they do not fit in the bar.
+pub(super) const TAB_ROW_H: f32 = 40.0;
+const TAB_UNDERLINE: f32 = 2.0;
+/// Room on each side of a tab label in the bar.
+const TAB_PADDING: f32 = 16.0;
+const LOGO_W: f32 = 20.0;
+const BRAND_INSET: f32 = 14.0;
+const BACK_GAP: f32 = 6.0;
+/// The least room left between the tabs and each side zone.
+const SIDE_GAP: f32 = 8.0;
 
-/// A page laid out below the floating tab row.
-fn under_tabs<'a>(page: Element<'a, Message>) -> Element<'a, Message> {
-    column![Space::new().height(NAV_H), page].into()
+/// Width of a tab in the bar: its label and the padding on both sides.
+fn tab_width(title: &str) -> f32 {
+    (title.chars().count() as f32 * TEXT_BODY * 0.6 + 2.0 * TAB_PADDING).ceil()
 }
 
-/// The page area below the floating tab row.
-fn below_nav(area: Size) -> Size {
-    Size::new(area.width, (area.height - NAV_H).max(0.0))
+/// Minimize, maximize and close as square buttons the height of the bar, each with a rule on
+/// the side that faces the page. macOS puts close first.
+fn window_buttons<'a>(macos: bool) -> Element<'a, Message> {
+    let button_for = |glyph: &'static str, message: Message| {
+        button(theme::window_icon(glyph))
+            .on_press(message)
+            .width(HEADER_H)
+            .height(HEADER_H)
+            .padding(0)
+            .style(theme::window_button)
+    };
+    let buttons = if macos {
+        [
+            ("close", Message::CloseWindow),
+            ("minus", Message::MinimizeWindow),
+            ("square", Message::ToggleMaximize),
+        ]
+    } else {
+        [
+            ("minus", Message::MinimizeWindow),
+            ("square", Message::ToggleMaximize),
+            ("close", Message::CloseWindow),
+        ]
+    };
+    let mut row = row![].height(HEADER_H);
+    for (glyph, message) in buttons {
+        if macos {
+            row = row
+                .push(button_for(glyph, message))
+                .push(vrule(HEADER_H, RULE));
+        } else {
+            row = row
+                .push(vrule(HEADER_H, RULE))
+                .push(button_for(glyph, message));
+        }
+    }
+    row.into()
 }
 
 /// Side margin of the page: narrower on phone-sized windows.
@@ -866,7 +890,34 @@ pub(super) fn spacer<'a>(height: f32) -> Element<'a, Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::{display_title, fit, meta_text};
+    use super::super::{App, Page};
+    use super::{Tab, display_title, fit, meta_text};
+
+    #[test]
+    fn the_tabs_sit_in_the_bar_on_wide_windows_and_take_a_second_row_on_narrow_ones() {
+        let at = |window_width| App {
+            window_width,
+            ..App::default()
+        };
+        assert!(at(1418.0).tabs_fit_inline());
+        assert!(at(1270.0).tabs_fit_inline());
+        assert!(!at(390.0).tabs_fit_inline());
+        assert!(!at(360.0).tabs_fit_inline());
+    }
+
+    #[test]
+    fn a_page_opened_from_a_tab_keeps_that_tab_marked_as_its_origin() {
+        let mut app = App {
+            page: Page::Library,
+            ..App::default()
+        };
+        assert!(app.tab_origin() == (Tab::Favorites, true));
+        app.page = Page::NowPlaying;
+        app.now_playing_return = Some(Page::Library);
+        assert!(app.tab_origin() == (Tab::Favorites, false));
+        app.page = Page::Search;
+        assert!(app.tab_origin() == (Tab::Home, false));
+    }
 
     #[test]
     fn upload_tags_are_dropped_from_the_shown_title_only_at_its_end() {

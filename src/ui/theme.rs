@@ -55,8 +55,8 @@ pub(super) const FONT_BOLD_BYTES: &[u8] =
 
 /// Page gutters and the vertical rhythm shared by every page.
 pub(super) const GUTTER: f32 = 32.0;
-pub(super) const TITLE_BAR_H: f32 = 34.0;
-pub(super) const NAV_H: f32 = 76.0;
+/// Height of the header bar, which holds the brand, the tabs and the window buttons.
+pub(super) const TITLE_BAR_H: f32 = 44.0;
 pub(super) const PLAYER_H: f32 = 84.0;
 
 /// Outline width in layout units: one physical pixel at the current interface
@@ -169,6 +169,91 @@ pub(super) fn tab_style(active: bool) -> impl Fn(&Theme, button::Status) -> butt
             ..Default::default()
         }
     }
+}
+
+/// A header tab: plain text, white for the page on screen or while hovered, grey otherwise. The
+/// underline is drawn by the view.
+pub(super) fn header_tab(current: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| button::Style {
+        background: None,
+        text_color: if current
+            || matches!(status, button::Status::Hovered | button::Status::Pressed)
+        {
+            INK
+        } else {
+            DIM
+        },
+        border: Border::default(),
+        ..Default::default()
+    }
+}
+
+/// A window button: a square that inverts while hovered. Its icon follows in `window_icon`.
+pub(super) fn window_button(_: &Theme, status: button::Status) -> button::Style {
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    button::Style {
+        background: Some(Background::Color(if hovered { INK } else { BLACK })),
+        text_color: if hovered { BLACK } else { INK },
+        border: Border::default(),
+        ..Default::default()
+    }
+}
+
+/// Size of the glyph inside a window button.
+const WINDOW_GLYPH: f32 = 14.0;
+
+/// A window button's glyph, drawn over the whole button so that it turns black exactly while the
+/// button is hovered. The icon's view box is widened so the glyph keeps its 14 px size in a button
+/// as tall as the header.
+pub(super) fn window_icon<'a>(name: &'static str) -> Element<'a, Message> {
+    svg(window_icon_handle(name))
+        .width(TITLE_BAR_H)
+        .height(TITLE_BAR_H)
+        .style(|_, status| svg::Style {
+            color: Some(if matches!(status, svg::Status::Hovered) {
+                BLACK
+            } else {
+                INK
+            }),
+        })
+        .into()
+}
+
+fn window_icon_handle(name: &'static str) -> svg::Handle {
+    use std::sync::LazyLock;
+    static HANDLES: LazyLock<[(&str, svg::Handle); 3]> = LazyLock::new(|| {
+        [
+            ("minus", include_str!("../../assets/icons/minus.svg")),
+            ("square", include_str!("../../assets/icons/square.svg")),
+            ("close", include_str!("../../assets/icons/close.svg")),
+        ]
+        .map(|(name, source)| {
+            (
+                name,
+                svg::Handle::from_memory(padded_icon(source).into_bytes()),
+            )
+        })
+    });
+    HANDLES
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map_or_else(|| HANDLES[2].1.clone(), |(_, handle)| handle.clone())
+}
+
+/// The icon source with its 24-unit view box widened to the whole button at the glyph's scale.
+fn padded_icon(source: &str) -> String {
+    let span = 24.0 * TITLE_BAR_H / WINDOW_GLYPH;
+    let offset = (span - 24.0) / 2.0;
+    source
+        .replacen(
+            "viewBox=\"0 0 24 24\"",
+            &format!(
+                "viewBox=\"{:.3} {:.3} {span:.3} {span:.3}\"",
+                -offset, -offset
+            ),
+            1,
+        )
+        .replacen("width=\"24\" height=\"24\"", "", 1)
 }
 
 /// Borderless icon button; hovering draws the 1 px outline.
@@ -460,6 +545,17 @@ mod tests {
     fn contrast(a: Color, b: Color) -> f32 {
         let (x, y) = (luminance(a), luminance(b));
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn a_window_icon_keeps_its_glyph_size_in_a_button_as_tall_as_the_header() {
+        let padded = padded_icon(include_str!("../../assets/icons/close.svg"));
+        // 44 px of button at 14 px per 24 units is a 75.43-unit view box, centred on the glyph.
+        assert!(
+            padded.contains("viewBox=\"-25.714 -25.714 75.429 75.429\""),
+            "{padded}"
+        );
+        assert!(!padded.contains("width=\"24\""));
     }
 
     #[test]

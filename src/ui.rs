@@ -2960,10 +2960,10 @@ fn ui_zoom_for(width: f32, height: f32, enabled: bool) -> f32 {
 
 /// Page area for a window size, before the first layout reports the real one.
 fn estimated_area(window_width: f32, window_height: f32) -> iced::Size {
-    use theme::{GUTTER, NAV_H, PLAYER_H, TITLE_BAR_H};
+    use theme::{GUTTER, PLAYER_H, TITLE_BAR_H};
     iced::Size::new(
         (window_width - 2.0 * GUTTER - 2.0).max(320.0),
-        (window_height - TITLE_BAR_H - NAV_H - PLAYER_H - 4.0).max(240.0),
+        (window_height - TITLE_BAR_H - PLAYER_H - 4.0).max(240.0),
     )
 }
 
