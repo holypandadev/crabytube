@@ -525,22 +525,23 @@ impl App {
                 ),
                 width,
             ),
-            self.setting(
+        ];
+        // Notifications and startup need the Linux desktop, so other platforms do not offer them.
+        if cfg!(target_os = "linux") {
+            rows.push(self.setting(
                 "Track notifications",
-                Some(if cfg!(target_os = "linux") {
+                Some(
                     "Shows a notification when a track starts while the window is in the background."
-                        .into()
-                } else {
-                    "Available on Linux only for now.".into()
-                }),
+                        .into(),
+                ),
                 toggle(
                     p.track_notifications,
                     Message::Preference(Preference::TrackNotifications(!p.track_notifications)),
                 ),
                 width,
-            ),
-            self.history_setting(width),
-        ];
+            ));
+        }
+        rows.push(self.history_setting(width));
         if cfg!(target_os = "linux") {
             rows.push(self.setting(
                 "Launch on startup",

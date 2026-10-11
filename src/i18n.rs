@@ -210,7 +210,6 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Shows a notification when a track starts while the window is in the background." => {
             "Muestra una notificación cuando empieza una pista con la ventana en segundo plano."
         }
-        "Available on Linux only for now." => "Disponible solo en Linux por ahora.",
         "About" => "Acerca de",
         "Add to queue" => "Añadir a la cola",
         "Remove from queue" => "Quitar de la cola",
