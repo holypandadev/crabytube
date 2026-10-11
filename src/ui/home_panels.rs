@@ -11,7 +11,7 @@ use super::theme::{
 };
 use super::{App, Message, format_duration};
 use crate::local_clock::LocalClock;
-use crate::preferences::RecentPlay;
+use crate::preferences::{RecentPlay, UiLanguage};
 use crate::process_stats::{self, ProcessReading};
 use futures_util::{SinkExt, Stream};
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
@@ -76,12 +76,34 @@ fn greeting_for(part: DayPart) -> &'static str {
     }
 }
 
-/// "21:14 — THURSDAY 09 OCT", with the weekday and month already translated.
-fn clock_line(clock: LocalClock, weekday: &str, month: &str) -> String {
+/// "21:14 · THURSDAY 09 OCT" in Spanish, "9:14 PM · THURSDAY 09 OCT" in English, with the weekday
+/// and month already translated.
+fn clock_line(clock: LocalClock, twelve_hour: bool, weekday: &str, month: &str) -> String {
     format!(
-        "{:02}:{:02} · {} {:02} {}",
-        clock.hour, clock.minute, weekday, clock.day, month
+        "{} · {} {:02} {}",
+        clock_time(clock, twelve_hour),
+        weekday,
+        clock.day,
+        month
     )
+}
+
+/// The time of day: 24 hours, or 12 hours with AM or PM.
+fn clock_time(clock: LocalClock, twelve_hour: bool) -> String {
+    if !twelve_hour {
+        return format!("{:02}:{:02}", clock.hour, clock.minute);
+    }
+    let hour = match clock.hour % 12 {
+        0 => 12,
+        hour => hour,
+    };
+    let period = if clock.hour < 12 { "AM" } else { "PM" };
+    format!("{hour}:{:02} {period}", clock.minute)
+}
+
+/// English reads the clock on 12 hours, Spanish on 24.
+fn uses_twelve_hour_clock(language: UiLanguage) -> bool {
+    language == UiLanguage::English
 }
 
 /// The recent searches that get a chip, in order and at most `MAX_CHIPS`. On a desktop width
@@ -112,7 +134,8 @@ impl App {
         let clock = self.clock;
         let weekday = self.tr_static(WEEKDAYS[usize::from(clock.weekday % 7)]);
         let month = self.tr_static(MONTHS[usize::from(clock.month.clamp(1, 12) - 1)]);
-        let stamp = clock_line(clock, weekday, month);
+        let twelve_hour = uses_twelve_hour_clock(self.preferences.ui_language);
+        let stamp = clock_line(clock, twelve_hour, weekday, month);
         let greeting = self.tr_static(greeting_for(day_part(clock.hour)));
         let content: Element<'_, Message> = match layout.greeting {
             GreetingSize::Full => column![
@@ -479,9 +502,38 @@ mod tests {
             month: 10,
         };
         assert_eq!(
-            clock_line(clock, "THURSDAY", "OCT"),
+            clock_line(clock, false, "THURSDAY", "OCT"),
             "21:04 · THURSDAY 09 OCT"
         );
+    }
+
+    #[test]
+    fn the_clock_reads_twelve_hours_with_a_period_only_where_it_is_asked() {
+        let at = |hour| LocalClock {
+            hour,
+            minute: 5,
+            weekday: 4,
+            day: 9,
+            month: 10,
+        };
+        assert_eq!(
+            clock_line(at(21), true, "THURSDAY", "OCT"),
+            "9:05 PM · THURSDAY 09 OCT"
+        );
+        assert_eq!(
+            clock_line(at(0), true, "THURSDAY", "OCT"),
+            "12:05 AM · THURSDAY 09 OCT"
+        );
+        assert_eq!(
+            clock_line(at(12), true, "THURSDAY", "OCT"),
+            "12:05 PM · THURSDAY 09 OCT"
+        );
+        assert_eq!(
+            clock_line(at(0), false, "THURSDAY", "OCT"),
+            "00:05 · THURSDAY 09 OCT"
+        );
+        assert!(uses_twelve_hour_clock(UiLanguage::English));
+        assert!(!uses_twelve_hour_clock(UiLanguage::Spanish));
     }
 
     #[test]
