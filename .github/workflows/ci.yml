@@ -3,6 +3,8 @@ name: Rust CI
 on:
   push:
   pull_request:
+  # The platform matrix runs only when started by hand (Actions tab or `gh workflow run`).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,9 +49,10 @@ jobs:
       # The MPRIS integration test needs a session bus, so the tests run under a private one.
       - run: dbus-run-session -- env CRABYTUBE_TEST_MPRIS_BUS=1 cargo test --workspace --locked
 
-  # Cross-platform checks and release build on pull requests and the default branch.
+  # Cross-platform checks and release build, started by hand. Windows and macOS runners cost
+  # several times the minutes of a Linux one, so they do not run on every push.
   platform-matrix:
-    if: github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
