@@ -168,7 +168,7 @@ impl App {
             .into()
     }
 
-    /// Where the Back button in the header leads: the page a collection was opened from, or
+    /// Where Back leads beyond the page history: the page a collection was opened from, or
     /// the page Now Playing was opened from. `None` when there is nowhere to go.
     pub(super) fn back_target(&self) -> Option<Message> {
         match &self.page {
@@ -214,7 +214,7 @@ impl App {
         iced::widget::stack![framed, resize_grips()].into()
     }
 
-    /// The header: one bar with the brand and Back on the left, the tabs centred on the window
+    /// The header: one bar with the brand on the left, Back, the tabs and Forward centred on the window
     /// and the window buttons on the right (on macOS they come first, on the left). The empty parts
     /// move the window and a double click maximizes it. When the three zones do not fit side by
     /// side, the wordmark goes and the tabs take a second row of their own.
@@ -247,20 +247,6 @@ impl App {
             left = left.push(window_buttons(true));
         }
         left = left.push(Space::new().width(BRAND_INSET)).push(brand);
-        if let Some(target) = self.back_target() {
-            left = left.push(Space::new().width(BACK_GAP)).push(
-                button(
-                    container(icon("chev-left", 16.0, INK))
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill),
-                )
-                .on_press(target)
-                .width(HEADER_H)
-                .height(HEADER_H)
-                .padding(0)
-                .style(theme::icon_button),
-            );
-        }
         left = left.push(drag());
         right = right.push(drag());
         if !cfg!(target_os = "macos") {
@@ -285,10 +271,7 @@ impl App {
             return false;
         }
         let buttons = 3.0 * (HEADER_H + 1.0);
-        let mut brand = BRAND_INSET + LOGO_W + 10.0 + WORDMARK_H * WORDMARK_ASPECT;
-        if self.back_target().is_some() {
-            brand += BACK_GAP + HEADER_H;
-        }
+        let brand = BRAND_INSET + LOGO_W + 10.0 + WORDMARK_H * WORDMARK_ASPECT;
         let (left, right) = if cfg!(target_os = "macos") {
             (buttons + brand, 0.0)
         } else {
@@ -355,11 +338,49 @@ impl App {
             .into()
         });
         let row = iced::widget::Row::with_children(tabs).height(height);
-        if second_row {
-            row.width(Length::Fill).into()
+        let row = if second_row {
+            row.width(Length::Fill)
         } else {
-            row.into()
+            row
+        };
+        // Back and Forward frame the tabs. Each is faint while there is nowhere to go.
+        let back = self
+            .back_target()
+            .or_else(|| (!self.history.is_empty()).then_some(Message::Back));
+        let forward = (!self.forward.is_empty()).then_some(Message::Forward);
+        let mut line = row![self.nav_arrow("chev-left", back, height), row];
+        line = line.push(self.nav_arrow("chev-right", forward, height));
+        if second_row {
+            line.width(Length::Fill).into()
+        } else {
+            line.into()
         }
+    }
+
+    /// A Back or Forward arrow beside the tabs, as tall as their row. Without a page to go to it is
+    /// drawn faint and does nothing.
+    fn nav_arrow(
+        &self,
+        name: &'static str,
+        message: Option<Message>,
+        height: f32,
+    ) -> Element<'_, Message> {
+        let color = if message.is_some() {
+            INK
+        } else {
+            theme::ICON_IDLE
+        };
+        button(
+            container(icon(name, 16.0, color))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .on_press_maybe(message)
+        .width(HEADER_H)
+        .height(height)
+        .padding(0)
+        .style(theme::icon_button)
+        .into()
     }
 
     pub(super) fn is_playing(&self) -> bool {
@@ -730,7 +751,6 @@ const TAB_UNDERLINE: f32 = 2.0;
 const TAB_PADDING: f32 = 16.0;
 const LOGO_W: f32 = 20.0;
 const BRAND_INSET: f32 = 14.0;
-const BACK_GAP: f32 = 6.0;
 /// The least room left between the tabs and each side zone.
 const SIDE_GAP: f32 = 8.0;
 

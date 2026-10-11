@@ -14,6 +14,8 @@ pub(super) const INK: Color = Color::from_rgb8(255, 255, 255);
 pub(super) const DIM: Color = Color::from_rgb8(160, 160, 160);
 /// Tertiary text and disabled controls. 5:1 on black, so it stays readable.
 pub(super) const FADED: Color = Color::from_rgb8(124, 124, 124);
+/// An icon with nothing to do, such as Back with no page to return to: present but faint.
+pub(super) const ICON_IDLE: Color = Color::from_rgb8(72, 72, 72);
 /// Thin separators between table rows.
 pub(super) const RULE: Color = Color::from_rgb8(58, 58, 58);
 /// Hover fill for rows and inactive tabs.
