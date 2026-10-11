@@ -103,7 +103,7 @@ pub fn normalized_identity(track: &Track, duration: Option<Duration>) -> String 
 
 pub fn lyrics_cache_path(track: &Track, duration: Option<Duration>) -> std::path::PathBuf {
     let key = normalized_identity(track, duration);
-    dirs::cache_dir()
+    crate::app_dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/lyrics")
         .join(format!("{:x}.json", Sha256::digest(key.as_bytes())))

@@ -1680,7 +1680,7 @@ async fn open_stream(
 
 /// Streamed audio is buffered in the cache directory rather than `/tmp`, which is RAM on many systems.
 fn stream_temp_dir() -> std::path::PathBuf {
-    let dir = dirs::cache_dir()
+    let dir = crate::app_dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/stream");
     let _ = crate::storage::create_private_dir_all(&dir);

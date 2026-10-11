@@ -16,7 +16,7 @@ pub fn is_cache_temp_name(name: &str) -> bool {
 
 /// Cache directories that receive atomic writes. Only direct children are swept.
 pub fn cache_directories() -> Vec<PathBuf> {
-    let Some(cache) = dirs::cache_dir() else {
+    let Some(cache) = crate::app_dirs::cache_dir() else {
         return Vec::new();
     };
     let root = cache.join("crabytube");

@@ -288,7 +288,7 @@ pub struct BotguardHelper {
 
 impl BotguardHelper {
     pub fn new() -> Self {
-        let mut path = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+        let mut path = crate::app_dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
         path.push("crabytube");
         path.push("botguard-snapshot.bin");
         Self::with_snapshot_path(path)

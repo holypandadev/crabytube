@@ -398,7 +398,7 @@ impl App {
                 .map(crate::playback::ResolvedAudioFormat::label),
             "window": [self.window_width, self.window_height],
         });
-        let path = dirs::cache_dir()
+        let path = crate::app_dirs::cache_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("crabytube/diagnostics.json");
         Task::perform(
@@ -462,7 +462,8 @@ impl App {
                             crate::preferences::MAX_STATE_BYTES / 1024 / 1024
                         ));
                     }
-                    let dir = dirs::document_dir().ok_or("Documents folder is unavailable")?;
+                    let dir =
+                        crate::app_dirs::document_dir().ok_or("Documents folder is unavailable")?;
                     let path = dir.join("crabytube-backup.json");
                     // Atomic write via temp file in the same directory.
                     let tmp = dir.join(format!(
@@ -492,7 +493,8 @@ impl App {
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(|| {
-                    let dir = dirs::document_dir().ok_or("Documents folder is unavailable")?;
+                    let dir =
+                        crate::app_dirs::document_dir().ok_or("Documents folder is unavailable")?;
                     let path = dir.join("crabytube-backup.json");
                     let size = std::fs::metadata(&path)
                         .map_err(|error| error.to_string())?

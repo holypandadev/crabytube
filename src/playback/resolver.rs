@@ -438,7 +438,7 @@ const MAX_PERSISTED_PLAYER_VERSIONS: usize = 2;
 
 fn persisted_player_js_path(url_key: &str, source_fp: &str) -> Option<std::path::PathBuf> {
     Some(
-        dirs::cache_dir()?
+        crate::app_dirs::cache_dir()?
             .join("crabytube/player-js")
             .join(format!("{url_key}-{source_fp}.json")),
     )
@@ -446,7 +446,7 @@ fn persisted_player_js_path(url_key: &str, source_fp: &str) -> Option<std::path:
 
 fn raw_player_js_path(url_key: &str, source_fp: &str) -> Option<std::path::PathBuf> {
     Some(
-        dirs::cache_dir()?
+        crate::app_dirs::cache_dir()?
             .join("crabytube/player-js")
             .join(format!("{url_key}-{source_fp}.js")),
     )
@@ -467,7 +467,7 @@ fn store_raw_player_js(path: &std::path::Path, source: &str) {
 /// file name. The URL names the player version, so the saved copy is the file the network would
 /// return. A copy that fails the check is removed so the network copy replaces it.
 fn saved_raw_player_js(url_key: &str) -> Option<(String, String, Option<std::path::PathBuf>)> {
-    let directory = dirs::cache_dir()?.join("crabytube/player-js");
+    let directory = crate::app_dirs::cache_dir()?.join("crabytube/player-js");
     let prefix = format!("{url_key}-");
     let (path, fingerprint) = std::fs::read_dir(&directory)
         .ok()?

@@ -54,7 +54,7 @@ impl CacheUsage {
 }
 
 fn app_cache_root() -> PathBuf {
-    dirs::cache_dir()
+    crate::app_dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube")
 }
@@ -223,7 +223,7 @@ pub(crate) fn create_private_dir_all(dir: &Path) -> io::Result<()> {
 /// them. Links are not followed. Unix only: other systems have no such modes.
 #[cfg(unix)]
 pub fn tighten_app_folders() {
-    for root in [dirs::config_dir(), dirs::cache_dir()]
+    for root in [crate::app_dirs::config_dir(), crate::app_dirs::cache_dir()]
         .into_iter()
         .flatten()
     {

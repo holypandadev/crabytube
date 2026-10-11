@@ -293,7 +293,7 @@ fn artwork_cache_root() -> std::path::PathBuf {
     if let Some(root) = TEST_CACHE_ROOT.get() {
         return root.clone();
     }
-    dirs::cache_dir()
+    crate::app_dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/artwork")
 }

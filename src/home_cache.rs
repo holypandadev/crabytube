@@ -19,7 +19,7 @@ struct Snapshot {
 
 /// One snapshot per catalog language, so switching language never shows the old one.
 fn path() -> PathBuf {
-    dirs::cache_dir()
+    crate::app_dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join(format!(
             "crabytube/home-v1-{}.json",

@@ -2,6 +2,7 @@
 /// the icons of a Linux install carry it in their file names.
 pub const APP_ID: &str = "dev.holypanda.CrabyTube";
 
+pub mod app_dirs;
 pub mod i18n;
 pub mod logging;
 pub mod music;

@@ -503,7 +503,7 @@ impl Snapshot {
     }
 }
 pub fn state_path() -> PathBuf {
-    dirs::config_dir()
+    crate::app_dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("crabytube/state.json")
 }
@@ -703,7 +703,7 @@ impl Drop for Persistence {
 pub fn set_startup(enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let path = dirs::config_dir()
+        let path = crate::app_dirs::config_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("autostart/crabytube.desktop");
         if !enabled {

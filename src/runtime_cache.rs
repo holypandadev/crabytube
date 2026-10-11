@@ -42,7 +42,7 @@ struct SavedRuntime {
 static FILE_LOCK: Mutex<()> = Mutex::new(());
 
 fn path() -> Option<PathBuf> {
-    let mut path = dirs::cache_dir()?;
+    let mut path = crate::app_dirs::cache_dir()?;
     path.push("crabytube");
     path.push("runtime.json");
     Some(path)
