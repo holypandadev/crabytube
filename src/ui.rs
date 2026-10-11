@@ -1577,6 +1577,20 @@ impl App {
                         }
                         return Task::batch([self.navigate(Page::Home), focus]);
                     }
+                    // The window shortcuts of macOS: Cmd+W closes the window, Cmd+, opens Settings.
+                    if cfg!(target_os = "macos") && modifiers.command() {
+                        if key.to_latin(physical_key) == Some('w') {
+                            return self.close_window_task();
+                        }
+                        if key.to_latin(physical_key) == Some(',')
+                            || physical_key
+                                == iced::keyboard::key::Physical::Code(
+                                    iced::keyboard::key::Code::Comma,
+                                )
+                        {
+                            return self.navigate(Page::Settings);
+                        }
+                    }
                     // Alt+← and Alt+→ move through the history, as the mouse side buttons do.
                     if modifiers.alt() {
                         match key {
@@ -4128,6 +4142,37 @@ mod tests {
             false,
         )));
         assert_eq!(app.page, Page::Home, "Ctrl+K works with a non-Latin layout");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cmd_comma_opens_settings_on_macos() {
+        use iced::keyboard::{Event as KeyEvent, Key, Modifiers, key::Code, key::Physical};
+        let mut app = App::default();
+        let press = |key: Key, code: Code, modifiers: Modifiers| KeyEvent::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: Physical::Code(code),
+            location: iced::keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        };
+        assert_ne!(app.page, Page::Settings);
+        let _ = app.update(Message::KeyPressed(press(
+            Key::Character(",".into()),
+            Code::Comma,
+            Modifiers::LOGO,
+        )));
+        assert_eq!(app.page, Page::Settings);
+        // Without Cmd the comma does nothing.
+        let _ = app.update(Message::Navigate(Page::Home));
+        let _ = app.update(Message::KeyPressed(press(
+            Key::Character(",".into()),
+            Code::Comma,
+            Modifiers::empty(),
+        )));
+        assert_eq!(app.page, Page::Home);
     }
 
     #[test]
