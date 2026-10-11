@@ -10,6 +10,7 @@ pub mod playback;
 pub mod ui;
 
 pub mod artwork;
+pub mod background_portal;
 pub mod flatpak;
 mod home_cache;
 pub mod local_clock;

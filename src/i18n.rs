@@ -220,6 +220,7 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Player" => "Reproductor",
         "Play next" => "Reproducir a continuación",
         "Reduce motion" => "Reducir movimiento",
+        "Play music in the background." => "Reproducir música en segundo plano.",
         "Reset" => "Restablecer",
         "Reset settings?" => "¿Restablecer los ajustes?",
         "Language, window size and lyrics offsets stay." => {

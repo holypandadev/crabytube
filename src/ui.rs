@@ -291,6 +291,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::LocalDataExported { .. }
         | Message::LocalDataImported { .. }
         | Message::OutputDevicesLoaded(_)
+        | Message::StartupRequested { .. }
         | Message::TrackNotificationSent(_)
         | Message::PersistState
         | Message::VolumeSaveDue(_)
@@ -831,6 +832,13 @@ impl App {
                     Preference::ReducedMotion(v) => self.preferences.reduced_motion = v,
                     Preference::Startup(v) => {
                         self.preferences.startup = v;
+                        if crate::flatpak::in_flatpak() {
+                            // The portal decides and answers later.
+                            return Task::perform(
+                                crate::background_portal::request_autostart(v),
+                                move |result| Message::StartupRequested { enabled: v, result },
+                            );
+                        }
                         if let Err(error) = crate::preferences::set_startup(v) {
                             self.preferences.startup = !v;
                             warn!(%error,"Could not update startup preference");
@@ -1187,6 +1195,17 @@ impl App {
                 }
             },
             Message::RefreshOutputDevices => return self.refresh_output_devices_task(),
+            Message::StartupRequested { enabled, result } => {
+                // On an error the setting goes back to what it was before the request.
+                self.preferences.startup = match result {
+                    Ok(granted) => granted,
+                    Err(error) => {
+                        warn!(%error, "Could not update the start at login setting");
+                        !enabled
+                    }
+                };
+                self.persist();
+            }
             Message::OutputDevicesLoaded(result) => {
                 self.output_devices_loading = false;
                 match result {
@@ -1867,13 +1886,26 @@ impl App {
                 self.confirmation = None;
                 let current = std::mem::take(&mut self.preferences);
                 let mut defaults = Self::reset_preferences(&current);
-                if current.startup && crate::preferences::set_startup(false).is_err() {
-                    defaults.startup = true;
+                let mut startup_task = Task::none();
+                if current.startup {
+                    if crate::flatpak::in_flatpak() {
+                        // The portal removes the entry when it answers; an error turns the setting back on.
+                        startup_task = Task::perform(
+                            crate::background_portal::request_autostart(false),
+                            |result| Message::StartupRequested {
+                                enabled: false,
+                                result,
+                            },
+                        );
+                    } else if crate::preferences::set_startup(false).is_err() {
+                        defaults.startup = true;
+                    }
                 }
                 self.preferences = defaults;
                 self.apply_preferences();
                 self.sync_discord_presence(true);
                 self.persist();
+                return startup_task;
             }
             Message::ReloadHome => {
                 self.home_error = None;
@@ -4675,6 +4707,39 @@ mod tests {
         );
         drop(app.update(Message::Preference(Preference::ShuffleAll(false))));
         assert!(app.confirmation.is_none(), "another press drops it");
+    }
+
+    #[test]
+    fn a_startup_answer_sets_the_setting_or_reverts_it_on_error() {
+        let mut app = App::default();
+        app.preferences.startup = true;
+        drop(app.update(Message::StartupRequested {
+            enabled: true,
+            result: Ok(true),
+        }));
+        assert!(
+            app.preferences.startup,
+            "a granted request keeps the setting on"
+        );
+        drop(app.update(Message::StartupRequested {
+            enabled: true,
+            result: Ok(false),
+        }));
+        assert!(!app.preferences.startup, "a refusal turns the setting off");
+        drop(app.update(Message::StartupRequested {
+            enabled: true,
+            result: Err("the portal failed".into()),
+        }));
+        assert!(
+            !app.preferences.startup,
+            "an error on enabling leaves it off"
+        );
+        // Turning it off failed, so the entry may still exist and the setting goes back on.
+        drop(app.update(Message::StartupRequested {
+            enabled: false,
+            result: Err("the portal failed".into()),
+        }));
+        assert!(app.preferences.startup, "an error on disabling keeps it on");
     }
 
     #[test]

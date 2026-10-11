@@ -126,6 +126,11 @@ pub(super) enum Message {
     },
     RefreshOutputDevices,
     OutputDevicesLoaded(Result<Vec<crate::playback::output::OutputDeviceChoice>, String>),
+    /// The Background portal's answer to a start-at-login request inside a Flatpak.
+    StartupRequested {
+        enabled: bool,
+        result: Result<bool, String>,
+    },
     ExportDiagnostics,
     ExportLocalData,
     ImportLocalData,
