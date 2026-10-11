@@ -56,14 +56,37 @@ const LIMITS: helper_guard::Limits = helper_guard::Limits {
     cpu_seconds: 60,
 };
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
+/// The BotGuard VM runs V8 through deno_core. The main thread of a Windows process has 1 MB of
+/// stack, about what V8 allows itself by default, so the helper runs on a thread with the same 32
+/// MiB as the JS challenge helper.
+const WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
+
+fn main() {
     helper_guard::confine(LIMITS);
-    if let Err(message) = run().await {
+    let result = match std::thread::Builder::new()
+        .name("botguard".into())
+        .stack_size(WORKER_STACK_BYTES)
+        .spawn(run_worker)
+    {
+        Ok(worker) => worker
+            .join()
+            .unwrap_or_else(|_| Err("BotGuard worker panicked".into())),
+        Err(error) => Err(format!("worker thread: {error}")),
+    };
+    if let Err(message) = result {
         let _ = serde_json::to_writer(io::stdout().lock(), &Failure { error: message });
         println!();
         std::process::exit(1);
     }
+}
+
+/// Runs the helper's one request on a current-thread runtime, on the worker thread.
+fn run_worker() -> Result<(), String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("async runtime: {e}"))?;
+    runtime.block_on(run())
 }
 
 async fn run() -> Result<(), String> {
