@@ -21,11 +21,29 @@ const QUEUE_HEADER_H: f32 = 40.0;
 
 /// Height of everything in the artwork column but the artwork: the title block, the seek row and
 /// the transport, with their gaps.
-const ART_CHROME_H: f32 = 210.0;
-/// Width of the transport with the volume beside it; a narrower artwork puts the volume on a row
-/// of its own, which takes `VOLUME_ROW_H`.
-const CONTROLS_W: f32 = 440.0;
-const VOLUME_ROW_H: f32 = 52.0;
+const ART_CHROME_H: f32 = 190.0;
+/// Icon size of the Now Playing transport; play is a little larger.
+const TRANSPORT_ICON: f32 = 22.0;
+/// Width of that transport: five buttons with 7 px padding (icons of 18, 22, 28, 22 and 18 px)
+/// and four 14 px gaps.
+const TRANSPORT_W: f32 = 234.0;
+/// The mute button and the gaps around the volume rail.
+const VOLUME_CHROME_W: f32 = 48.0;
+/// The shortest volume rail worth showing beside the transport.
+const VOLUME_RAIL_MIN: f32 = 60.0;
+/// Width the controls row needs: the centred transport with the shortest volume rail on each
+/// side, so the transport stays centred. A narrower artwork puts the volume on a row of its own,
+/// which takes `VOLUME_ROW_H`.
+const CONTROLS_W: f32 = TRANSPORT_W + 2.0 * (VOLUME_CHROME_W + VOLUME_RAIL_MIN);
+const VOLUME_ROW_H: f32 = 40.0;
+
+/// Length of the volume rail beside the transport in a row `width` wide, or `None` when it does
+/// not fit and the volume takes a row of its own. The rail never grows past the player bar's.
+fn volume_rail_beside(width: f32) -> Option<f32> {
+    let side = ((width - TRANSPORT_W) / 2.0).floor();
+    let rail = (side - VOLUME_CHROME_W).min(super::shell::VOLUME_W);
+    (rail >= VOLUME_RAIL_MIN).then_some(rail)
+}
 
 /// Edge of the artwork and width of the side panel, or `None` when the page is stacked. The
 /// artwork starts at the page margin and the panel takes the rest after the gap.
@@ -98,19 +116,28 @@ impl App {
                     container(self.seek_row(TEXT_CAPTION)).width(art),
                 ]
                 .width(art);
-                left = if art >= CONTROLS_W {
-                    left.push(
-                        container(
-                            row![self.now_playing_transport(), self.volume_control(true)]
-                                .spacing(16)
-                                .align_y(Alignment::Center),
-                        )
+                left = match volume_rail_beside(art) {
+                    // The transport is centred under the seek rail and the volume ends where the
+                    // rail ends; an empty zone as wide as the volume's keeps the transport centred.
+                    Some(rail) => left.push(
+                        row![
+                            Space::new().width(Length::Fill),
+                            self.transport_controls(TRANSPORT_ICON, true),
+                            container(self.volume_control(Some(rail)))
+                                .width(Length::Fill)
+                                .align_right(Length::Fill),
+                        ]
                         .width(art)
-                        .center_x(art),
-                    )
-                } else {
-                    left.push(container(self.now_playing_transport()).center_x(art))
-                        .push(container(self.volume_control(true)).center_x(art))
+                        .align_y(Alignment::Center),
+                    ),
+                    None => left
+                        .push(
+                            container(self.transport_controls(TRANSPORT_ICON, true)).center_x(art),
+                        )
+                        .push(
+                            container(self.volume_control(Some(super::shell::VOLUME_W)))
+                                .center_x(art),
+                        ),
                 };
                 row![
                     container(left).width(art).height(Length::Fill),
@@ -136,8 +163,9 @@ impl App {
                     .spacing(20)
                     .align_y(Alignment::Center),
                     self.seek_row(TEXT_CAPTION),
-                    container(self.now_playing_transport()).center_x(Length::Fill),
-                    container(self.volume_control(true)).center_x(Length::Fill),
+                    container(self.transport_controls(TRANSPORT_ICON, true)).center_x(Length::Fill),
+                    container(self.volume_control(Some(super::shell::VOLUME_W)))
+                        .center_x(Length::Fill),
                     container(self.side_panel(width)).height(Length::Fill),
                 ]
                 .spacing(12)
@@ -580,6 +608,17 @@ mod tests {
             art + ART_CHROME_H + VOLUME_ROW_H <= 560.0 - 24.0 + 1.0,
             "{art}"
         );
+    }
+
+    #[test]
+    fn the_volume_rail_shortens_beside_the_transport_before_it_takes_a_row() {
+        assert_eq!(
+            volume_rail_beside(700.0),
+            Some(super::super::shell::VOLUME_W)
+        );
+        let short = volume_rail_beside(500.0).unwrap();
+        assert!((VOLUME_RAIL_MIN..super::super::shell::VOLUME_W).contains(&short));
+        assert_eq!(volume_rail_beside(CONTROLS_W - 2.0), None);
     }
 
     #[test]
