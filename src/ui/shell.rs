@@ -538,6 +538,19 @@ impl App {
 
     /// Phone-width player: a full-width seek rail on top, then the cover,
     /// title and the three main transport buttons.
+    /// The mini player's second line: the artist, or the seek notice for a moment, as in the bar.
+    fn mini_subtitle(&self, artist: &str, width: f32) -> Element<'_, Message> {
+        if self.seek_notice.is_some() {
+            let notice = self.tr("Couldn't seek there");
+            return text(fit(&notice, width, TEXT_CAPTION))
+                .size(TEXT_CAPTION)
+                .font(MONO)
+                .color(DIM)
+                .into();
+        }
+        self.artist_link(artist, width, 12.0, DIM)
+    }
+
     fn mini_player(&self, width: f32) -> Element<'_, Message> {
         let track = self.shown_track();
         let max_position = self
@@ -580,7 +593,7 @@ impl App {
                     text(fit(&title, text_width, TEXT_BODY))
                         .size(TEXT_BODY)
                         .font(MONO),
-                    self.artist_link(&subtitle, text_width, 12.0, DIM),
+                    self.mini_subtitle(&subtitle, text_width),
                 ]
                 .spacing(4)
                 .width(Length::Fill),
