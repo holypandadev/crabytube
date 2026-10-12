@@ -41,26 +41,35 @@ impl UiLanguage {
 /// The language for a system locale such as `es_ES.UTF-8` or `es-MX`: Spanish for any Spanish
 /// locale, English for the rest.
 pub fn language_for_locale(locale: &str) -> UiLanguage {
-    let language = locale
-        .trim()
-        .split(['_', '-', '.', '@'])
-        .next()
-        .unwrap_or_default();
-    if language.eq_ignore_ascii_case("es") {
-        UiLanguage::Spanish
-    } else {
-        UiLanguage::English
-    }
+    language_for_preferences([locale])
 }
 
-/// The language of the system, from the locale variables that POSIX programs read. Other systems
-/// have none of these here, so they start in English.
+/// The language for a list of preferred languages, the first choice first: the first one the app
+/// has a translation for. Languages it does not know (French, say) are skipped, so a Mac set to
+/// French and then Spanish starts in Spanish. English when none matches.
+pub fn language_for_preferences<S: AsRef<str>>(
+    languages: impl IntoIterator<Item = S>,
+) -> UiLanguage {
+    for language in languages {
+        let code = language
+            .as_ref()
+            .trim()
+            .split(['_', '-', '.', '@'])
+            .next()
+            .unwrap_or_default();
+        if code.eq_ignore_ascii_case("es") {
+            return UiLanguage::Spanish;
+        }
+        if code.eq_ignore_ascii_case("en") {
+            return UiLanguage::English;
+        }
+    }
+    UiLanguage::English
+}
+
+/// The language of the system, from the languages it prefers (see `system_language`).
 pub fn detected_ui_language() -> UiLanguage {
-    ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .into_iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.trim().is_empty())
-        .map_or(UiLanguage::English, |locale| language_for_locale(&locale))
+    language_for_preferences(crate::system_language::preferred_languages())
 }
 
 impl std::fmt::Display for UiLanguage {
@@ -1012,6 +1021,22 @@ mod tests {
         assert!(!written.contains("sidebar_collapsed"));
         assert!(!written.contains("artwork_background"));
         assert!(!written.contains("ui_font_family"));
+    }
+
+    #[test]
+    fn the_first_preferred_language_the_app_knows_decides() {
+        use UiLanguage::{English, Spanish};
+        assert_eq!(language_for_preferences(["es-ES", "en-US"]), Spanish);
+        assert_eq!(language_for_preferences(["en-US", "es-ES"]), English);
+        // A language the app has no translation for is skipped.
+        assert_eq!(language_for_preferences(["fr-FR", "es-419"]), Spanish);
+        assert_eq!(language_for_preferences(["fr-FR", "de-DE"]), English);
+        assert_eq!(language_for_preferences(["es_MX.UTF-8"]), Spanish);
+        assert_eq!(language_for_preferences(["ES"]), Spanish);
+        assert_eq!(language_for_preferences(Vec::<String>::new()), English);
+        // A name that only starts with the letters of a language is not that language.
+        assert_eq!(language_for_preferences(["estonian", "es"]), Spanish);
+        assert_eq!(language_for_preferences(["C", "POSIX"]), English);
     }
 
     #[test]
