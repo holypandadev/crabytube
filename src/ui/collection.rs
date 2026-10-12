@@ -367,6 +367,8 @@ impl App {
             let entry = &data.tracks[index];
             let track = &entry.track;
             let current = playing == Some(track.video_id.as_str());
+            // The row under the keyboard cursor is outlined; the playing row stays inverted.
+            let cursor = self.row_is_cursor("collection", index);
             let ink = theme::row_ink(current);
             let menu = super::messages::RowMenu {
                 list: "collection",
@@ -428,16 +430,22 @@ impl App {
                 .padding([10, 4])
                 .style(if current {
                     theme::row_button_current
+                } else if cursor {
+                    theme::row_button_cursor
                 } else {
                     theme::row_button
                 });
             // An open menu adds its actions under the row; closed rows keep the fixed pitch the
             // virtual list counts with.
-            rows = rows.push(if open {
-                column![line, self.row_actions(track), hrule(RULE)]
-            } else {
-                column![line, hrule(RULE)].height(pitch)
-            });
+            rows = rows.push(super::keyboard::mark_row(
+                "collection",
+                index,
+                if open {
+                    column![line, self.row_actions(track), hrule(RULE)]
+                } else {
+                    column![line, hrule(RULE)].height(pitch)
+                },
+            ));
         }
         let remaining = data.tracks.len().saturating_sub(range.end);
         if remaining > 0 {

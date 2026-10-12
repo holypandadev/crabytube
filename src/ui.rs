@@ -225,6 +225,8 @@ struct App {
     fade_until: Option<std::time::Instant>,
     /// Video ID whose ••• actions are open, if any.
     row_menu: Option<RowMenu>,
+    /// The row the keyboard cursor stands on, if it was moved.
+    row_cursor: Option<RowMenu>,
     /// Durations learned from playback, collections and search subtitles.
     known_durations: HashMap<String, Duration>,
 }
@@ -1697,6 +1699,9 @@ impl App {
                             _ => {}
                         }
                     }
+                    if let Some(row_key) = keyboard::row_key(&key, modifiers) {
+                        return self.row_key_pressed(row_key);
+                    }
                     // Global playback keys; text fields capture their own keys first.
                     if modifiers.is_empty() || modifiers.shift() {
                         match key {
@@ -1732,6 +1737,7 @@ impl App {
                     }
                 }
             }
+            Message::RowKey { key, typing } => return self.apply_row_key(key, typing),
             Message::VolumeScrolled(delta) => return self.volume_scrolled(delta),
             Message::SuggestionsCompleted { request_id, result } => {
                 if request_id != self.suggest_request_id {
@@ -2151,6 +2157,7 @@ impl App {
             os_window: (1024.0, 768.0),
             fade_until: None,
             row_menu: None,
+            row_cursor: None,
             known_durations: HashMap::new(),
         }
     }
@@ -2858,6 +2865,7 @@ impl App {
         self.artwork_generation = self.artwork_generation.wrapping_add(1);
         self.invalidate_suggestions();
         self.row_menu = None;
+        self.row_cursor = None;
         self.page = page.clone();
         if self.page == Page::Home {
             self.enter_home();

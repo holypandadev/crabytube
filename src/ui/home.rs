@@ -836,6 +836,33 @@ impl App {
             .collect()
     }
 
+    /// The song and live rows of the results page, in the order they are listed: the songs beside
+    /// the top result, then the two sections as the page orders them. Empty while the page still
+    /// shows Home.
+    pub(super) fn search_row_order(&self) -> Vec<super::messages::RowMenu> {
+        if !self.search_committed && self.catalog_results.is_empty() {
+            return Vec::new();
+        }
+        let songs = self.search_songs().len();
+        let live = self.search_live().len();
+        let top = self.catalog_results.first();
+        let beside = if top.is_some() && self.area.width.max(280.0) >= TOP_RESULT_SPLIT_W {
+            songs.min(TOP_RESULT_SONGS)
+        } else {
+            0
+        };
+        let row = |list: &'static str, index: usize| super::messages::RowMenu { list, index };
+        let mut order: Vec<_> = (0..beside).map(|index| row("songs", index)).collect();
+        let songs_below = (beside..songs).map(|index| row("songs", index));
+        let live_rows = (0..live).map(|index| row("live", index));
+        if live_first(top) {
+            order.extend(live_rows.chain(songs_below));
+        } else {
+            order.extend(songs_below.chain(live_rows));
+        }
+        order
+    }
+
     /// Song results the results page lists under "Songs".
     pub(super) fn search_songs(&self) -> Vec<&HomeItem> {
         self.catalog_results
@@ -923,6 +950,8 @@ impl App {
         menu: super::messages::RowMenu,
     ) -> Element<'a, Message> {
         let open = self.row_menu.as_ref() == Some(&menu);
+        let (list, index) = (menu.list, menu.index);
+        let cursor = self.row_cursor.as_ref() == Some(&menu);
         let playing = self
             .playback_status
             .track
@@ -969,6 +998,8 @@ impl App {
         .padding([padding, 8.0])
         .style(if playing {
             theme::row_button_current
+        } else if cursor {
+            theme::row_button_cursor
         } else {
             theme::row_button
         });
@@ -976,7 +1007,7 @@ impl App {
         if open {
             block = block.push(self.row_actions(track));
         }
-        block.push(hrule(RULE)).into()
+        super::keyboard::mark_row(list, index, block.push(hrule(RULE)))
     }
 
     /// Inline actions under an opened ••• row.

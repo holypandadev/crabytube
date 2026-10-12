@@ -314,6 +314,20 @@ pub(super) fn row_button_current(_: &Theme, _: button::Status) -> button::Style 
     }
 }
 
+/// The row under the keyboard cursor: no fill, a hairline outline in the ink colour.
+pub(super) fn row_button_cursor(_: &Theme, _: button::Status) -> button::Style {
+    button::Style {
+        background: None,
+        text_color: INK,
+        border: Border {
+            color: INK,
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 /// Text and icon colours of a list row: the playing row is inverted.
 #[derive(Clone, Copy)]
 pub(super) struct RowInk {

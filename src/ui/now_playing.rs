@@ -412,6 +412,8 @@ impl App {
                 index,
             };
             let open = self.row_menu.as_ref() == Some(&menu);
+            // The row under the keyboard cursor is outlined; the playing row stays inverted.
+            let cursor = self.row_is_cursor("queue", index);
             let ink = theme::row_ink(current);
             let title = display_title(&entry.title);
             let title = if current {
@@ -451,6 +453,8 @@ impl App {
             .padding([padding, 8.0])
             .style(if current {
                 theme::row_button_current
+            } else if cursor {
+                theme::row_button_cursor
             } else {
                 theme::row_button
             });
@@ -458,7 +462,11 @@ impl App {
             if open {
                 block = block.push(self.row_actions_with(entry, (!current).then_some(index)));
             }
-            rows = rows.push(block.push(hrule(RULE)));
+            rows = rows.push(super::keyboard::mark_row(
+                "queue",
+                index,
+                block.push(hrule(RULE)),
+            ));
         }
         let remaining = self.queue.len().saturating_sub(range.end);
         if remaining > 0 {

@@ -364,6 +364,9 @@ impl App {
         ]
         .spacing(12)
         .align_y(Alignment::Center);
+        // The entry under the keyboard cursor is outlined.
+        let index = menu.as_ref().map_or(0, |menu| menu.index);
+        let cursor = self.row_is_cursor("recent", index);
         if let (Some(menu), RecentPlay::Track(_)) = (menu, play) {
             // The entry keeps the plain row style, so its ••• button does too, even for the
             // track that is playing.
@@ -375,12 +378,16 @@ impl App {
                     .style(theme::row_icon_button(false, open)),
             );
         }
-        button(content)
+        let entry = button(content)
             .on_press(action)
             .width(Length::Fill)
             .padding([2, 6])
-            .style(theme::row_button)
-            .into()
+            .style(if cursor {
+                theme::row_button_cursor
+            } else {
+                theme::row_button
+            });
+        super::keyboard::mark_row("recent", index, entry)
     }
 
     /// The status line at the foot of Home: memory and CPU of this process on the left, the

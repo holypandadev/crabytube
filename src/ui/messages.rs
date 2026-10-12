@@ -241,6 +241,11 @@ pub(super) enum Message {
     SuggestionChosen(String),
     DismissSuggestions,
     KeyPressed(iced::keyboard::Event),
+    /// An arrow or Enter for the row cursor, with whether the search field had the focus.
+    RowKey {
+        key: super::keyboard::RowKey,
+        typing: bool,
+    },
     /// The mouse wheel turned over a volume control.
     VolumeScrolled(iced::mouse::ScrollDelta),
     CatalogCompleted {
