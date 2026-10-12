@@ -56,6 +56,14 @@ fn now_unix() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
+/// Whether the startup prewarm reads the player JavaScript of this runtime: only the primary profile has a
+/// signature timestamp to read, and only when the runtime has its player URL and no timestamp yet.
+fn player_js_to_prewarm(runtime: &PlayerRuntime, profile: ClientProfile) -> bool {
+    profile == ClientProfile::WebMusic
+        && runtime.signature_timestamp.is_none()
+        && runtime.player_js_url.is_some()
+}
+
 /// A saved configuration that YouTube refuses shows up as a signature that no longer decodes, tokens it
 /// does not accept, or a media request it refuses.
 fn configuration_refused(error: &StreamError) -> bool {
@@ -1387,6 +1395,19 @@ impl YouTubeStreamResolver {
                 cached.player_js_url = runtime.player_js_url.clone();
             }
         }
+        self.ensure_player_js(runtime, cancellation).await
+    }
+
+    /// Reads the signature timestamp from the player JavaScript. The JavaScript is downloaded only when its
+    /// version is not saved on disk yet.
+    async fn ensure_player_js(
+        &self,
+        runtime: &mut PlayerRuntime,
+        cancellation: &CancellationToken,
+    ) -> Result<(), StreamError> {
+        if runtime.signature_timestamp.is_some() {
+            return Ok(());
+        }
         let Some(js_url) = runtime.player_js_url.clone() else {
             warn!(
                 client = runtime.profile.name,
@@ -1523,7 +1544,15 @@ impl StreamResolver for YouTubeStreamResolver {
             .prewarming
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
-        let result = self.player_runtime(&token).await;
+        let result = match self.player_runtime(&token).await {
+            // The player JavaScript is read here too, so a play that comes later does not wait for it. It is
+            // downloaded only when its version is not on disk yet. No BotGuard token is minted at startup.
+            Ok(mut runtime) if player_js_to_prewarm(&runtime, self.profile) => self
+                .ensure_player_js(&mut runtime, &token)
+                .await
+                .map(|()| runtime),
+            other => other,
+        };
         *self
             .prewarming
             .lock()
@@ -2560,6 +2589,39 @@ mod tests {
     }
 
     #[test]
+    fn startup_reads_the_player_javascript_only_when_a_timestamp_is_missing() {
+        let saved = player_config::SavedPlayerConfig {
+            saved_at: now_unix(),
+            profile: "WEB_REMIX".into(),
+            endpoint: String::new(),
+            origin: String::new(),
+            header_id: String::new(),
+            version: String::new(),
+            user_agent: None,
+            player_js_url: Some("/s/player/abc/base.js".into()),
+            context: json!({}),
+            botguard_ytcfg_json: String::new(),
+            botguard_user_agent: String::new(),
+            homepage_challenge_json: None,
+            event_id: None,
+            gvs_video_id: false,
+        };
+        let mut runtime = runtime_from_saved(saved.clone(), ClientProfile::WebMusic.config());
+        assert!(player_js_to_prewarm(&runtime, ClientProfile::WebMusic));
+        assert!(!player_js_to_prewarm(&runtime, ClientProfile::Mweb));
+        runtime.signature_timestamp = Some(20732);
+        assert!(!player_js_to_prewarm(&runtime, ClientProfile::WebMusic));
+        let without_url = runtime_from_saved(
+            player_config::SavedPlayerConfig {
+                player_js_url: None,
+                ..saved
+            },
+            ClientProfile::WebMusic.config(),
+        );
+        assert!(!player_js_to_prewarm(&without_url, ClientProfile::WebMusic));
+    }
+
+    #[test]
     fn a_player_runtime_is_reused_for_six_hours_only() {
         use super::{PLAYER_RUNTIME_TTL, runtime_is_fresh};
         let fetched = std::time::Instant::now();
@@ -2579,8 +2641,9 @@ mod tests {
         MWEB_UA, PlayerRuntime, StreamError, StreamResolver, TrackId, ValidatedPlaybackResolution,
         YouTubeStreamResolver, choose_aac_format, configuration_refused, has_video_id_gvs_binding,
         is_live_content, is_live_media_url, now_unix, parse_signature_timestamp, parse_yt_at_n,
-        parse_ytcfg, persisted_player_js_ready, player_config, player_js_url, player_request,
-        retryable_config_status, runtime_from_saved, saved_from_runtime, set_po_token,
+        parse_ytcfg, persisted_player_js_ready, player_config, player_js_to_prewarm, player_js_url,
+        player_request, retryable_config_status, runtime_from_saved, saved_from_runtime,
+        set_po_token,
     };
 
     #[test]
