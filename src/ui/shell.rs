@@ -197,7 +197,8 @@ impl App {
     }
 
     /// The header: one bar with the brand on the left, Back, the tabs and Forward centred on the window
-    /// and the window buttons on the right (on macOS they come first, on the left). The empty parts
+    /// and the window buttons on the right. On macOS the two ends swap: the buttons come first, on
+    /// the left, and the brand is on the right. The empty parts
     /// move the window and a double click maximizes it. When the three zones do not fit side by
     /// side, the wordmark goes and the tabs take a second row of their own.
     fn header(&self) -> Element<'_, Message> {
@@ -226,13 +227,15 @@ impl App {
         let mut left = row![].height(HEADER_H).align_y(Alignment::Center);
         let mut right = row![].height(HEADER_H).align_y(Alignment::Center);
         if cfg!(target_os = "macos") {
-            left = left.push(window_buttons(true));
-        }
-        left = left.push(Space::new().width(BRAND_INSET)).push(brand);
-        left = left.push(drag());
-        right = right.push(drag());
-        if !cfg!(target_os = "macos") {
-            right = right.push(window_buttons(false));
+            left = left.push(window_buttons(true)).push(drag());
+            right = right
+                .push(drag())
+                .push(brand)
+                .push(Space::new().width(BRAND_INSET));
+        } else {
+            left = left.push(Space::new().width(BRAND_INSET)).push(brand);
+            left = left.push(drag());
+            right = right.push(drag()).push(window_buttons(false));
         }
         let mut bar = row![container(left).width(Length::Fill)];
         if inline {
@@ -255,7 +258,7 @@ impl App {
         let buttons = 3.0 * (HEADER_H + 1.0);
         let brand = BRAND_INSET + LOGO_W + 10.0 + WORDMARK_H * WORDMARK_ASPECT;
         let (left, right) = if cfg!(target_os = "macos") {
-            (buttons + brand, 0.0)
+            (buttons, brand)
         } else {
             (brand, buttons)
         };
