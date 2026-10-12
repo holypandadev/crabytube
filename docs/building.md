@@ -47,8 +47,20 @@ matching `.desktop` file, so install it to get the icon in docks and task switch
 
 ## Windows
 
-The application icon is embedded in the executable at build time. Keep `botguard-helper.exe` and
-`js-challenge-helper.exe` next to `crabytube.exe`.
+The application icon and the version information are embedded in the three executables at build
+time. Keep `botguard-helper.exe` and `js-challenge-helper.exe` next to `crabytube.exe`.
+
+The Windows release is a zip with the three executables, the license and a first-launch note. Build
+it on an x64 Windows PC with the MSVC Rust toolchain and the Visual Studio C++ build tools:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-zip.ps1
+```
+
+The script compiles the workspace in release mode and writes `target\windows\CrabyTube-windows-x64.zip`
+(the application is named `CrabyTube.exe` inside it) and prints its SHA-256. Nothing is signed;
+`packaging/windows/README-first-launch.txt`, which goes into the zip, explains the SmartScreen
+warning. `-NoBuild` packs the executables already in `target\release\`.
 
 ## macOS
 
