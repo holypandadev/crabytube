@@ -549,6 +549,10 @@ where
             return Err(NOT_FOUND.into());
         }
     }
+    info!(
+        duration_secs = duration.map(|d| d.as_secs()),
+        "lyrics search started"
+    );
     // Keep the newest plain text, so a deadline can still return it.
     let latest_plain = std::sync::Arc::new(std::sync::Mutex::new(None::<Lyrics>));
     let stash = std::sync::Arc::clone(&latest_plain);
