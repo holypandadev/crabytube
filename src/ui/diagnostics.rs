@@ -810,6 +810,8 @@ pub(super) fn diagnostic_autoplay_task() -> Task<Message> {
             title: id.to_owned(),
             artist: String::new(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
             duration_secs: None,
         })

@@ -224,26 +224,23 @@ pub(super) fn parse_catalog_track(item: &Value) -> Option<CollectionTrack> {
         .collect();
     let artists: Vec<_> = references
         .iter()
-        .filter(|reference| {
-            matches!(
-                reference.target.page_type.as_deref(),
-                Some("MUSIC_PAGE_TYPE_ARTIST" | "MUSIC_PAGE_TYPE_USER_CHANNEL")
-            ) || (reference.target.page_type.is_none()
-                && reference.target.browse_id.starts_with("UC"))
-        })
+        .filter(|reference| is_artist_destination(reference))
         .map(|reference| reference.label.as_str())
         .collect();
     // Album is taken only from a linked album/release destination. This keeps
     // lyrics matching metadata structural and avoids guessing from display text.
     let album = references
         .iter()
-        .find(|reference| {
-            matches!(
-                reference.target.page_type.as_deref(),
-                Some("MUSIC_PAGE_TYPE_ALBUM")
-            ) || reference.target.browse_id.starts_with("MP")
-        })
+        .find(|reference| is_album_destination(reference))
         .map(|reference| reference.label.clone());
+    let artist_page = references
+        .iter()
+        .find(|reference| is_artist_destination(reference))
+        .map(|reference| reference.target.clone());
+    let album_page = references
+        .iter()
+        .find(|reference| is_album_destination(reference))
+        .map(|reference| reference.target.clone());
     let artist = if !artists.is_empty() {
         artists.join(", ")
     } else {
@@ -290,12 +287,30 @@ pub(super) fn parse_catalog_track(item: &Value) -> Option<CollectionTrack> {
             title,
             artist,
             album,
+            artist_page,
+            album_page,
             thumbnail_url: home_item_thumbnail(item).filter(|url| url.len() <= 2_048),
             duration_secs: duration.and_then(|length| u32::try_from(length.as_secs()).ok()),
         },
         duration,
         references,
     })
+}
+
+/// An artist destination: the page type says so, or, when the response omits it, a channel id.
+fn is_artist_destination(reference: &CatalogReference) -> bool {
+    matches!(
+        reference.target.page_type.as_deref(),
+        Some("MUSIC_PAGE_TYPE_ARTIST" | "MUSIC_PAGE_TYPE_USER_CHANNEL")
+    ) || (reference.target.page_type.is_none() && reference.target.browse_id.starts_with("UC"))
+}
+
+/// A linked album or release destination.
+fn is_album_destination(reference: &CatalogReference) -> bool {
+    matches!(
+        reference.target.page_type.as_deref(),
+        Some("MUSIC_PAGE_TYPE_ALBUM")
+    ) || reference.target.browse_id.starts_with("MP")
 }
 
 pub(super) fn parse_duration(text: &str) -> Option<Duration> {
@@ -658,6 +673,23 @@ mod tests {
         let entry = parse_catalog_track(&item).unwrap();
         assert_eq!(entry.track.artist, "An artist");
         assert_eq!(entry.track.album.as_deref(), Some("An album"));
+        // The destinations keep their ids, so menus can open the artist and the album.
+        assert_eq!(
+            entry
+                .track
+                .artist_page
+                .as_ref()
+                .map(|page| page.browse_id.as_str()),
+            Some("UCartist")
+        );
+        assert_eq!(
+            entry
+                .track
+                .album_page
+                .as_ref()
+                .map(|page| page.browse_id.as_str()),
+            Some("MPalbum")
+        );
     }
     #[test]
     fn does_not_take_video_ids_from_menu_actions_but_supports_albums() {

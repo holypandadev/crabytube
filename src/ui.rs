@@ -3511,6 +3511,8 @@ mod tests {
             title: title.into(),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
             duration_secs: None,
         }
@@ -3592,6 +3594,8 @@ mod tests {
                     title: format!("Track {index}"),
                     artist: "Artist".into(),
                     album: None,
+                    artist_page: None,
+                    album_page: None,
                     thumbnail_url: None,
                 })
                 .collect();
@@ -3626,6 +3630,8 @@ mod tests {
                         title: format!("Item {item}"),
                         artist: String::new(),
                         album: None,
+                        artist_page: None,
+                        album_page: None,
                         thumbnail_url: Some(format!("cover-{index}-{item}")),
                     }),
                     duration: None,
@@ -3648,6 +3654,8 @@ mod tests {
             title: "Song".into(),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
         };
         let mut app = App {
@@ -3705,6 +3713,8 @@ mod tests {
                     title: "Song".into(),
                     artist: "Artist".into(),
                     album: None,
+                    artist_page: None,
+                    album_page: None,
                     thumbnail_url: None,
                 }),
                 ..crate::playback::PlaybackStatus::default()
@@ -4720,6 +4730,8 @@ mod tests {
             title: "Song".into(),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
         }
     }
@@ -4936,6 +4948,8 @@ mod tests {
             title: format!("Title {id}"),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
         }
     }

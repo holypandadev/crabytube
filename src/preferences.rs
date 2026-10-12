@@ -922,6 +922,8 @@ mod tests {
             title: "Title".into(),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
             duration_secs: None,
         };
@@ -1197,6 +1199,8 @@ mod tests {
                     title: "é".repeat(300),
                     artist: "artist".into(),
                     album: None,
+                    artist_page: None,
+                    album_page: None,
                     thumbnail_url: Some("x".repeat(3_000)),
                 })
                 .collect::<Vec<_>>()
@@ -1208,6 +1212,8 @@ mod tests {
                     title: "favorite".into(),
                     artist: "artist".into(),
                     album: None,
+                    artist_page: None,
+                    album_page: None,
                     thumbnail_url: None,
                 })
                 .collect::<Vec<_>>()
@@ -1308,6 +1314,8 @@ mod tests {
             title: "Song".into(),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
         });
         s.queue_index = Some(0);

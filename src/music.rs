@@ -22,6 +22,12 @@ pub struct Track {
     /// Album metadata is optional because many YouTube Music renderers omit it.
     #[serde(default)]
     pub album: Option<String>,
+    /// Artist and album destinations, kept with their service parameters, when the catalog names
+    /// them. The track menu offers "Go to artist" and "Go to album" only for these.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist_page: Option<browse::BrowseTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_page: Option<browse::BrowseTarget>,
     pub thumbnail_url: Option<String>,
     /// Length in whole seconds, kept so Favorites can show it after a restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -943,6 +949,8 @@ fn parse_radio(payload: &Value) -> Vec<Track> {
                         })
                         .unwrap_or_default(),
                     album: None,
+                    artist_page: None,
+                    album_page: None,
                     thumbnail_url: home_item_thumbnail(r),
                     duration_secs: r
                         .get("lengthText")

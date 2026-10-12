@@ -561,6 +561,8 @@ mod tests {
             title: format!("Title {id}"),
             artist: "Artist".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: Some(format!("row-{id}")),
         }
     }

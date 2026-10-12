@@ -1360,6 +1360,8 @@ mod tests {
             title: title.into(),
             artist: artist.into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
         }
     }
@@ -1616,6 +1618,8 @@ mod tests {
             title: "Never Gonna Give You Up".into(),
             artist: "Rick Astley".into(),
             album: None,
+            artist_page: None,
+            album_page: None,
             thumbnail_url: None,
             duration_secs: Some(213),
         };
