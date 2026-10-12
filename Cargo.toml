@@ -11,6 +11,12 @@ winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+# The system media controls (media keys and the media panel); already in the build through other crates.
+windows = { version = "0.62", features = ["Foundation", "Media", "Media_Playback", "Storage_Streams", "Win32_System_WinRT"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The test that reads the media session back from the system.
+windows = { version = "0.62", features = ["Foundation_Collections", "Media_Control"] }
 
 [features]
 default = []

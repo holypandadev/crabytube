@@ -80,7 +80,8 @@ zips the result into `target/macos/CrabyTube-<version>-macos-universal.zip`. The
 one architecture.
 
 The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
-on Linux. On macOS the media keys and Now Playing work from the application bundle.
+on Linux. On macOS the media keys and Now Playing work from the application bundle. On Windows the
+media keys and the media panel of the system flyout work from the executable, with no setup.
 
 ## Release builds on GitHub
 

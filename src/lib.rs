@@ -25,14 +25,17 @@ pub mod storage;
 pub mod temp_cleanup;
 
 pub mod lyrics;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", windows, test))]
 pub mod media_session;
 #[cfg(target_os = "linux")]
 pub mod mpris;
 #[cfg(target_os = "macos")]
 #[path = "mpris_macos.rs"]
 pub mod mpris;
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(windows)]
+#[path = "mpris_windows.rs"]
+pub mod mpris;
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[path = "mpris_stub.rs"]
 pub mod mpris;
 #[cfg(target_os = "linux")]
