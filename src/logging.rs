@@ -29,7 +29,7 @@ pub fn init() {
 }
 
 /// The log file for this run. `None` on Linux, in diagnostics builds (whose output is read from the
-/// console) and when the file cannot be opened. The lines then go to stderr.
+/// console) and when the file cannot be opened. The lines then go to stdout, the default of `fmt()`.
 fn open_log_file() -> Option<File> {
     if cfg!(any(target_os = "linux", feature = "diagnostics")) {
         return None;
