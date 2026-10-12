@@ -46,8 +46,12 @@ modules:
         skip:
           - .git
           - target
-      # Every crate in Cargo.lock, vendored, plus the two git dependencies. Generated with
-      # flatpak-cargo-generator from Cargo.lock; regenerate it when Cargo.lock changes.
+      # Every crate in Cargo.lock, vendored, plus the two git dependencies. Regenerate it whenever
+      # Cargo.lock changes; tests/flatpak_sources.rs fails while a registry crate is missing:
+      #   python3 -I flatpak-cargo-generator.py <path to Cargo.lock> -o packaging/linux/flatpak/cargo-sources.json
+      # Generator: cargo/flatpak-cargo-generator.py of flatpak/flatpak-builder-tools at commit
+      # 74697c75b630d7330e77250fc13cb5ea688d9479, sha256 0a2db6be87d75910facef28ab46d4d6460802e8419ab850d0caa6a364d26b380.
+      # Its dependencies are aiohttp and tomlkit (>=0.13.3,<1.0); PyYAML is optional.
       - cargo-sources.json
       - type: file
         url: https://github.com/denoland/rusty_v8/releases/download/v130.0.7/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz
