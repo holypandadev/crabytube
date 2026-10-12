@@ -14,3 +14,6 @@ oxc_syntax = "0.153.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 helper-guard = { path = "../helper-guard" }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

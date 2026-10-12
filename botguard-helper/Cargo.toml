@@ -16,3 +16,6 @@ sha2 = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 helper-guard = { path = "../helper-guard" }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

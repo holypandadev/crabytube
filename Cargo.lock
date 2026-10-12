@@ -617,6 +617,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "winresource",
 ]
 
 [[package]]
@@ -3191,6 +3192,7 @@ dependencies = [
  "oxc_syntax",
  "serde",
  "serde_json",
+ "winresource",
  "ytdlp-ejs",
 ]
 
