@@ -12,11 +12,12 @@
     <p>CrabyTube is a native player for YouTube Music. It needs no browser, no Electron and no account.</p>
     <ul>
       <li>Search, Home with recent searches and collections, and your favorite songs</li>
-      <li>Queue with shuffle, repeat and reordering</li>
+      <li>Queue with shuffle and repeat, and a radio from any song</li>
       <li>Synced lyrics that follow the playback</li>
       <li>Media keys and desktop media controls (MPRIS)</li>
       <li>Tray icon and track notifications</li>
       <li>Optional Discord rich presence</li>
+      <li>Interface in nine languages</li>
     </ul>
   </description>
   <launchable type="desktop-id">dev.holypanda.CrabyTube.desktop</launchable>
@@ -46,6 +47,9 @@
     <category>Player</category>
   </categories>
   <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-12"/>
+  </releases>
   <provides>
     <binary>crabytube</binary>
   </provides>
