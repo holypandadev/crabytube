@@ -278,10 +278,7 @@ impl SuggestionCache {
 
 /// Innertube `hl` for the current interface language.
 pub fn content_language() -> &'static str {
-    match crate::i18n::current_language() {
-        crate::preferences::UiLanguage::Spanish => "es",
-        crate::preferences::UiLanguage::English => "en",
-    }
+    crate::i18n::current_language().content_code()
 }
 
 #[derive(Clone)]

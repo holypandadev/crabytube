@@ -93,7 +93,7 @@ impl TrayRemote {
             let tray = CrabyTray {
                 sender: sender.clone(),
                 watcher_state: Arc::clone(&watcher_state),
-                spanish: crate::i18n::current_language() == crate::preferences::UiLanguage::Spanish,
+                language: crate::i18n::current_language(),
             };
             let handle = tray
                 .assume_sni_available(true)
@@ -154,7 +154,7 @@ fn logo_icons() -> Vec<ksni::Icon> {
 struct CrabyTray {
     sender: UnboundedSender<TrayCommand>,
     watcher_state: Arc<AtomicU8>,
-    spanish: bool,
+    language: crate::preferences::UiLanguage,
 }
 
 impl CrabyTray {
@@ -202,25 +202,15 @@ impl Tray for CrabyTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        let labels = if self.spanish {
-            [
-                "Abrir CrabyTube",
-                "Ocultar en la bandeja",
-                "Reproducir / Pausar",
-                "Siguiente",
-                "Anterior",
-                "Salir",
-            ]
-        } else {
-            [
-                "Open CrabyTube",
-                "Hide to tray",
-                "Play / Pause",
-                "Next track",
-                "Previous track",
-                "Quit",
-            ]
-        };
+        let labels = [
+            "Open CrabyTube",
+            "Hide to tray",
+            "Play / Pause",
+            "Next track",
+            "Previous track",
+            "Quit",
+        ]
+        .map(|label| crate::i18n::translate_static(self.language, label));
         vec![
             self.item(labels[0], "window", TrayCommand::ShowWindow),
             self.item(labels[1], "go-down", TrayCommand::HideWindow),
@@ -277,7 +267,7 @@ mod tests {
         let tray = CrabyTray {
             sender,
             watcher_state: Arc::new(AtomicU8::new(WATCHER_ONLINE)),
-            spanish: false,
+            language: crate::preferences::UiLanguage::English,
         };
         assert_eq!(tray.id(), "crabytube");
         assert!(tray.icon_name().is_empty());
@@ -290,7 +280,7 @@ mod tests {
         let mut tray_state = CrabyTray {
             sender: tray.sender.clone(),
             watcher_state: Arc::clone(&tray.watcher_state),
-            spanish: tray.spanish,
+            language: tray.language,
         };
         assert_eq!(menu.len(), 8);
         for (index, expected) in [

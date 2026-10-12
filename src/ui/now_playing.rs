@@ -10,6 +10,7 @@ use super::{App, Message, NowPlayingTab, format_duration, layout};
 use crate::preferences::UiDensity;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Size};
+use unicode_width::UnicodeWidthStr;
 const PANEL_PADDING: f32 = 16.0;
 const COLUMN_GAP: f32 = 40.0;
 const STACK_BELOW: f32 = 760.0;
@@ -492,8 +493,7 @@ impl App {
         // The notice takes the room left of the button and is cut short, never wrapped, so the list
         // below keeps its place. The room follows the translated label's width.
         let clear_label = self.tr("Clear up next").into_owned();
-        let clear_width =
-            clear_label.chars().count() as f32 * TEXT_CAPTION * 0.6 + CLEAR_BUTTON_EXTRA;
+        let clear_width = clear_label.width() as f32 * TEXT_CAPTION * 0.6 + CLEAR_BUTTON_EXTRA;
         // The count of what comes next, or a notice about the last change to the queue while one
         // is set. Either is cut short, never wrapped, so the list keeps its place.
         let status = match self.queue_notice {
@@ -562,6 +562,7 @@ impl App {
                 label(
                     self.lyrics_error
                         .clone()
+                        .map(|error| self.tr_string(error))
                         .unwrap_or_else(|| self.tr("No lyrics for this song.").into_owned()),
                     TEXT_BODY
                 )

@@ -29,7 +29,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `preferences.rs` | Versioned local state (`state.json`): preferences, queue, favorites, history; autostart entry. |
 | `storage.rs`, `temp_cleanup.rs` | Cache usage reporting and selective clearing; removal of leftover temporary files. |
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
-| `i18n.rs` | English/Spanish interface strings. |
+| `i18n/` | Interface translations: English, Spanish, Brazilian Portuguese, French, German, Italian, Russian, Japanese and Simplified Chinese. English is the key; each language has a file of exact entries and templates for text with numbers or names. |
 | `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). Other platforms use `tray_stub.rs`. |
 | `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what is not specific to macOS: the player state, the commands, and the rules for what to tell the system and when. Windows still uses `mpris_stub.rs`. |
 | `discord.rs` | Optional Discord Rich Presence over the local Discord IPC socket. |

@@ -32,21 +32,86 @@ pub enum UiLanguage {
     #[default]
     English,
     Spanish,
+    PortugueseBrazil,
+    French,
+    German,
+    Italian,
+    Russian,
+    Japanese,
+    ChineseSimplified,
 }
 
 impl UiLanguage {
-    pub const ALL: [Self; 2] = [Self::English, Self::Spanish];
+    pub const ALL: [Self; 9] = [
+        Self::English,
+        Self::Spanish,
+        Self::PortugueseBrazil,
+        Self::French,
+        Self::German,
+        Self::Italian,
+        Self::Russian,
+        Self::Japanese,
+        Self::ChineseSimplified,
+    ];
+
+    /// The name of the language in the language itself, as the language picker shows it.
+    pub fn native_name(self) -> &'static str {
+        match self {
+            Self::English => "English",
+            Self::Spanish => "Español",
+            Self::PortugueseBrazil => "Português (Brasil)",
+            Self::French => "Français",
+            Self::German => "Deutsch",
+            Self::Italian => "Italiano",
+            Self::Russian => "Русский",
+            Self::Japanese => "日本語",
+            Self::ChineseSimplified => "简体中文",
+        }
+    }
+
+    /// The language YouTube Music is asked to answer in (its `hl` parameter).
+    pub fn content_code(self) -> &'static str {
+        match self {
+            Self::English => "en",
+            Self::Spanish => "es",
+            Self::PortugueseBrazil => "pt",
+            Self::French => "fr",
+            Self::German => "de",
+            Self::Italian => "it",
+            Self::Russian => "ru",
+            Self::Japanese => "ja",
+            Self::ChineseSimplified => "zh-CN",
+        }
+    }
+
+    /// The language a primary language subtag such as `es` or `pt` stands for, if the app has it.
+    /// Portuguese is the Brazilian translation and any Chinese the simplified one.
+    fn for_subtag(subtag: &str) -> Option<Self> {
+        let subtag = subtag.to_ascii_lowercase();
+        Some(match subtag.as_str() {
+            "en" => Self::English,
+            "es" => Self::Spanish,
+            "pt" => Self::PortugueseBrazil,
+            "fr" => Self::French,
+            "de" => Self::German,
+            "it" => Self::Italian,
+            "ru" => Self::Russian,
+            "ja" => Self::Japanese,
+            "zh" => Self::ChineseSimplified,
+            _ => return None,
+        })
+    }
 }
 
-/// The language for a system locale such as `es_ES.UTF-8` or `es-MX`: Spanish for any Spanish
-/// locale, English for the rest.
+/// The language for a system locale such as `es_ES.UTF-8` or `pt-BR`: the app's language for that
+/// locale's language, English when the app does not have it.
 pub fn language_for_locale(locale: &str) -> UiLanguage {
     language_for_preferences([locale])
 }
 
 /// The language for a list of preferred languages, the first choice first: the first one the app
-/// has a translation for. Languages it does not know (French, say) are skipped, so a Mac set to
-/// French and then Spanish starts in Spanish. English when none matches.
+/// has a translation for. Languages it does not know (Dutch, say) are skipped, so a Mac set to
+/// Dutch and then Spanish starts in Spanish. English when none matches.
 pub fn language_for_preferences<S: AsRef<str>>(
     languages: impl IntoIterator<Item = S>,
 ) -> UiLanguage {
@@ -57,11 +122,8 @@ pub fn language_for_preferences<S: AsRef<str>>(
             .split(['_', '-', '.', '@'])
             .next()
             .unwrap_or_default();
-        if code.eq_ignore_ascii_case("es") {
-            return UiLanguage::Spanish;
-        }
-        if code.eq_ignore_ascii_case("en") {
-            return UiLanguage::English;
+        if let Some(language) = UiLanguage::for_subtag(code) {
+            return language;
         }
     }
     UiLanguage::English
@@ -74,10 +136,7 @@ pub fn detected_ui_language() -> UiLanguage {
 
 impl std::fmt::Display for UiLanguage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::English => "English",
-            Self::Spanish => "Español",
-        })
+        f.write_str(self.native_name())
     }
 }
 
@@ -1029,14 +1088,34 @@ mod tests {
         assert_eq!(language_for_preferences(["es-ES", "en-US"]), Spanish);
         assert_eq!(language_for_preferences(["en-US", "es-ES"]), English);
         // A language the app has no translation for is skipped.
-        assert_eq!(language_for_preferences(["fr-FR", "es-419"]), Spanish);
-        assert_eq!(language_for_preferences(["fr-FR", "de-DE"]), English);
+        assert_eq!(language_for_preferences(["nl-NL", "es-419"]), Spanish);
+        assert_eq!(language_for_preferences(["nl-NL", "sv-SE"]), English);
         assert_eq!(language_for_preferences(["es_MX.UTF-8"]), Spanish);
         assert_eq!(language_for_preferences(["ES"]), Spanish);
         assert_eq!(language_for_preferences(Vec::<String>::new()), English);
         // A name that only starts with the letters of a language is not that language.
         assert_eq!(language_for_preferences(["estonian", "es"]), Spanish);
         assert_eq!(language_for_preferences(["C", "POSIX"]), English);
+    }
+
+    #[test]
+    fn every_language_of_the_app_is_found_from_the_system() {
+        use UiLanguage::*;
+        for (system, language) in [
+            ("pt-BR", PortugueseBrazil),
+            ("pt_PT.UTF-8", PortugueseBrazil),
+            ("fr-CA", French),
+            ("de_AT", German),
+            ("it-IT", Italian),
+            ("ru_RU.UTF-8", Russian),
+            ("ja-JP", Japanese),
+            ("zh-Hans-CN", ChineseSimplified),
+            ("zh-TW", ChineseSimplified),
+            ("zh_HK.UTF-8", ChineseSimplified),
+            ("ko-KR", English),
+        ] {
+            assert_eq!(language_for_locale(system), language, "{system}");
+        }
     }
 
     #[test]

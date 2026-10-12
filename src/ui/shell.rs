@@ -740,7 +740,7 @@ const SIDE_GAP: f32 = 8.0;
 
 /// Width of a tab in the bar: its label and the padding on both sides.
 fn tab_width(title: &str) -> f32 {
-    (title.chars().count() as f32 * TEXT_BODY * 0.6 + 2.0 * TAB_PADDING).ceil()
+    (title.width() as f32 * TEXT_BODY * 0.6 + 2.0 * TAB_PADDING).ceil()
 }
 
 /// Minimize, maximize and close as square buttons the height of the bar, each with a rule on

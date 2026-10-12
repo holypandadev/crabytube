@@ -1,356 +1,124 @@
-//! Small, explicit UI translation table. Catalog and user-provided text bypasses it.
+//! Interface translations. The English text is the key: every language has a table of exact
+//! entries and a table of templates for text that carries numbers, names or paths. Catalog text
+//! and text the user typed bypass it.
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::preferences::UiLanguage;
 
+mod de;
+mod es;
+mod fr;
+mod it;
+mod ja;
+mod pt_br;
+mod ru;
+mod zh_hans;
+
+/// The translation of the interface into one language.
+pub(crate) struct Catalog {
+    /// Exact English text and its translation. Keys starting with `cache:` name the caches a
+    /// template puts in its `{cache}` hole.
+    pub entries: &'static [(&'static str, &'static str)],
+    /// English templates and their translations, most specific first. In the English side `{}`
+    /// stands for any text, `{#}` for a number and `{cache}` for the name of a cache. In the translation `{0}`, `{1}`… repeat those parts in any order, and
+    /// `{0:one|few|many}` picks the form that agrees with the number in part 0.
+    pub templates: &'static [(&'static str, &'static str)],
+    /// The date after the time on Home, with `{weekday}`, `{day}` (two digits), `{day_number}`,
+    /// `{month}` (the short name) and `{month_number}`.
+    pub date: &'static str,
+    /// Whether decimals are written with a comma.
+    pub decimal_comma: bool,
+    /// Which plural form a number takes: its index among the `|`-separated forms of a template.
+    pub plural: fn(u64) -> usize,
+}
+
+fn catalog(language: UiLanguage) -> Option<&'static Catalog> {
+    Some(match language {
+        UiLanguage::English => return None,
+        UiLanguage::Spanish => &es::CATALOG,
+        UiLanguage::PortugueseBrazil => &pt_br::CATALOG,
+        UiLanguage::French => &fr::CATALOG,
+        UiLanguage::German => &de::CATALOG,
+        UiLanguage::Italian => &it::CATALOG,
+        UiLanguage::Russian => &ru::CATALOG,
+        UiLanguage::Japanese => &ja::CATALOG,
+        UiLanguage::ChineseSimplified => &zh_hans::CATALOG,
+    })
+}
+
+/// The plural rule of languages with a singular for one and a plural for the rest.
+pub(crate) fn one_or_other(n: u64) -> usize {
+    usize::from(n != 1)
+}
+
+/// The plural rule of French, where zero takes the singular too.
+pub(crate) fn zero_one_or_other(n: u64) -> usize {
+    usize::from(n > 1)
+}
+
+/// The plural rule of Russian: 1, 21, 31… / 2–4, 22–24… / the rest.
+pub(crate) fn russian_plural(n: u64) -> usize {
+    match (n % 10, n % 100) {
+        (1, rest) if rest != 11 => 0,
+        (2..=4, rest) if !(12..=14).contains(&rest) => 1,
+        _ => 2,
+    }
+}
+
+/// Languages without plural forms.
+pub(crate) fn no_plural(_: u64) -> usize {
+    0
+}
+
 static CURRENT_LANGUAGE: AtomicU8 = AtomicU8::new(0);
 
+fn language_index(language: UiLanguage) -> usize {
+    UiLanguage::ALL
+        .iter()
+        .position(|candidate| *candidate == language)
+        .unwrap_or(0)
+}
+
 pub fn current_language() -> UiLanguage {
-    match CURRENT_LANGUAGE.load(Ordering::Relaxed) {
-        1 => UiLanguage::Spanish,
-        _ => UiLanguage::English,
-    }
+    UiLanguage::ALL
+        .get(usize::from(CURRENT_LANGUAGE.load(Ordering::Relaxed)))
+        .copied()
+        .unwrap_or_default()
 }
 
 pub fn set_current_language(language: UiLanguage) {
-    CURRENT_LANGUAGE.store(u8::from(language == UiLanguage::Spanish), Ordering::Relaxed);
+    let index = u8::try_from(language_index(language)).unwrap_or(0);
+    CURRENT_LANGUAGE.store(index, Ordering::Relaxed);
+}
+
+/// The exact entries of a language as a map, built on first use.
+fn entries(
+    language: UiLanguage,
+    catalog: &'static Catalog,
+) -> &'static HashMap<&'static str, &'static str> {
+    static MAPS: [OnceLock<HashMap<&'static str, &'static str>>; UiLanguage::ALL.len()] =
+        [const { OnceLock::new() }; UiLanguage::ALL.len()];
+    MAPS[language_index(language)].get_or_init(|| catalog.entries.iter().copied().collect())
 }
 
 pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
-    if language == UiLanguage::English {
+    let Some(catalog) = catalog(language) else {
         return Cow::Borrowed(source);
-    }
-
-    // Static entries win over dynamic prefix rules, so "Lyrics only" is not
-    // rebuilt from the "Lyrics " prefix.
-    let translated = match source {
-        "General" => "General",
-        "#" => "#",
-        "BotGuard" => "BotGuard",
-        "Appearance" => "Apariencia",
-        "Playback" => "Reproducción",
-        "Lyrics" => "Letras",
-        "Storage" => "Almacenamiento",
-        "Songs" => "Canciones",
-        "Albums" => "Álbumes",
-        "Artists" => "Artistas",
-        "Song" => "Canción",
-        "Album" => "Álbum",
-        "Artist" => "Artista",
-        "Playlist" => "Lista de reproducción",
-        "Mix" => "Mezcla",
-        "Music" => "Música",
-        "Playlists" => "Listas de reproducción",
-        "Settings" => "Ajustes",
-        "CrabyTube" => "CrabyTube",
-        "Home" => "Inicio",
-        "Ctrl+K" => "Ctrl+K",
-        "Back" => "Atrás",
-        "1 song" => "1 canción",
-        "GOOD MORNING." => "BUENOS DÍAS.",
-        "GOOD AFTERNOON." => "BUENAS TARDES.",
-        "GOOD EVENING." => "BUENAS NOCHES.",
-        "STILL UP?" => "BUENAS NOCHES.",
-        "Jump back in" => "Seguir escuchando",
-        "Queue limited to {} entries; the selected track stays first." => {
-            "La cola se limita a {} elementos; la pista elegida sigue primera."
-        }
-        "Added to queue" => "Añadida a la cola",
-        "{} up next" => "{} a continuación",
-        "More songs" => "Más canciones",
-        "Plays next" => "Suena a continuación",
-        "{} on disk · {} in memory" => "{} en disco · {} en memoria",
-        "Player {} · BotGuard {} · Home {}" => "Reproductor {} · BotGuard {} · Inicio {}",
-        "SUNDAY" => "DOMINGO",
-        "MONDAY" => "LUNES",
-        "TUESDAY" => "MARTES",
-        "WEDNESDAY" => "MIÉRCOLES",
-        "THURSDAY" => "JUEVES",
-        "FRIDAY" => "VIERNES",
-        "SATURDAY" => "SÁBADO",
-        "JAN" => "ENE",
-        "FEB" => "FEB",
-        "MAR" => "MAR",
-        "APR" => "ABR",
-        "MAY" => "MAY",
-        "JUN" => "JUN",
-        "JUL" => "JUL",
-        "AUG" => "AGO",
-        "SEP" => "SEP",
-        "OCT" => "OCT",
-        "NOV" => "NOV",
-        "DEC" => "DIC",
-        "Copy title" => "Copiar título",
-        "Copy artist" => "Copiar artista",
-        "Copied" => "Copiado",
-        "Live" => "Directos",
-        "Searching…" => "Buscando…",
-        "Retry loading more" => "Reintentar carga",
-        "Clear" => "Borrar",
-        "Autoplay" => "Reproducción automática",
-        "Playing" => "Reproduciendo",
-        "Paused" => "En pausa",
-        "Listen on YouTube Music" => "Escuchar en YouTube Music",
-        "Stopped" => "Detenida",
-        "Nothing playing" => "No se está reproduciendo nada",
-        "Buffering…" => "Cargando…",
-        "Playback failed" => "Falló la reproducción",
-        "A temporary network problem interrupted playback. Try again." => {
-            "Un problema temporal de red interrumpió la reproducción. Inténtalo de nuevo."
-        }
-        "CrabyTube is missing a file it needs. Reinstall it to restore playback." => {
-            "A CrabyTube le falta un archivo que necesita. Reinstálalo para recuperar la reproducción."
-        }
-        "YouTube configuration could not be loaded. Try again shortly." => {
-            "No se pudo cargar la configuración de YouTube. Inténtalo de nuevo en unos minutos."
-        }
-        "This track is unavailable for playback." => {
-            "Esta canción no está disponible para reproducirse."
-        }
-        "This live broadcast can't be played right now." => {
-            "Este directo no se puede reproducir ahora."
-        }
-        "YouTube could not validate this playback session." => {
-            "YouTube no pudo validar esta sesión de reproducción."
-        }
-        "YouTube's player response could not be processed." => {
-            "No se pudo procesar la respuesta del reproductor de YouTube."
-        }
-        "YouTube rejected the audio stream. Try again later." => {
-            "YouTube rechazó el flujo de audio. Inténtalo más tarde."
-        }
-        "YouTube could not provide this track right now." => {
-            "YouTube no puede ofrecer esta canción ahora mismo."
-        }
-        "This track has no supported audio format." => {
-            "Esta canción no tiene un formato de audio compatible."
-        }
-        "This audio format could not be decoded." => {
-            "No se pudo decodificar este formato de audio."
-        }
-        "No audio output device is available." => {
-            "No hay ningún dispositivo de salida de audio disponible."
-        }
-        "Playback could not continue." => "La reproducción no pudo continuar.",
-        "Playback was cancelled." => "La reproducción se canceló.",
-        "The audio stream could not be reached or was cut off by YouTube. Try again later." => {
-            "No se pudo acceder al flujo de audio, o YouTube lo cortó. Inténtalo más tarde."
-        }
-        "Playback entered an invalid state." => "La reproducción entró en un estado no válido.",
-        "Retry" => "Reintentar",
-        "Could not refresh Home: {}" => "No se pudo actualizar Inicio: {}",
-        "This collection type is not supported yet." => {
-            "Este tipo de colección todavía no es compatible."
-        }
-        "Updating…" => "Actualizando…",
-        "ARTIST" => "ARTISTA",
-        "ALBUM" => "ÁLBUM",
-        "Loading more songs…" => "Cargando más canciones…",
-        "TITLE" => "TÍTULO",
-        "DURATION" => "DURACIÓN",
-        "Audio output" => "Salida de audio",
-        "Volume" => "Volumen",
-        "System default" => "Predeterminado del sistema",
-        "Compact" => "Compacta",
-        "Comfortable" => "Espaciosa",
-        "Sans serif" => "Palo seco",
-        "Serif" => "Serif",
-        "Monospace" => "Monoespaciada",
-        "Integrations" => "Integraciones",
-        "System tray is starting." => "Iniciando la bandeja del sistema.",
-        "System tray is active." => "La bandeja del sistema está activa.",
-        "Waiting for a compatible system tray host." => {
-            "Esperando un host compatible para la bandeja del sistema."
-        }
-        "System tray host is offline; closing the window will quit CrabyTube." => {
-            "El host de la bandeja no está disponible; al cerrar la ventana, CrabyTube saldrá."
-        }
-        "System tray support is unavailable on this platform." => {
-            "La bandeja del sistema no está disponible en esta plataforma."
-        }
-        "Language" => "Idioma",
-        "English" => "English",
-        "Español" => "Español",
-        "Enabled · waiting for playback" => "Activado · esperando la reproducción",
-        "Connecting to Discord…" => "Conectando con Discord…",
-        "Connected to Discord" => "Conectado con Discord",
-        "Discord desktop client unavailable · retrying…" => {
-            "La aplicación de escritorio de Discord no está disponible · reintentando…"
-        }
-        "Discord connection error · retrying…" => {
-            "Error de conexión con Discord · reintentando…"
-        }
-        "The selected output applies when the next track starts." => {
-            "La salida seleccionada se aplicará al comenzar la siguiente canción."
-        }
-        "Effective AAC format appears after a stream resolves." => {
-            "El formato AAC efectivo aparecerá cuando se resuelva una transmisión."
-        }
-        "Cache sizes refreshed." => "Se actualizaron los tamaños de caché.",
-        "Local-data backup imported." => "Se importó la copia de los datos locales.",
-        "Documents folder is unavailable" => "La carpeta Documentos no está disponible.",
-        "Starting MPRIS session-bus service…" => "Iniciando el servicio MPRIS del bus de sesión…",
-        "MPRIS media controls active on the Linux session bus" => {
-            "Los controles multimedia MPRIS están activos en el bus de sesión de Linux"
-        }
-        "MPRIS status unavailable" => "El estado de MPRIS no está disponible",
-        "System media controls are unavailable on this platform" => {
-            "Los controles multimedia del sistema no están disponibles en esta plataforma"
-        }
-        "YouTube requires sign-in for this track; it can't be played without an account." => {
-            "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
-        }
-        "Lyrics only" => "Solo letras",
-        "Earlier" => "Antes",
-        "Later" => "Después",
-        "Timed lyrics don't match this version" => {
-            "La letra sincronizada no coincide con esta versión"
-        }
-        "Scale with window" => "Escalar con la ventana",
-        "Keeps the layout's proportions on large windows." => {
-            "Mantiene las proporciones en ventanas grandes."
-        }
-        "Track notifications" => "Notificaciones de pista",
-        "Shows a notification when a track starts while the window is in the background." => {
-            "Muestra una notificación cuando empieza una pista con la ventana en segundo plano."
-        }
-        "About" => "Acerca de",
-        "Add to queue" => "Añadir a la cola",
-        "Start radio" => "Iniciar radio",
-        "Go to artist" => "Ir al artista",
-        "Go to album" => "Ir al álbum",
-        "[ RADIO FAILED ]" => "[ ERROR DE RADIO ]",
-        "Remove from queue" => "Quitar de la cola",
-        "Clear up next" => "Vaciar a continuación",
-        "Artwork cache" => "Caché de carátulas",
-        "Audio" => "Audio",
-        "Changes save automatically" => "Los cambios se guardan solos",
-        "Choose a song from Home or Favorite songs." => {
-            "Elige una canción en Inicio o en Favoritas."
-        }
-        "Close to tray" => "Cerrar a la bandeja",
-        "Compact mode" => "Modo compacto",
-        "[ COULD NOT LOAD ]" => "[ NO SE PUDO CARGAR ]",
-        "CRABYTUBE" => "CRABYTUBE",
-        "Customize your experience" => "Personaliza tu experiencia",
-        "Default" => "Predeterminado",
-        "Diagnostics" => "Diagnóstico",
-        "Discord presence" => "Presencia en Discord",
-        "Export" => "Exportar",
-        "Favorite songs" => "Canciones favoritas",
-        "Favorites" => "Favoritas",
-        "Follow current line" => "Seguir la línea actual",
-        "GPL-3.0-or-later. Not affiliated with Google or YouTube." => {
-            "GPL-3.0 o posterior. Sin relación con Google ni YouTube."
-        }
-        "GPU acceleration" => "Aceleración por GPU",
-        "[ HOME COULD NOT LOAD ]" => "[ NO SE PUDO CARGAR INICIO ]",
-        "Import" => "Importar",
-        "Launch on startup" => "Abrir al iniciar sesión",
-        "Loading…" => "Cargando…",
-        "Couldn't seek there" => "No se pudo saltar a ese punto",
-        "[ LOADING ]" => "[ CARGANDO ]",
-        "[ LOADING LYRICS ]" => "[ CARGANDO LETRAS ]",
-        "[ LOADING RADIO ]" => "[ CARGANDO RADIO ]",
-        "[ LOADING YOUTUBE MUSIC ]" => "[ CARGANDO YOUTUBE MUSIC ]",
-        "Local data" => "Datos locales",
-        "Lyrics cache" => "Caché de letras",
-        "Media controls (MPRIS)" => "Controles multimedia (MPRIS)",
-        "No lyrics for this song." => "No hay letra para esta canción.",
-        "Not synced" => "Sin sincronizar",
-        "Press play to load the lyrics." => "Pulsa reproducir para cargar la letra.",
-        "No playable songs in this collection." => {
-            "Esta colección no tiene canciones reproducibles."
-        }
-        "[ NOTHING PLAYING ]" => "[ NADA EN REPRODUCCIÓN ]",
-        "Output device" => "Dispositivo de salida",
-        "Play" => "Reproducir",
-        "Play all" => "Reproducir todo",
-        "Playback helpers" => "Ayudantes de reproducción",
-        "Player" => "Reproductor",
-        "Play next" => "Reproducir a continuación",
-        "Reduce motion" => "Reducir movimiento",
-        "Play music in the background." => "Reproducir música en segundo plano.",
-        "Reset" => "Restablecer",
-        "Reset settings?" => "¿Restablecer los ajustes?",
-        "Language, window size and lyrics offsets stay." => {
-            "Se conservan el idioma, el tamaño de la ventana y los desfases de la letra."
-        }
-        "Cancel" => "Cancelar",
-        "Confirm" => "Confirmar",
-        "Confirm import" => "Confirmar importación",
-        "Replace your data with this backup?" => "¿Reemplazar tus datos con esta copia?",
-        "Brings {} favorites and {} queued songs, plus its settings." => {
-            "Trae {} favoritos y {} canciones en la cola, además de sus ajustes."
-        }
-        "Clear history and Jump back in?" => "¿Borrar el historial y también «Seguir escuchando»?",
-        "Turn off history and remove Jump back in?" => {
-            "¿Desactivar el historial y quitar también «Seguir escuchando»?"
-        }
-        "{} saved searches." => "{} búsquedas guardadas.",
-        "{} saved searches. Clearing or turning this off also removes 'Jump back in'." => {
-            "{} búsquedas guardadas. Borrarlas o desactivar el historial quita también «Seguir escuchando»."
-        }
-        "Importing local data…" => "Importando datos locales…",
-        "Restore queue on launch" => "Restaurar la cola al abrir",
-        "Return to current line" => "Volver a la línea actual",
-        "Search artist, album, tracks" => "Busca artistas, álbumes, canciones",
-        "[ SEARCH FAILED ]" => "[ FALLÓ LA BÚSQUEDA ]",
-        "Search history" => "Historial de búsqueda",
-        "Search results" => "Resultados",
-        "Search suggestions" => "Sugerencias de búsqueda",
-        "Search to start" => "Busca para empezar",
-        "Search to start listening." => "Busca algo para empezar a escuchar.",
-        "Show lyrics by default" => "Mostrar letras por defecto",
-        "Show translation" => "Mostrar traducción",
-        "Shuffle" => "Aleatorio",
-        "Shuffle whole queue" => "Mezclar toda la cola",
-        "Space play/pause · ←/→ seek · Ctrl+K search · Esc back" => {
-            "Espacio reproducir/pausar · ←/→ avanzar · Ctrl+K buscar · Esc volver"
-        }
-        "Space play/pause · ←/→ seek · ⌘K search · Esc back" => {
-            "Espacio reproducir/pausar · ←/→ avanzar · ⌘K buscar · Esc volver"
-        }
-        "Tap the heart on any song to save it here." => {
-            "Pulsa el corazón de una canción para guardarla aquí."
-        }
-        "Text size" => "Tamaño del texto",
-        "The queue is empty." => "La cola está vacía.",
-        "Timing offset" => "Desfase de tiempo",
-        "Top result" => "Resultado principal",
-        "Up next" => "A continuación",
-        "Remove favorite" => "Quitar de favoritas",
-        "Add to favorites" => "Añadir a favoritas",
-        "Smaller rows in Up next, results, collections and Favorites." => {
-            "Filas más pequeñas en A continuación, resultados, colecciones y favoritas."
-        }
-        "Smoother on large windows; uses much more memory. Applies after restart." => {
-            "Más fluido en ventanas grandes; usa mucha más memoria. Se aplica al reiniciar."
-        }
-        "Continue with related songs when the queue ends." => {
-            "Sigue con canciones relacionadas cuando termina la cola."
-        }
-        "Playback never starts by itself." => "La reproducción nunca empieza sola.",
-        "Now Playing opens on the Lyrics tab." => "Reproduciendo se abre en la pestaña Letras.",
-        "Keep playing in the system tray." => "Sigue sonando en la bandeja del sistema.",
-        "Needs a system tray host." => "Necesita una bandeja del sistema.",
-        "Shifts every song. Positive shows lines later." => {
-            "Afecta a todas las canciones. Positivo muestra las líneas más tarde."
-        }
-        "Favorites, queue and settings as JSON in Documents." => {
-            "Favoritas, cola y ajustes como JSON en Documentos."
-        }
-        "Sanitized report without tokens or URLs." => "Informe sin tokens ni URL.",
-        "Saved output is unavailable." => "La salida guardada no está disponible.",
-        "Changes apply to the next track." => "Los cambios se aplican a la siguiente canción.",
-        "Off" => "Desactivado",
-        "The queue is full." => "La cola está llena.",
-        _ => {
-            return translate_dynamic(source).map_or(Cow::Borrowed(source), Cow::Owned);
-        }
     };
-    Cow::Borrowed(translated)
+    let entries = entries(language, catalog);
+    // Exact entries win over templates, so "Lyrics only" is never read as a template.
+    if let Some(translated) = entries.get(source) {
+        return Cow::Borrowed(translated);
+    }
+    for (english, translated) in catalog.templates {
+        if let Some(parts) = match_template(english, source) {
+            return Cow::Owned(render(translated, &parts, entries, catalog.plural));
+        }
+    }
+    Cow::Borrowed(source)
 }
 
 pub fn translate_static(language: UiLanguage, source: &'static str) -> &'static str {
@@ -360,246 +128,141 @@ pub fn translate_static(language: UiLanguage, source: &'static str) -> &'static 
     }
 }
 
-fn translate_dynamic(source: &str) -> Option<String> {
-    let prefixed = [
-        ("Active output: ", "Salida activa: "),
-        ("Last resolved stream: ", "Último formato resuelto: "),
-        ("Window size: ", "Tamaño de ventana: "),
-        ("Offset: ", "Desfase: "),
-        ("Text size: ", "Tamaño del texto: "),
-        ("Diagnostics: ", "Diagnóstico: "),
-        ("Local data backup path: ", "Ubicación de la copia local: "),
-        (
-            "Showing saved Home data · ",
-            "Mostrando datos guardados de Inicio · ",
-        ),
-        ("Song • ", "Canción • "),
-        ("Version ", "Versión "),
-        ("Unreadable file moved to ", "Archivo ilegible movido a "),
-        ("Search: ", "Búsqueda: "),
-        ("Last stream: ", "Último stream: "),
-        ("Active: ", "Activa: "),
-        (
-            "Saved settings could not be read and were moved to ",
-            "No se pudieron leer los ajustes; se movieron a ",
-        ),
-        ("Playback failed: ", "Falló la reproducción: "),
-        (
-            "MPRIS controls unavailable: ",
-            "Controles MPRIS no disponibles: ",
-        ),
-        ("MPRIS unavailable: ", "MPRIS no está disponible: "),
-        (
-            "System tray unavailable: ",
-            "La bandeja del sistema no está disponible: ",
-        ),
-    ];
-    for (english, spanish) in prefixed {
-        if let Some(value) = source.strip_prefix(english) {
-            if english == "Active output: "
-                && let Some((device, _)) =
-                    value.split_once(". A new choice applies to the next track.")
-            {
-                return Some(format!(
-                    "{spanish}{device}. La nueva salida se aplicará a la siguiente canción."
-                ));
-            }
-            if english == "Active: "
-                && let Some((device, _)) = value.split_once(". Changes apply to the next track.")
-            {
-                return Some(format!(
-                    "{spanish}{device}. Los cambios se aplican a la siguiente canción."
-                ));
-            }
-            return Some(format!("{spanish}{value}"));
-        }
-    }
-
-    if let Some((count, query)) = source.split_once(" results for ")
-        && !count.is_empty()
-        && count.chars().all(|c| c.is_ascii_digit())
-    {
-        return Some(format!("{count} resultados para {query}"));
-    }
-
-    for (suffix, spanish) in [
-        (" results", " resultados"),
-        (" songs loaded", " canciones cargadas"),
-        (" saved tracks", " canciones guardadas"),
-        (" saved searches.", " búsquedas guardadas."),
-        (" songs", " canciones"),
-        ("%", "%"),
-    ] {
-        if let Some(count) = source.strip_suffix(suffix)
-            && !count.is_empty()
-            && count.chars().all(|c| c.is_ascii_digit())
-        {
-            return Some(format!("{count}{spanish}"));
-        }
-    }
-
-    if let Some(message) = source.strip_suffix(" is already empty.")
-        && !message.is_empty()
-    {
-        if message == "BotGuard disk snapshots" {
-            return Some("Las capturas locales de BotGuard ya están vacías.".into());
-        }
-        return Some(format!(
-            "{} ya está vacía.",
-            localized_cache_subject(message)
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Cleared ")
-        && let Some((cache, amount)) = rest.split_once(" (")
-        && let Some(size) = amount.strip_suffix(" MiB removed).")
-    {
-        return Some(format!(
-            "Se borró el contenido de {} (se liberaron {size} MiB).",
-            localized_cache_subject(cache)
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Maximum of ")
-        && let Some(count) = rest.strip_suffix(" tracks loaded for one collection.")
-    {
-        return Some(format!(
-            "Máximo de {count} canciones cargadas en una colección."
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Lyrics ") {
-        let rest = rest
-            .replace(" (30-day TTL)", " (retención de 30 días)")
-            .replace(" · Home ", " · Inicio ");
-        return Some(format!("Letras {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Player JS ") {
-        let rest = rest
-            .replace(" max ", " máx. ")
-            .replace(" snapshots", " capturas");
-        return Some(format!("JavaScript del reproductor {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Artwork memory: ") {
-        let rest = rest.replace(
-            " variants). Disk artwork: ",
-            " variantes). Portadas en disco: ",
-        );
-        return Some(format!("Memoria de portadas: {rest}"));
-    }
-    if let Some(rest) = source.strip_suffix(" unavailable or unsupported entries were omitted.")
-        && !rest.is_empty()
-        && rest.chars().all(|c| c.is_ascii_digit())
-    {
-        return Some(format!(
-            "Se omitieron {rest} elementos no disponibles o no compatibles."
-        ));
-    }
-    if let Some(rest) = source.strip_suffix(" • click a timed line to seek") {
-        return Some(format!(
-            "{rest} • pulsa una línea sincronizada para avanzar"
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Playback: ")
-        && let Some(rest) = rest.strip_suffix(" audio underrun episode(s) on the current track.")
-        && let Some((state, count)) = rest.split_once(" · ")
-    {
-        let state = match state {
-            "Playing" => "reproduciendo",
-            "Paused" => "en pausa",
-            "Stopped" => "detenida",
-            "Resolving" => "preparando",
-            "Buffering" => "cargando",
-            "Seeking" => "buscando posición",
-            "Finished" => "finalizada",
-            _ => state,
-        };
-        return Some(format!(
-            "Reproducción: {state} · {count} episodios de interrupción de audio en la canción actual."
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Playback: ") {
-        let mut parts = rest.splitn(2, " · ");
-        let state = match parts.next().unwrap_or_default() {
-            "Idle" => "inactiva",
-            "Resolving" => "preparando",
-            "Buffering" => "cargando",
-            "Playing" => "reproduciendo",
-            "Paused" => "en pausa",
-            "Seeking" => "buscando posición",
-            "Finished" => "finalizada",
-            "Stopped" => "detenida",
-            "Error" => "con error",
-            other => other,
-        };
-        return Some(match parts.next() {
-            Some(detail) => format!("Reproducción: {state} · {detail}"),
-            None => format!("Reproducción: {state}"),
-        });
-    }
-    if let Some(rest) = source.strip_prefix("Local-data backup exceeds the ")
-        && let Some(size) = rest.strip_suffix(" MiB size limit.")
-    {
-        return Some(format!(
-            "La copia de datos locales supera el límite de {size} MiB."
-        ));
-    }
-    // The path is absolute and varies, so this matches by prefix rather than a fixed key.
-    if let Some(rest) = source.strip_prefix("Local data exported to ") {
-        return Some(format!("Datos locales exportados a {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Diagnostics exported to ") {
-        return Some(format!("Diagnóstico exportado a {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Diagnostics export failed: ") {
-        return Some(format!("Falló la exportación del diagnóstico: {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Local-data export failed: ") {
-        return Some(format!("Falló la exportación de datos locales: {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Local-data import failed: ") {
-        return Some(format!("Falló la importación de datos locales: {rest}"));
-    }
-    if let Some(rest) = source.strip_prefix("Could not clear ")
-        && let Some((cache, error)) = rest.split_once(": ")
-    {
-        return Some(format!(
-            "No se pudo borrar {}: {error}",
-            localized_cache_subject(cache)
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Queue limited to ")
-        && let Some((count, _)) = rest.split_once(" entries; the selected track stays first.")
-    {
-        return Some(format!(
-            "Cola limitada a {count} elementos; la canción elegida queda primero."
-        ));
-    }
-    if let Some(rest) = source.strip_prefix("Local favorites are limited to ")
-        && let Some(count) = rest.strip_suffix(" tracks.")
-    {
-        return Some(format!(
-            "Los favoritos locales están limitados a {count} canciones."
-        ));
-    }
-    if source == "The selected output applies when the next track starts." {
-        return Some("La salida seleccionada se aplicará al comenzar la siguiente canción.".into());
-    }
-    if source == "Effective AAC format appears after a stream resolves." {
-        return Some(
-            "El formato AAC efectivo aparecerá cuando se resuelva una transmisión.".into(),
-        );
-    }
-
-    None
+/// The date after the time on Home: `weekday` and `month` are the English keys (`MONDAY`, `OCT`).
+pub fn date_line(
+    language: UiLanguage,
+    weekday: &'static str,
+    day: u8,
+    month: &'static str,
+    month_number: u8,
+) -> String {
+    let pattern = catalog(language).map_or("{weekday} {day} {month}", |catalog| catalog.date);
+    pattern
+        .replace("{weekday}", translate_static(language, weekday))
+        .replace("{day_number}", &day.to_string())
+        .replace("{day}", &format!("{day:02}"))
+        .replace("{month_number}", &month_number.to_string())
+        .replace("{month}", translate_static(language, month))
 }
 
-fn localized_cache_subject(label: &str) -> &str {
-    match label {
-        "artwork cache" => "la caché de portadas",
-        "lyrics cache" => "la caché de letras",
-        "Home metadata cache" => "la caché de metadatos de Inicio",
-        "player JS disk cache" => "la caché de JavaScript del reproductor",
-        "BotGuard disk snapshots" => "las capturas locales de BotGuard",
-        other => other,
+/// A number with `decimals` decimal places, with the decimal separator of the language.
+pub fn decimal(language: UiLanguage, value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    if catalog(language).is_some_and(|catalog| catalog.decimal_comma) {
+        text.replace('.', ",")
+    } else {
+        text
     }
+}
+
+/// One part of an English template.
+#[derive(Debug, PartialEq)]
+enum Piece<'t> {
+    Text(&'t str),
+    Hole(&'t str),
+}
+
+/// The text and holes of an English template, in order.
+fn pieces(template: &str) -> Vec<Piece<'_>> {
+    let mut pieces = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}') else {
+            break;
+        };
+        if open > 0 {
+            pieces.push(Piece::Text(&rest[..open]));
+        }
+        pieces.push(Piece::Hole(&rest[open + 1..open + close]));
+        rest = &rest[open + close + 1..];
+    }
+    if !rest.is_empty() {
+        pieces.push(Piece::Text(rest));
+    }
+    pieces
+}
+
+/// The parts of `source` that fill the holes of `template`, with their kinds, when it matches.
+/// A hole takes the shortest text up to the next fixed text of the template, and the last hole
+/// takes the rest.
+fn match_template<'s>(template: &str, source: &'s str) -> Option<Vec<(String, &'s str)>> {
+    let pieces = pieces(template);
+    let mut parts = Vec::new();
+    let mut rest = source;
+    for (index, piece) in pieces.iter().enumerate() {
+        match piece {
+            Piece::Text(text) => rest = rest.strip_prefix(text)?,
+            Piece::Hole(kind) => {
+                let end = match pieces.get(index + 1) {
+                    Some(Piece::Text(next)) => rest.find(next)?,
+                    Some(Piece::Hole(_)) => return None,
+                    None => rest.len(),
+                };
+                let part = &rest[..end];
+                let fits =
+                    !part.is_empty() && (*kind != "#" || part.chars().all(|c| c.is_ascii_digit()));
+                if !fits {
+                    return None;
+                }
+                parts.push(((*kind).to_owned(), part));
+                rest = &rest[end..];
+            }
+        }
+    }
+    rest.is_empty().then_some(parts)
+}
+
+/// A translated template with the parts put back. A part that names a cache is translated through
+/// its `cache:` entry.
+fn render(
+    template: &str,
+    parts: &[(String, &str)],
+    entries: &HashMap<&'static str, &'static str>,
+    plural: fn(u64) -> usize,
+) -> String {
+    let shown = |index: usize| -> String {
+        let Some((kind, part)) = parts.get(index) else {
+            return String::new();
+        };
+        if kind == "cache"
+            && let Some(word) = entries.get(format!("cache:{part}").as_str())
+        {
+            return (*word).to_owned();
+        }
+        (*part).to_owned()
+    };
+    let mut out = String::new();
+    let mut next = 0;
+    for piece in pieces(template) {
+        match piece {
+            Piece::Text(text) => out.push_str(text),
+            Piece::Hole(spec) => {
+                let (index, forms) = match spec.split_once(':') {
+                    Some((index, forms)) => (index, Some(forms)),
+                    None => (spec, None),
+                };
+                let index = if index.is_empty() {
+                    next
+                } else {
+                    index.parse().unwrap_or(next)
+                };
+                next = index + 1;
+                match forms {
+                    Some(forms) => {
+                        let count = parts
+                            .get(index)
+                            .and_then(|(_, part)| part.parse::<u64>().ok())
+                            .unwrap_or(0);
+                        let forms: Vec<&str> = forms.split('|').collect();
+                        let form = plural(count).min(forms.len().saturating_sub(1));
+                        out.push_str(forms.get(form).copied().unwrap_or_default());
+                    }
+                    None => out.push_str(&shown(index)),
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The keys that focus the search field, as they are written on this platform.
@@ -619,21 +282,36 @@ pub const KEYS_HELP: &str = if cfg!(target_os = "macos") {
 
 #[cfg(test)]
 mod tests {
-    use super::translate;
+    use super::{catalog, match_template, russian_plural, translate};
     use crate::preferences::UiLanguage;
 
+    /// Every language but English, which needs no table.
+    fn translated_languages() -> impl Iterator<Item = UiLanguage> {
+        UiLanguage::ALL
+            .into_iter()
+            .filter(|language| *language != UiLanguage::English)
+    }
+
     #[test]
-    fn the_key_help_names_the_platform_shortcut_in_both_languages() {
+    fn the_key_help_names_the_platform_shortcut_in_every_language() {
         use super::{KEYS_HELP, SEARCH_SHORTCUT};
         assert!(KEYS_HELP.contains(SEARCH_SHORTCUT));
-        let spanish = translate(UiLanguage::Spanish, KEYS_HELP);
-        assert_ne!(spanish, KEYS_HELP, "the line must have a Spanish entry");
-        assert!(spanish.contains(SEARCH_SHORTCUT));
-        for variant in [
-            "Space play/pause · ←/→ seek · Ctrl+K search · Esc back",
-            "Space play/pause · ←/→ seek · ⌘K search · Esc back",
-        ] {
-            assert_ne!(translate(UiLanguage::Spanish, variant), variant);
+        for language in translated_languages() {
+            let translated = translate(language, KEYS_HELP);
+            assert_ne!(
+                translated, KEYS_HELP,
+                "{language:?} must translate the key help"
+            );
+            assert!(
+                translated.contains(SEARCH_SHORTCUT),
+                "{language:?}: {translated}"
+            );
+            for variant in [
+                "Space play/pause · ←/→ seek · Ctrl+K search · Esc back",
+                "Space play/pause · ←/→ seek · ⌘K search · Esc back",
+            ] {
+                assert_ne!(translate(language, variant), variant, "{language:?}");
+            }
         }
     }
 
@@ -680,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn static_entries_take_precedence_over_dynamic_prefix_rules() {
+    fn exact_entries_take_precedence_over_templates() {
         assert_eq!(translate(UiLanguage::Spanish, "Lyrics only"), "Solo letras");
     }
 
@@ -694,15 +372,8 @@ mod tests {
         );
         assert_eq!(translate(UiLanguage::Spanish, "Up next"), "A continuación");
         assert_eq!(
-            translate(UiLanguage::Spanish, "42 results"),
-            "42 resultados"
-        );
-        assert_eq!(
-            translate(
-                UiLanguage::Spanish,
-                "Playback: Playing · 3 audio underrun episode(s) on the current track."
-            ),
-            "Reproducción: reproduciendo · 3 episodios de interrupción de audio en la canción actual."
+            translate(UiLanguage::Spanish, "42 results for daft punk"),
+            "42 resultados para daft punk"
         );
         assert_eq!(
             translate(
@@ -710,10 +381,6 @@ mod tests {
                 "YouTube requires sign-in for this track; it can't be played without an account."
             ),
             "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
-        );
-        assert_eq!(
-            translate(UiLanguage::Spanish, "Search: Sigur Rós"),
-            "Búsqueda: Sigur Rós"
         );
         assert_eq!(
             translate(
@@ -733,6 +400,90 @@ mod tests {
             translate(UiLanguage::Spanish, "A user supplied title"),
             "A user supplied title"
         );
+    }
+
+    #[test]
+    fn a_count_takes_the_plural_form_of_the_language() {
+        assert_eq!(translate(UiLanguage::Spanish, "1 songs"), "1 canción");
+        assert_eq!(translate(UiLanguage::Spanish, "12 songs"), "12 canciones");
+        assert_eq!(
+            [1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111].map(russian_plural),
+            [0, 1, 1, 2, 2, 2, 2, 0, 1, 2, 0, 2]
+        );
+    }
+
+    #[test]
+    fn a_template_matches_only_text_of_its_shape() {
+        let parts = match_template("{#} results for {}", "12 results for a b").unwrap();
+        assert_eq!(parts, [("#".to_owned(), "12"), (String::new(), "a b")]);
+        assert!(match_template("{#} results for {}", "many results for a").is_none());
+        assert!(match_template("{#} songs", "12 songs left").is_none());
+        assert!(match_template("Working on {cache}…", "Working on …").is_none());
+    }
+
+    #[test]
+    fn every_language_has_the_same_entries_and_templates_as_spanish() {
+        let spanish = catalog(UiLanguage::Spanish).unwrap();
+        let keys = |entries: &'static [(&'static str, &'static str)]| {
+            let mut keys: Vec<&'static str> = entries.iter().map(|(key, _)| *key).collect();
+            keys.sort_unstable();
+            keys
+        };
+        for language in translated_languages() {
+            let catalog = catalog(language).unwrap();
+            let mut entries = keys(catalog.entries);
+            let all = entries.len();
+            entries.dedup();
+            assert_eq!(all, entries.len(), "{language:?} repeats an entry");
+            assert_eq!(entries, keys(spanish.entries), "{language:?} entries");
+            assert_eq!(
+                keys(catalog.templates),
+                keys(spanish.templates),
+                "{language:?} templates"
+            );
+            for (_, translated) in catalog.entries.iter().chain(catalog.templates) {
+                assert!(
+                    !translated.is_empty(),
+                    "{language:?} has an empty translation"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_template_puts_its_parts_back_in_every_language() {
+        for language in translated_languages() {
+            for (english, _) in catalog(language).unwrap().templates {
+                let sample = english
+                    .replace("{#}", "7")
+                    .replace("{cache}", "artwork cache")
+                    .replace("{}", "PART");
+                let translated = translate(language, &sample);
+                assert_ne!(translated, sample, "{language:?}: {english}");
+                assert!(!translated.contains('{'), "{language:?}: {translated}");
+                if english.contains("{}") {
+                    assert!(translated.contains("PART"), "{language:?}: {translated}");
+                }
+                if english.contains("{#}") {
+                    assert!(translated.contains('7'), "{language:?}: {translated}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn templates_with_holes_filled_later_keep_their_holes() {
+        // Entries such as "{} up next" are filled by the caller after translation, so each
+        // translation keeps exactly as many holes as the English text.
+        for language in translated_languages() {
+            for (english, translated) in catalog(language).unwrap().entries {
+                assert_eq!(
+                    english.matches("{}").count(),
+                    translated.matches("{}").count(),
+                    "{language:?}: {english} => {translated}"
+                );
+            }
+        }
     }
 
     /// The first string argument of each call that shows text in one source file.
@@ -772,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn every_string_the_interface_shows_has_a_spanish_entry() {
+    fn every_string_the_interface_shows_has_an_entry_in_every_language() {
         let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui");
         let mut sources = vec![std::fs::read_to_string(ui.with_extension("rs")).unwrap()];
         for entry in std::fs::read_dir(&ui).unwrap() {
@@ -781,17 +532,22 @@ mod tests {
                 sources.push(std::fs::read_to_string(path).unwrap());
             }
         }
-        let table = include_str!("i18n.rs");
-        let mut missing: Vec<String> = sources
+        let mut shown: Vec<String> = sources
             .iter()
             .flat_map(|source| shown_literals(source))
-            .filter(|literal| !table.contains(&format!("\"{literal}\" =>")))
             .collect();
-        missing.sort();
-        missing.dedup();
-        assert!(
-            missing.is_empty(),
-            "interface strings without a Spanish entry: {missing:?}"
-        );
+        shown.sort();
+        shown.dedup();
+        for language in translated_languages() {
+            let entries = catalog(language).unwrap().entries;
+            let missing: Vec<&String> = shown
+                .iter()
+                .filter(|literal| !entries.iter().any(|(key, _)| key == literal))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "interface strings without a {language:?} entry: {missing:?}"
+            );
+        }
     }
 }

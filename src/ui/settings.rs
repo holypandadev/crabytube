@@ -50,13 +50,12 @@ fn masonry_columns(heights: &[f32]) -> Vec<usize> {
         .collect()
 }
 
-/// A size in MiB with one decimal place; Spanish writes the decimal separator as a comma.
+/// A size in MiB with one decimal place, with the decimal separator of the language.
 fn mib(bytes: u64, language: UiLanguage) -> String {
-    let value = format!("{:.1}", bytes as f64 / 1_048_576.0);
-    match language {
-        UiLanguage::English => format!("{value} MiB"),
-        UiLanguage::Spanish => format!("{} MiB", value.replace('.', ",")),
-    }
+    format!(
+        "{} MiB",
+        crate::i18n::decimal(language, bytes as f64 / 1_048_576.0, 1)
+    )
 }
 
 impl App {

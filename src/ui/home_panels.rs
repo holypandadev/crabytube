@@ -19,6 +19,7 @@ use iced::widget::{Space, button, column, container, mouse_area, row, scrollable
 use iced::{Alignment, Color, Element, Length, Padding};
 use std::sync::Arc;
 use std::time::Duration;
+use unicode_width::UnicodeWidthStr;
 
 /// Edge of the thumbnails in "Jump back in".
 pub(super) const JUMP_THUMB: f32 = 36.0;
@@ -79,15 +80,16 @@ fn greeting_for(part: DayPart) -> &'static str {
     }
 }
 
-/// "21:14 · THURSDAY 09 OCT" in Spanish, "9:14 PM · THURSDAY 09 OCT" in English, with the weekday
-/// and month already translated.
-fn clock_line(clock: LocalClock, twelve_hour: bool, weekday: &str, month: &str) -> String {
+/// "21:14 · JUEVES 09 OCT" in Spanish, "9:14 PM · THURSDAY 09 OCT" in English: the time, then the
+/// date as the language writes it.
+fn clock_line(clock: LocalClock, twelve_hour: bool, language: UiLanguage) -> String {
+    let weekday = WEEKDAYS[usize::from(clock.weekday % 7)];
+    let month_number = clock.month.clamp(1, 12);
+    let month = MONTHS[usize::from(month_number - 1)];
     format!(
-        "{} · {} {:02} {}",
+        "{} · {}",
         clock_time(clock, twelve_hour),
-        weekday,
-        clock.day,
-        month
+        crate::i18n::date_line(language, weekday, clock.day, month, month_number)
     )
 }
 
@@ -115,7 +117,7 @@ pub(super) fn chip_queries(searches: &[String], width: f32, narrow: bool) -> Vec
     let mut chips: Vec<String> = Vec::new();
     let mut used = 0.0;
     for query in searches.iter().take(MAX_CHIPS) {
-        let chip = query.chars().count() as f32 * CHIP_CHAR_W + CHIP_PADDING;
+        let chip = query.width() as f32 * CHIP_CHAR_W + CHIP_PADDING;
         let next = if chips.is_empty() {
             chip
         } else {
@@ -135,10 +137,8 @@ impl App {
     /// one line when it does not.
     pub(super) fn greeting_view(&self, layout: &HomeLayout) -> Element<'_, Message> {
         let clock = self.clock;
-        let weekday = self.tr_static(WEEKDAYS[usize::from(clock.weekday % 7)]);
-        let month = self.tr_static(MONTHS[usize::from(clock.month.clamp(1, 12) - 1)]);
         let twelve_hour = uses_twelve_hour_clock(self.preferences.ui_language);
-        let stamp = clock_line(clock, twelve_hour, weekday, month);
+        let stamp = clock_line(clock, twelve_hour, self.preferences.ui_language);
         let greeting = self.tr_static(greeting_for(day_part(clock.hour)));
         let content: Element<'_, Message> = match layout.greeting {
             GreetingSize::Full => column![
@@ -182,7 +182,7 @@ impl App {
             .replacen("{}", error, 1);
         let retry = self.tr("Retry").into_owned();
         // The button is as wide as its label, plus its padding and border, and the gap before it.
-        let retry_room = retry.chars().count() as f32 * TEXT_CAPTION * 0.6 + REFRESH_RETRY_EXTRA;
+        let retry_room = retry.width() as f32 * TEXT_CAPTION * 0.6 + REFRESH_RETRY_EXTRA;
         let line = row![
             label(
                 fit(&text, layout.search_width - retry_room, TEXT_CAPTION),
@@ -550,8 +550,12 @@ mod tests {
             month: 10,
         };
         assert_eq!(
-            clock_line(clock, false, "THURSDAY", "OCT"),
+            clock_line(clock, false, UiLanguage::English),
             "21:04 · THURSDAY 09 OCT"
+        );
+        assert_eq!(
+            clock_line(clock, false, UiLanguage::Spanish),
+            "21:04 · JUEVES 09 OCT"
         );
     }
 
@@ -565,19 +569,19 @@ mod tests {
             month: 10,
         };
         assert_eq!(
-            clock_line(at(21), true, "THURSDAY", "OCT"),
+            clock_line(at(21), true, UiLanguage::English),
             "9:05 PM · THURSDAY 09 OCT"
         );
         assert_eq!(
-            clock_line(at(0), true, "THURSDAY", "OCT"),
+            clock_line(at(0), true, UiLanguage::English),
             "12:05 AM · THURSDAY 09 OCT"
         );
         assert_eq!(
-            clock_line(at(12), true, "THURSDAY", "OCT"),
+            clock_line(at(12), true, UiLanguage::English),
             "12:05 PM · THURSDAY 09 OCT"
         );
         assert_eq!(
-            clock_line(at(0), false, "THURSDAY", "OCT"),
+            clock_line(at(0), false, UiLanguage::English),
             "00:05 · THURSDAY 09 OCT"
         );
         assert!(uses_twelve_hour_clock(UiLanguage::English));
