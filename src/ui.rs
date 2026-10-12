@@ -2543,19 +2543,25 @@ impl App {
         }
         let track = track?;
         self.announced_track = Some(track.video_id.clone());
-        let notice = crate::notifications::TrackNotice {
+        let notice = self.notice_for(track);
+        Some(Task::perform(
+            crate::notifications::show(notice),
+            Message::TrackNotificationSent,
+        ))
+    }
+
+    /// What a track notification shows: the title as the app shows it, without trailing tags such
+    /// as "(Official Video)", and the cover if it is already on disk.
+    fn notice_for(&self, track: Track) -> crate::notifications::TrackNotice {
+        crate::notifications::TrackNotice {
             replaces_id: self.track_notice_id,
             cover: track
                 .thumbnail_url
                 .as_deref()
                 .and_then(crate::artwork::saved_cover_path),
-            title: track.title,
+            title: shell::display_title(&track.title).to_owned(),
             artist: track.artist,
-        };
-        Some(Task::perform(
-            crate::notifications::show(notice),
-            Message::TrackNotificationSent,
-        ))
+        }
     }
 
     /// Scrolls the lyrics view to the active line when the line changed.
@@ -3451,7 +3457,7 @@ mod tests {
     }
 
     #[test]
-    fn the_system_controls_and_discord_get_the_title_the_app_shows() {
+    fn the_system_controls_discord_and_notifications_get_the_title_the_app_shows() {
         let mut app = App::default();
         app.playback_status.track = Some(song("Song (Official Video) [Lyrics]"));
         // MPRIS, Now Playing and the other system controls read the player state.
@@ -3473,6 +3479,12 @@ mod tests {
                 .title,
             "(Official Video)"
         );
+        // The notification of a new track shows it too.
+        assert_eq!(
+            app.notice_for(song("Song (Official Video) [Lyrics]")).title,
+            "Song"
+        );
+        assert_eq!(app.notice_for(song("Song (Live)")).title, "Song (Live)");
         // The stored track keeps the original.
         assert_eq!(
             app.playback_status.track.as_ref().unwrap().title,
