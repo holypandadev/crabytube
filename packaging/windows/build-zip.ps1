@@ -4,9 +4,9 @@ Builds CrabyTube for Windows x64 and packs it into CrabyTube-windows-x64.zip.
 
 .DESCRIPTION
 Compiles the three programs of the workspace in release mode, then puts them in one folder with
-the first-launch notes and the license, and zips that folder (the files sit at the top level of
-the zip). The executables carry the application icon and their version information, which the
-build embeds from packaging/windows/crabytube.ico. Nothing is signed.
+the first-launch notes, the license and the third-party notices, and zips that folder (the files
+sit at the top level of the zip). The executables carry the application icon and their version
+information, which the build embeds from packaging/windows/crabytube.ico. Nothing is signed.
 
   powershell -ExecutionPolicy Bypass -File packaging\windows\build-zip.ps1
 
@@ -97,6 +97,7 @@ foreach ($name in $programs.Keys) {
 }
 Copy-TextFile (Join-Path $here 'README-first-launch.txt') (Join-Path $stage 'README-first-launch.txt')
 Copy-TextFile (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
+Copy-TextFile (Join-Path $root 'docs\licenses.md') (Join-Path $stage 'THIRD-PARTY-LICENSES.md')
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)

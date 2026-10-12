@@ -12,7 +12,8 @@ What is in this folder
   CrabyTube.exe            The application. Start this one.
   botguard-helper.exe      Two small programs that CrabyTube starts by itself when it plays a
   js-challenge-helper.exe  song. Do not move, rename or delete them.
-  LICENSE.txt              The license (GPL-3.0-or-later).
+  LICENSE.txt              The license of CrabyTube (GPL-3.0-or-later).
+  THIRD-PARTY-LICENSES.md  The components CrabyTube uses and their licenses.
   README-first-launch.txt  This file.
 
 Keep all the files together in one folder: CrabyTube looks for its helper programs next to
