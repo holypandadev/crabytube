@@ -547,10 +547,17 @@ impl App {
     fn show_window_from_tray_task(&mut self) -> Task<Message> {
         self.window_hidden_to_tray = false;
         iced::window::latest().and_then(move |id| {
-            Task::batch([
-                iced::window::set_mode(id, iced::window::Mode::Windowed),
-                iced::window::gain_focus(id),
-            ])
+            // Restore the window only when it is minimized. Wayland does not report that
+            // state, so nothing is sent there.
+            iced::window::set_mode(id, iced::window::Mode::Windowed)
+                .chain(iced::window::is_minimized(id).and_then(move |minimized| {
+                    if minimized {
+                        iced::window::minimize(id, false)
+                    } else {
+                        Task::none()
+                    }
+                }))
+                .chain(iced::window::gain_focus(id))
         })
     }
 
@@ -3325,6 +3332,17 @@ mod tests {
         assert!(should_close_to_tray(true, true));
         assert!(!should_close_to_tray(false, true));
         assert!(!should_close_to_tray(true, false));
+    }
+
+    #[test]
+    fn a_second_launch_or_tray_show_produces_window_work() {
+        // Window calls run in Iced's runtime, so the test only checks that the request
+        // produces a task; `units()` is 0 for `Task::none()`.
+        let mut app = App::default();
+        let second_launch = app.update(Message::ShowWindowRequested);
+        assert!(second_launch.units() > 0);
+        let tray_show = app.update(Message::TrayCommand(crate::tray::TrayCommand::ShowWindow));
+        assert!(tray_show.units() > 0);
     }
 
     #[test]
