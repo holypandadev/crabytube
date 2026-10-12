@@ -45,6 +45,10 @@ struct PlayerClient {
 /// A player page older than this is fetched again, so a stale challenge or cipher cannot stay for days.
 const PLAYER_RUNTIME_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
+/// How long a play waits for a prewarm that still fetches the player data. Past this the play fetches the data
+/// itself.
+const PREWARM_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// Whether a cached player runtime, fetched at `fetched_at`, may still be used at `now`.
 fn runtime_is_fresh(fetched_at: std::time::Instant, now: std::time::Instant) -> bool {
     now.saturating_duration_since(fetched_at) < PLAYER_RUNTIME_TTL
@@ -493,8 +497,9 @@ pub struct YouTubeStreamResolver {
     profile: ClientProfile,
     runtime: tokio::sync::Mutex<Option<PlayerRuntime>>,
     player_cache: tokio::sync::Mutex<HashMap<String, PlayerJsCacheEntry>>,
-    /// The prewarm still fetching the player data, if any. A Play cancels it and fetches the data itself.
-    prewarming: std::sync::Mutex<Option<CancellationToken>>,
+    /// Set while a prewarm is fetching the player data. The receiver turns true when that prewarm ends. A Play
+    /// waits for it for at most `PREWARM_WAIT`, rather than sending the same requests again.
+    prewarming: std::sync::Mutex<Option<tokio::sync::watch::Receiver<bool>>>,
     /// Plays live broadcasts that the primary client refuses: the mobile web client serves their audio.
     live_fallback: Option<Box<YouTubeStreamResolver>>,
 }
@@ -651,7 +656,7 @@ impl YouTubeStreamResolver {
         cancellation: CancellationToken,
         used_saved: &mut bool,
     ) -> Result<ValidatedPlaybackResolution, StreamError> {
-        self.cancel_prewarm();
+        self.wait_for_prewarm(&cancellation).await?;
         let mut max_validation_attempts = if self.profile == ClientProfile::WebMusic {
             1
         } else {
@@ -1048,15 +1053,20 @@ impl YouTubeStreamResolver {
         }
     }
 
-    /// Stops an unfinished prewarm, so a Play fetches the player data alone rather than wait for it.
-    fn cancel_prewarm(&self) {
-        let token = self
+    /// Waits for a prewarm that still fetches the player data, for at most `PREWARM_WAIT`, instead of sending the
+    /// same requests again. A cancelled play stops waiting.
+    async fn wait_for_prewarm(&self, cancellation: &CancellationToken) -> Result<(), StreamError> {
+        let pending = self
             .prewarming
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(token) = token {
-            token.cancel();
+            .clone();
+        let Some(mut finished) = pending else {
+            return Ok(());
+        };
+        tokio::select! {
+            _ = cancellation.cancelled() => Err(StreamError::Cancelled),
+            _ = tokio::time::timeout(PREWARM_WAIT, finished.wait_for(|done| *done)) => Ok(()),
         }
     }
 
@@ -1539,11 +1549,13 @@ async fn retry_config_get(
 #[async_trait]
 impl StreamResolver for YouTubeStreamResolver {
     async fn prewarm(&self) {
+        // The prewarm stays marked as unfinished until it ends, so a play that comes meanwhile waits for it.
         let token = CancellationToken::new();
+        let (finished, pending) = tokio::sync::watch::channel(false);
         *self
             .prewarming
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pending);
         let result = match self.player_runtime(&token).await {
             // The player JavaScript is read here too, so a play that comes later does not wait for it. It is
             // downloaded only when its version is not on disk yet. No BotGuard token is minted at startup.
@@ -1553,6 +1565,7 @@ impl StreamResolver for YouTubeStreamResolver {
                 .map(|()| runtime),
             other => other,
         };
+        let _ = finished.send(true);
         *self
             .prewarming
             .lock()
@@ -2454,16 +2467,53 @@ mod tests {
         assert_eq!(fingerprint, super::sha256_hex(b"player"));
     }
 
-    #[test]
-    fn a_play_cancels_an_unfinished_prewarm_once() {
+    #[tokio::test]
+    async fn a_play_waits_for_an_unfinished_prewarm_instead_of_repeating_it() {
         let resolver = super::YouTubeStreamResolver::new(crate::music::YouTubeSession::default());
-        let prewarm = tokio_util::sync::CancellationToken::new();
-        *resolver.prewarming.lock().unwrap() = Some(prewarm.clone());
-        resolver.cancel_prewarm();
-        assert!(prewarm.is_cancelled());
-        assert!(resolver.prewarming.lock().unwrap().is_none());
-        // A second play finds nothing left to cancel.
-        resolver.cancel_prewarm();
+        let (finished, pending) = tokio::sync::watch::channel(false);
+        *resolver.prewarming.lock().unwrap() = Some(pending);
+        let started = std::time::Instant::now();
+        let prewarm = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+            let _ = finished.send(true);
+        });
+        resolver
+            .wait_for_prewarm(&CancellationToken::new())
+            .await
+            .expect("the wait ends when the prewarm does");
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(50),
+            "the play did not wait"
+        );
+        assert!(
+            started.elapsed() < super::PREWARM_WAIT,
+            "the wait is bounded"
+        );
+        prewarm.await.expect("the prewarm task ends");
+    }
+
+    #[tokio::test]
+    async fn a_play_without_a_prewarm_does_not_wait() {
+        let resolver = super::YouTubeStreamResolver::new(crate::music::YouTubeSession::default());
+        assert!(
+            resolver
+                .wait_for_prewarm(&CancellationToken::new())
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_play_stops_waiting_for_the_prewarm() {
+        let resolver = super::YouTubeStreamResolver::new(crate::music::YouTubeSession::default());
+        let (_finished, pending) = tokio::sync::watch::channel(false);
+        *resolver.prewarming.lock().unwrap() = Some(pending);
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        assert!(matches!(
+            resolver.wait_for_prewarm(&cancellation).await,
+            Err(StreamError::Cancelled)
+        ));
     }
 
     #[tokio::test]
