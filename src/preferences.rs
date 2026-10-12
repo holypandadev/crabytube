@@ -255,8 +255,11 @@ pub struct Preferences {
     /// Obsolete: no longer read or written; kept so older state files still load.
     #[serde(skip_serializing)]
     pub sidebar_collapsed: bool,
+    /// Size of the window when it is not maximized.
     pub window_width: f32,
     pub window_height: f32,
+    /// Whether the window was maximized when the app last ran.
+    pub window_maximized: bool,
     /// Obsolete: no longer read or written; kept so older state files still load.
     #[serde(skip_serializing)]
     pub ui_font_family: UiFontFamily,
@@ -311,6 +314,7 @@ impl Default for Preferences {
             } else {
                 900.0
             },
+            window_maximized: false,
             ui_font_family: UiFontFamily::default(),
             ui_language: UiLanguage::default(),
             ui_density: UiDensity::default(),
@@ -978,8 +982,20 @@ mod tests {
         assert!(p.remember_queue);
         assert_eq!(p.window_width, Preferences::default().window_width);
         assert_eq!(p.window_height, Preferences::default().window_height);
+        assert!(!p.window_maximized);
         assert_eq!(p.ui_language, UiLanguage::English);
         assert_eq!(p.ui_density, UiDensity::Comfortable);
+    }
+
+    #[test]
+    fn the_maximized_flag_round_trips() {
+        let preferences = Preferences {
+            window_maximized: true,
+            ..Preferences::default()
+        };
+        let written = serde_json::to_string(&preferences).unwrap();
+        let read: Preferences = serde_json::from_str(&written).unwrap();
+        assert!(read.window_maximized);
     }
 
     #[test]

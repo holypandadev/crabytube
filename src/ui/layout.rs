@@ -33,6 +33,50 @@ pub fn clamped_window(width: f32, height: f32) -> (f32, f32) {
     (width.max(MIN_WIDTH), height.max(MIN_HEIGHT))
 }
 
+/// The window size and maximized flag to keep after a resize. A maximized window leaves the saved
+/// size alone, so restoring it brings the earlier size back instead of the whole monitor. A size
+/// below the minimum, which is what a minimized window reports, changes nothing.
+pub fn remembered_geometry(
+    saved: ((f32, f32), bool),
+    reported: (f32, f32),
+    maximized: bool,
+) -> ((f32, f32), bool) {
+    if reported.0 < MIN_WIDTH || reported.1 < MIN_HEIGHT {
+        return saved;
+    }
+    if maximized {
+        (saved.0, true)
+    } else {
+        (reported, false)
+    }
+}
+
+/// How to bring a window that opened at its saved size onto the monitor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FitAdjustment {
+    pub size: (f32, f32),
+    /// Where to move the window, when it stands on the monitor at the origin and so can be placed.
+    pub position: Option<(f32, f32)>,
+}
+
+/// What to change when the saved size is larger than the monitor: the size is cut with
+/// `fit_to_monitor` and the window is centred if its corner is on the monitor at the origin. A
+/// window that fits, wherever it stands, is left exactly as it is.
+pub fn fit_saved_window(
+    size: (f32, f32),
+    monitor: (f32, f32),
+    position: Option<(f32, f32)>,
+) -> Option<FitAdjustment> {
+    if size.0 <= monitor.0 && size.1 <= monitor.1 {
+        return None;
+    }
+    let size = fit_to_monitor(size, monitor);
+    let position = position
+        .filter(|(x, y)| (0.0..monitor.0).contains(x) && (0.0..monitor.1).contains(y))
+        .map(|_| ((monitor.0 - size.0) / 2.0, (monitor.1 - size.1) / 2.0));
+    Some(FitAdjustment { size, position })
+}
+
 /// Bounded row window for long vertical lists. The returned range includes
 /// overscan rows on both sides so small scroll changes do not churn the view.
 pub fn virtual_range(
@@ -93,6 +137,79 @@ mod tests {
             fit_to_monitor((1440.0, 900.0), (400.0, 300.0)),
             (MIN_WIDTH, MIN_HEIGHT)
         );
+    }
+
+    #[test]
+    fn a_maximized_window_keeps_the_saved_size() {
+        let saved = ((1440.0, 900.0), false);
+        // Maximizing reports the whole monitor: the size stays and the flag is raised.
+        assert_eq!(
+            remembered_geometry(saved, (2560.0, 1392.0), true),
+            ((1440.0, 900.0), true)
+        );
+        // Further resizes while maximized change nothing.
+        assert_eq!(
+            remembered_geometry(((1440.0, 900.0), true), (1920.0, 1080.0), true),
+            ((1440.0, 900.0), true)
+        );
+        // Restoring reports the normal size and lowers the flag.
+        assert_eq!(
+            remembered_geometry(((1440.0, 900.0), true), (1300.0, 800.0), false),
+            ((1300.0, 800.0), false)
+        );
+        // A plain resize is kept.
+        assert_eq!(
+            remembered_geometry(saved, (1000.0, 700.0), false),
+            ((1000.0, 700.0), false)
+        );
+    }
+
+    #[test]
+    fn a_minimized_window_changes_nothing() {
+        let saved = ((1440.0, 900.0), true);
+        assert_eq!(remembered_geometry(saved, (0.0, 0.0), false), saved);
+        assert_eq!(
+            remembered_geometry(saved, (MIN_WIDTH - 1.0, 900.0), false),
+            saved
+        );
+    }
+
+    #[test]
+    fn a_saved_size_that_fits_the_monitor_is_not_touched() {
+        let monitor = (2560.0, 1440.0);
+        assert_eq!(fit_saved_window((1440.0, 900.0), monitor, None), None);
+        // Exactly the monitor still fits, and so does a window standing anywhere.
+        assert_eq!(
+            fit_saved_window((2560.0, 1440.0), monitor, Some((300.0, 300.0))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_saved_size_larger_than_the_monitor_is_cut_and_centred() {
+        let monitor = (2560.0, 1440.0);
+        let adjustment = fit_saved_window((2600.0, 1392.0), monitor, Some((312.0, 312.0)))
+            .expect("larger than the monitor");
+        let (width, height) = adjustment.size;
+        assert!((width - 2304.0).abs() < 0.01 && (height - 1296.0).abs() < 0.01);
+        let (x, y) = adjustment
+            .position
+            .expect("a window on the monitor is centred");
+        assert!((x - 128.0).abs() < 0.01 && (y - 72.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn an_oversized_window_on_another_monitor_or_unplaceable_is_only_resized() {
+        let monitor = (1920.0, 1080.0);
+        let beyond = fit_saved_window((2560.0, 1392.0), monitor, Some((2000.0, 100.0)))
+            .expect("larger than the monitor");
+        assert_eq!(beyond.position, None);
+        let unknown = fit_saved_window((2560.0, 1392.0), monitor, None).expect("larger");
+        assert_eq!(unknown.position, None);
+        // Only the side that does not fit is cut when the other is within 90 %.
+        let tall = fit_saved_window((1200.0, 1500.0), monitor, None).expect("too tall");
+        assert_eq!(tall.size.0, 1200.0);
+        assert!((tall.size.1 - 972.0).abs() < 0.01);
     }
 
     #[test]

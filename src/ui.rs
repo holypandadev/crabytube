@@ -170,6 +170,8 @@ struct App {
     artwork_low_memory: bool,
     scroll_preload_pending: bool,
     resize_work_generation: u64,
+    /// Set when the window opened at a saved size that has not been compared with the monitor yet.
+    saved_window_unchecked: bool,
     scroll_preload_timer: bool,
     #[cfg(feature = "diagnostics")]
     diagnostic_scroll_step: u32,
@@ -263,7 +265,9 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ClockTick
         | Message::StatusReading(_)
         | Message::Resized { .. }
+        | Message::WindowGeometry { .. }
         | Message::MonitorMeasured(_)
+        | Message::SavedWindowMeasured { .. }
         | Message::ResizeWorkDue(_)
         | Message::DisplayScaleChanged(_)
         | Message::WindowFocusChanged(_)
@@ -775,12 +779,59 @@ impl App {
                 // Sizes arrive divided by the zoom in effect; undo it first.
                 self.os_window = (width * self.ui_zoom, height * self.ui_zoom);
                 self.apply_ui_zoom();
-                let (width, height) = self.os_window;
-                if width >= layout::MIN_WIDTH && height >= layout::MIN_HEIGHT {
-                    self.preferences.window_width = width;
-                    self.preferences.window_height = height;
-                }
-                return self.schedule_resize_work();
+                // Whether the window is maximized decides if this size is kept.
+                let size = self.os_window;
+                let geometry = iced::window::latest()
+                    .and_then(iced::window::is_maximized)
+                    .map(move |maximized| Message::WindowGeometry { size, maximized });
+                return Task::batch([geometry, self.schedule_resize_work()]);
+            }
+            Message::WindowGeometry { size, maximized } => {
+                let ((width, height), maximized) = layout::remembered_geometry(
+                    (
+                        (
+                            self.preferences.window_width,
+                            self.preferences.window_height,
+                        ),
+                        self.preferences.window_maximized,
+                    ),
+                    size,
+                    maximized,
+                );
+                self.preferences.window_width = width;
+                self.preferences.window_height = height;
+                self.preferences.window_maximized = maximized;
+            }
+            Message::SavedWindowMeasured { size, monitor } => {
+                // The window and the monitor were measured together, so the same zoom divides
+                // both; it is the zoom in effect now, because the layout has settled.
+                let zoom = self.ui_zoom;
+                let current = (size.width * zoom, size.height * zoom);
+                // The sizes reported while the window opened mix zooms, so this reading, taken
+                // once the layout is steady, is the one that is kept.
+                let reading = self.update(Message::Resized {
+                    width: size.width,
+                    height: size.height,
+                });
+                let Some(monitor) = monitor else {
+                    return reading;
+                };
+                let monitor = (monitor.width * zoom, monitor.height * zoom);
+                let fit = iced::window::latest().and_then(move |id| {
+                    iced::window::position(id).then(move |position| {
+                        let position = position.map(|position| (position.x, position.y));
+                        let Some(fit) = layout::fit_saved_window(current, monitor, position) else {
+                            return Task::none();
+                        };
+                        let mut tasks =
+                            vec![iced::window::resize(id, resize_request(fit.size, zoom))];
+                        if let Some((x, y)) = fit.position {
+                            tasks.push(iced::window::move_to(id, iced::Point::new(x, y)));
+                        }
+                        Task::batch(tasks)
+                    })
+                });
+                return Task::batch([reading, fit]);
             }
             Message::ResizeWorkDue(generation) => {
                 if generation == self.resize_work_generation {
@@ -788,7 +839,11 @@ impl App {
                     // sizes and save the geometry once.
                     self.rebuild_lyrics_heights();
                     self.persist();
-                    return self.preload_current_page_artwork();
+                    let artwork = self.preload_current_page_artwork();
+                    if std::mem::take(&mut self.saved_window_unchecked) {
+                        return Task::batch([artwork, Self::measure_saved_window()]);
+                    }
+                    return artwork;
                 }
             }
             Message::DisplayScaleChanged(scale_factor) => {
@@ -2059,6 +2114,7 @@ impl App {
             artwork_low_memory: false,
             scroll_preload_pending: false,
             resize_work_generation: 0,
+            saved_window_unchecked: false,
             scroll_preload_timer: false,
             #[cfg(feature = "diagnostics")]
             diagnostic_scroll_step: 0,
@@ -2168,6 +2224,9 @@ impl App {
                 .and_then(iced::window::monitor_size)
                 .map(Message::MonitorMeasured)
         } else {
+            // A window that opens at a saved size is compared with the monitor once its layout
+            // has settled; a maximized one already fills it.
+            app.saved_window_unchecked = !opens_maximized();
             Task::none()
         };
         app.mpris.update(app.mpris_player_state());
@@ -2304,12 +2363,13 @@ impl App {
         self.rebuild_lyrics_heights();
     }
 
-    /// The preferences Reset returns to: the defaults, except that the window size, the language and
-    /// the lyrics offsets stay.
+    /// The preferences Reset returns to: the defaults, except that the window geometry, the
+    /// language and the lyrics offsets stay.
     fn reset_preferences(current: &Preferences) -> Preferences {
         Preferences {
             window_width: current.window_width,
             window_height: current.window_height,
+            window_maximized: current.window_maximized,
             ui_language: current.ui_language,
             lyrics_offsets: current.lyrics_offsets.clone(),
             lyrics_offset_order: current.lyrics_offset_order.clone(),
@@ -2319,7 +2379,10 @@ impl App {
 
     fn apply_snapshot(&mut self, mut snapshot: Snapshot) -> Task<Message> {
         snapshot.normalize();
+        let window_maximized = self.preferences.window_maximized;
         self.preferences = snapshot.preferences.clone();
+        // An imported file says nothing about how this window stands now.
+        self.preferences.window_maximized = window_maximized;
         let (window_width, window_height) = layout::clamped_window(
             self.preferences.window_width,
             self.preferences.window_height,
@@ -2390,6 +2453,16 @@ impl App {
         theme::set_hairline_for_zoom(self.ui_zoom);
         self.window_width = width / self.ui_zoom;
         self.window_height = height / self.ui_zoom;
+    }
+
+    /// Measures the window and its monitor together, so both are divided by the same zoom.
+    fn measure_saved_window() -> Task<Message> {
+        iced::window::latest().and_then(|id| {
+            iced::window::size(id).then(move |size| {
+                iced::window::monitor_size(id)
+                    .map(move |monitor| Message::SavedWindowMeasured { size, monitor })
+            })
+        })
     }
 
     /// Debounces work that depends on the window or page size.
@@ -3063,6 +3136,18 @@ fn opens_at_default_size() -> bool {
 
 static FIRST_LAUNCH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
+/// Whether the window opens maximized: it was maximized when the app last ran. The saved size is
+/// still the one the window returns to when it is restored.
+fn opens_maximized() -> bool {
+    #[cfg(feature = "diagnostics")]
+    if diagnostic_window_size().is_some() || diagnostic_viewport().is_some() {
+        return false;
+    }
+    startup_state()
+        .as_ref()
+        .is_ok_and(|snapshot| snapshot.preferences.window_maximized)
+}
+
 /// The saved window size, so the window opens at it instead of being resized
 /// after mapping (Wayland compositors may ignore a later resize request).
 fn initial_window_size() -> iced::Size {
@@ -3286,6 +3371,7 @@ pub fn run() -> iced::Result {
         .scale_factor(|app: &App| app.ui_zoom)
         .window(iced::window::Settings {
             size: initial_window_size(),
+            maximized: opens_maximized(),
             position: if opens_at_default_size() {
                 iced::window::Position::Centered
             } else {
@@ -4941,13 +5027,70 @@ mod tests {
         let current = Preferences {
             ui_language: crate::preferences::UiLanguage::Spanish,
             window_width: 900.0,
+            window_maximized: true,
             shuffle: true,
             ..Preferences::default()
         };
         let reset = App::reset_preferences(&current);
         assert_eq!(reset.ui_language, crate::preferences::UiLanguage::Spanish);
         assert_eq!(reset.window_width, current.window_width);
+        assert!(reset.window_maximized);
         assert!(!reset.shuffle);
+    }
+
+    #[test]
+    fn maximizing_keeps_the_saved_size_and_restoring_replaces_it() {
+        let mut app = App::default();
+        app.preferences.window_width = 1440.0;
+        app.preferences.window_height = 900.0;
+        drop(app.update(Message::WindowGeometry {
+            size: (2560.0, 1392.0),
+            maximized: true,
+        }));
+        assert!(app.preferences.window_maximized);
+        assert_eq!(app.preferences.window_width, 1440.0);
+        assert_eq!(app.preferences.window_height, 900.0);
+        drop(app.update(Message::WindowGeometry {
+            size: (1300.0, 800.0),
+            maximized: false,
+        }));
+        assert!(!app.preferences.window_maximized);
+        assert_eq!(app.preferences.window_width, 1300.0);
+        assert_eq!(app.preferences.window_height, 800.0);
+    }
+
+    #[test]
+    fn the_settled_measurement_replaces_the_readings_taken_while_opening() {
+        let mut app = App {
+            os_window: (1632.857, 1020.5357),
+            ..App::default()
+        };
+        drop(app.update(Message::SavedWindowMeasured {
+            size: iced::Size::new(1280.0, 800.0),
+            monitor: None,
+        }));
+        assert_eq!(app.os_window, (1280.0 * app.ui_zoom, 800.0 * app.ui_zoom));
+    }
+
+    #[test]
+    fn the_saved_window_is_compared_with_the_monitor_once() {
+        let mut app = App {
+            saved_window_unchecked: true,
+            ..App::default()
+        };
+        let generation = app.resize_work_generation;
+        drop(app.update(Message::ResizeWorkDue(generation)));
+        assert!(!app.saved_window_unchecked);
+    }
+
+    #[test]
+    fn importing_a_file_does_not_change_whether_the_window_is_maximized() {
+        let mut app = App::default();
+        app.preferences.window_maximized = true;
+        let mut snapshot = Snapshot::default();
+        snapshot.preferences.window_maximized = false;
+        let _ = app.apply_snapshot(snapshot);
+        assert!(app.preferences.window_maximized);
     }
 
     #[test]

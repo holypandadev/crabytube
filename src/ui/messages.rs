@@ -65,8 +65,19 @@ pub(super) enum Message {
         width: f32,
         height: f32,
     },
+    /// The window size after a resize, with whether the window is maximized, to keep for next time.
+    WindowGeometry {
+        size: (f32, f32),
+        maximized: bool,
+    },
     /// The size of the monitor the window opened on, asked for after a first launch.
     MonitorMeasured(Option<iced::Size>),
+    /// The window and the monitor it is on, measured once after the window opened at a saved size,
+    /// in case that size is larger than the monitor.
+    SavedWindowMeasured {
+        size: iced::Size,
+        monitor: Option<iced::Size>,
+    },
     DisplayScaleChanged(f32),
     LyricsLoaded {
         generation: u64,
