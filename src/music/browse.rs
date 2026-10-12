@@ -156,6 +156,38 @@ const BYLINE_TYPE_LABELS: &[&str] = &[
     "sencillo",
     "lista de reproducción",
     "episodio",
+    "pódcast",
+    "música",
+    "episódio",
+    "titre",
+    "vidéo",
+    "épisode",
+    "titel",
+    "folge",
+    "brano",
+    "singolo",
+    "puntata",
+    "композиция",
+    "видео",
+    "альбом",
+    "сингл",
+    "плейлист",
+    "выпуск",
+    "подкаст",
+    "曲",
+    "動画",
+    "アルバム",
+    "シングル",
+    "プレイリスト",
+    "エピソード",
+    "ポッドキャスト",
+    "歌曲",
+    "视频",
+    "专辑",
+    "单曲",
+    "播放列表",
+    "分集",
+    "播客",
 ];
 
 /// The artist part of an unlinked byline such as `Song • Artist • 3:45`:
@@ -565,6 +597,22 @@ mod byline_tests {
     fn unlinked_bylines_keep_only_the_artist() {
         assert_eq!(clean_byline("Canción • 6:10"), "");
         assert_eq!(clean_byline("Song • Daft Punk • 6:10"), "Daft Punk");
+        // The labels YouTube Music writes in the other interface languages.
+        for label in [
+            "Música",
+            "Titre",
+            "Titel",
+            "Brano",
+            "Композиция",
+            "曲",
+            "歌曲",
+        ] {
+            assert_eq!(
+                clean_byline(&format!("{label} • Daft Punk • 6:10")),
+                "Daft Punk",
+                "{label}"
+            );
+        }
         assert_eq!(
             clean_byline("Daft Punk • Random Access Memories • 2013"),
             "Daft Punk"
