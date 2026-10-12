@@ -42,3 +42,13 @@ Everything not listed below is unchanged from the published crate.
    Upstream measures an image by decoding it into the raster cache, and the cache is trimmed only at
    the end of a draw. An RGBA handle already carries its width and height, so it is returned as is.
    Without this, a window that is not drawn (minimized) keeps one decoded copy of every cover laid out.
+
+7. **Border stroke width** (`src/engine.rs`, `stroke_width`).
+   Border strokes are given a width 1/512 larger than the snapped border. tiny-skia rasterizes a
+   stroke of one device pixel or less as a hairline, with another algorithm that can place the line
+   on the neighbouring row or column. A 1 px border is `1 / zoom` wide in layout units, and the f32
+   rounding of `(1 / zoom) * zoom` falls just below 1 at some interface zooms (1.27, 1.45, 1.49,
+   1.54, 1.57 and 1.67 to 1.70, among others), so neighbouring borders took different paths and the
+   window outline came out broken. The widened stroke always takes the regular path, and the extra
+   0.2 % of a pixel is invisible. The tests in `src/engine.rs` run with
+   `cargo test -p iced_tiny_skia`.

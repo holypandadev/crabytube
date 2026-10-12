@@ -253,7 +253,7 @@ impl Engine {
                         ..tiny_skia::Paint::default()
                     },
                     &tiny_skia::Stroke {
-                        width: border_width,
+                        width: stroke_width(border_width),
                         ..tiny_skia::Stroke::default()
                     },
                     transform,
@@ -308,7 +308,7 @@ impl Engine {
                         ..tiny_skia::Paint::default()
                     },
                     &tiny_skia::Stroke {
-                        width: border_width,
+                        width: stroke_width(border_width),
                         ..tiny_skia::Stroke::default()
                     },
                     transform,
@@ -912,4 +912,60 @@ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
         false,
         tiny_skia::Transform::default(),
     );
+}
+
+/// The width handed to tiny-skia for a border stroke, which is the border width widened by a hair.
+///
+/// tiny-skia rasterizes a stroke of one device pixel or less as a hairline, with another
+/// algorithm that can put the line on the neighbouring row or column. A 1 px border is 1 / zoom
+/// wide in layout units, and the f32 rounding of `(1 / zoom) * zoom` falls a little below 1 for
+/// some zooms (1.27 and 1.45, for instance), so neighbouring borders took different paths and
+/// outlines came out broken. A border a hair wider than the snapped width always takes the regular
+/// path, and the extra 0.2 % of a pixel is invisible.
+fn stroke_width(border_width: f32) -> f32 {
+    border_width * (1.0 + 1.0 / 512.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The device width of a snapped border at a scale, as tiny-skia measures it, with and without
+    /// the widening.
+    fn device_width(logical_border: f32, scale: f32, widened: bool) -> f32 {
+        let snapped = (logical_border * scale).round().max(1.0) / scale;
+        let width = if widened { stroke_width(snapped) } else { snapped };
+        width * scale
+    }
+
+    #[test]
+    fn a_one_pixel_border_never_reaches_tiny_skia_as_a_hairline() {
+        // Interface zooms are whole hundredths from 1.00 to 3.00, and the border is 1 / zoom wide.
+        // The display scale multiplies the zoom into the scale of the renderer.
+        for display in [1.0_f32, 1.25, 1.5, 2.0, 3.0] {
+            for hundredths in 100..=300 {
+                let zoom = hundredths as f32 / 100.0;
+                let scale = display * zoom;
+                let width = device_width(1.0 / zoom, scale, true);
+                assert!(
+                    width > 1.0,
+                    "zoom {zoom} at display scale {display}: {width} device pixels"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn without_the_widening_some_zooms_fall_below_one_pixel() {
+        // The failure the widening prevents: at these zooms the product is below 1.
+        for zoom in [1.27_f32, 1.45, 1.67] {
+            assert!(device_width(1.0 / zoom, zoom, false) <= 1.0, "zoom {zoom}");
+        }
+    }
+
+    #[test]
+    fn the_widening_is_far_below_a_visible_fraction_of_a_pixel() {
+        assert!((device_width(1.0, 1.0, true) - 1.0).abs() < 0.003);
+        assert!((device_width(2.0 / 3.0, 3.0, true) - 2.0).abs() < 0.005);
+    }
 }
