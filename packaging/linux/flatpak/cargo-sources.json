@@ -5071,6 +5071,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/objc2-media-player/objc2-media-player-0.3.2.crate",
+        "sha256": "85f2a98483f6e76313cb85a5a185eaa3cda86a177b13a8852d56cbd0085bf635",
+        "dest": "cargo/vendor/objc2-media-player-0.3.2"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"85f2a98483f6e76313cb85a5a185eaa3cda86a177b13a8852d56cbd0085bf635\", \"files\": {}}",
+        "dest": "cargo/vendor/objc2-media-player-0.3.2",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/objc2-metal/objc2-metal-0.2.2.crate",
         "sha256": "dd0cba1276f6023976a406a14ffa85e1fdd19df6b0f737b063b95f6c8c7aadd6",
         "dest": "cargo/vendor/objc2-metal-0.2.2"
