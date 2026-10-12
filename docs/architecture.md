@@ -30,7 +30,8 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `storage.rs`, `temp_cleanup.rs` | Cache usage reporting and selective clearing; removal of leftover temporary files. |
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
 | `i18n.rs` | English/Spanish interface strings. |
-| `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). Other platforms use `mpris_stub.rs` and `tray_stub.rs`. |
+| `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). Other platforms use `tray_stub.rs`. |
+| `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what is not specific to macOS: the player state, the commands, and the rules for what to tell the system and when. Windows still uses `mpris_stub.rs`. |
 | `discord.rs` | Optional Discord Rich Presence over the local Discord IPC socket. |
 
 Catalog and playback code does not depend on Iced; the UI talks to them through `MusicService`,
@@ -164,7 +165,7 @@ individually.
   through `~/.config/autostart`. The window's application ID is `dev.holypanda.CrabyTube`, matching
   `packaging/linux/dev.holypanda.CrabyTube.desktop`.
 - **Windows:** the icon is embedded by `build.rs` (`winresource`).
-- **macOS:** `cargo bundle` uses the metadata in `[package.metadata.bundle]`.
+- **macOS:** media keys, headphone buttons and Control Center through `MPRemoteCommandCenter`, and Now Playing (title, artist, album, cover, position and a progress bar that advances by itself) through `MPNowPlayingInfoCenter`. The cover is read from the file the app already saved, never from a URL the system downloads. `packaging/macos/build-app.sh` builds the signed universal app bundle.
 - **All platforms:** optional Discord Rich Presence.
 
 ## Development tools

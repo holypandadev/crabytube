@@ -86,6 +86,9 @@ dependencies:
 | `image` 0.25, `zune-jpeg`, `png` | app (artwork) | MIT OR Apache-2.0 (`zune-jpeg` also Zlib) |
 | `zbus` 5 | app (MPRIS, notifications; Linux) | MIT |
 | `ksni` 0.3 | app (system tray; Linux) | Unlicense |
+| `objc2` 0.6, `block2` 0.6, `objc2-foundation` 0.3 | app (Now Playing and media keys; macOS) | MIT |
+| `objc2-app-kit` 0.3, `objc2-core-foundation` 0.3, `objc2-media-player` 0.3 | app (Now Playing and media keys; macOS) | Zlib OR Apache-2.0 OR MIT |
+| `libc` 0.2 | app (process memory and CPU readings; macOS) | MIT OR Apache-2.0 |
 | `discord-rich-presence` 1.1 | app (Discord Rich Presence) | MIT |
 | `serde`, `serde_json`, `json5`, `roxmltree`, `sha2`, `dirs`, `rand` | app, helpers | MIT OR Apache-2.0 (`json5`: MIT) |
 | `deno_core` 0.331, `deno_web`, `deno_console`, `deno_url`, `deno_webidl` | BotGuard helper | MIT |

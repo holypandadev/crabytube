@@ -63,7 +63,7 @@ Then copy `target/release/botguard-helper` and `target/release/js-challenge-help
 `CrabyTube.app/Contents/MacOS/`, next to the main executable.
 
 The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
-on Linux.
+on Linux. On macOS the media keys and Now Playing work from the application bundle.
 
 ## Local data
 
