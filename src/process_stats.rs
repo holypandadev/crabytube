@@ -1,18 +1,20 @@
 //! Memory and CPU use of this process, for the status line on Home. Linux reads them from
-//! `/proc` and macOS from `proc_pid_rusage`; other systems have no reading, and the status line
-//! then shows only its other parts.
+//! `/proc`, macOS from `proc_pid_rusage` and Windows from `GetProcessMemoryInfo` and
+//! `GetProcessTimes`; other systems have no reading, and the status line then shows only its
+//! other parts.
 
 use std::time::Instant;
 
 /// Clock ticks per second in `/proc/<pid>/stat` (`USER_HZ`), which is 100 on every Linux ABI. The
-/// macOS reading is converted to the same unit.
+/// macOS and Windows readings are converted to the same unit.
 const CLOCK_TICKS_PER_SECOND: f32 = 100.0;
 
 /// The raw counters behind one reading. CPU is a difference between two samples.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ProcessSample {
     /// Proportional set size, in KiB, from `/proc/self/smaps_rollup`. On macOS it is the physical
-    /// footprint, the figure Activity Monitor calls Memory.
+    /// footprint, the figure Activity Monitor calls Memory. On Windows it is the private working
+    /// set, the figure Task Manager shows in its Memory column.
     pub pss_kib: u64,
     /// User plus system time, in clock ticks.
     pub cpu_ticks: u64,
@@ -21,7 +23,7 @@ pub struct ProcessSample {
 
 /// Whether the readings exist here. Elsewhere the status line shows no memory or CPU, and no
 /// reader needs to run.
-pub const AVAILABLE: bool = cfg!(any(target_os = "linux", target_os = "macos"));
+pub const AVAILABLE: bool = cfg!(any(target_os = "linux", target_os = "macos", windows));
 
 /// What the status line shows: whole mebibytes of memory, and whole percent of one core since
 /// the previous sample. Rounding keeps the figure still while the process is idle.
@@ -86,7 +88,47 @@ pub fn sample() -> Option<ProcessSample> {
     })
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(windows)]
+pub fn sample() -> Option<ProcessSample> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX2,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+
+    let empty = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (empty, empty, empty, empty);
+    let size = size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32;
+    // SAFETY: the pseudo handle from `GetCurrentProcess` is always valid and needs no closing.
+    // `K32GetProcessMemoryInfo` fills a structure of at least `size` bytes, which is what the
+    // extended structure is, and `GetProcessTimes` fills the four `FILETIME` values it is given.
+    // Each result is read only when its call reports success.
+    let (private_bytes, times) = unsafe {
+        let process = GetCurrentProcess();
+        let mut memory: PROCESS_MEMORY_COUNTERS_EX2 = std::mem::zeroed();
+        memory.cb = size;
+        if K32GetProcessMemoryInfo(process, std::ptr::from_mut(&mut memory).cast(), size) == 0
+            || GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) == 0
+        {
+            return None;
+        }
+        (memory.PrivateWorkingSetSize as u64, (kernel, user))
+    };
+    let hundred_nanos =
+        |time: FILETIME| filetime_hundred_nanos(time.dwLowDateTime, time.dwHighDateTime);
+    Some(ProcessSample {
+        pss_kib: private_bytes / 1024,
+        cpu_ticks: cpu_ticks_from_hundred_nanos(
+            hundred_nanos(times.0).checked_add(hundred_nanos(times.1))?,
+        ),
+        taken: Instant::now(),
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub fn sample() -> Option<ProcessSample> {
     None
 }
@@ -95,6 +137,18 @@ pub fn sample() -> Option<ProcessSample> {
 #[cfg(any(target_os = "macos", test))]
 fn cpu_ticks_from_micros(micros: u64) -> u64 {
     micros / (1_000_000.0 / CLOCK_TICKS_PER_SECOND) as u64
+}
+
+/// Converts 100-nanosecond intervals, the unit of Windows file times, to clock ticks.
+#[cfg(any(windows, test))]
+fn cpu_ticks_from_hundred_nanos(hundred_nanos: u64) -> u64 {
+    hundred_nanos / (10_000_000.0 / CLOCK_TICKS_PER_SECOND) as u64
+}
+
+/// The 64-bit count of 100-nanosecond intervals held in the two halves of a `FILETIME`.
+#[cfg(any(windows, test))]
+fn filetime_hundred_nanos(low: u32, high: u32) -> u64 {
+    (u64::from(high) << 32) | u64::from(low)
 }
 
 /// Share of one core used between two samples, in percent (one core busy is 100).
@@ -161,6 +215,37 @@ mod tests {
         // Less than a tick rounds down.
         assert_eq!(cpu_ticks_from_micros(9_999), 0);
         assert_eq!(cpu_ticks_from_micros(10_000), 1);
+    }
+
+    #[test]
+    fn windows_file_times_become_clock_ticks() {
+        // 2.5 s of CPU is 25 million intervals of 100 ns, which is 250 ticks.
+        assert_eq!(cpu_ticks_from_hundred_nanos(25_000_000), 250);
+        // Less than a tick rounds down.
+        assert_eq!(cpu_ticks_from_hundred_nanos(99_999), 0);
+        assert_eq!(cpu_ticks_from_hundred_nanos(100_000), 1);
+        // The halves of a file time make one 64-bit count.
+        assert_eq!(filetime_hundred_nanos(0xFFFF_FFFF, 0), 0xFFFF_FFFF);
+        assert_eq!(filetime_hundred_nanos(1, 1), (1 << 32) + 1);
+        assert_eq!(filetime_hundred_nanos(0, 0x8000_0000), 1 << 63);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn this_process_reports_memory_and_cpu_time_on_windows() {
+        let first = sample().expect("a reading");
+        assert!(first.pss_kib > 1024, "private set of {} KiB", first.pss_kib);
+        // Burn a little CPU: the counter must move forward. Windows accounts CPU time in steps
+        // of a scheduler quantum, so spend several of them.
+        let started = Instant::now();
+        let mut sink = 0u64;
+        while started.elapsed() < Duration::from_millis(400) {
+            sink = sink.wrapping_add(std::hint::black_box(1));
+        }
+        std::hint::black_box(sink);
+        let second = sample().expect("a second reading");
+        assert!(second.cpu_ticks > first.cpu_ticks);
+        assert!(cpu_percent(&first, &second).is_some());
     }
 
     #[cfg(target_os = "macos")]
