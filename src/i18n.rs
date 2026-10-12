@@ -300,6 +300,9 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         "Space play/pause · ←/→ seek · Ctrl+K search · Esc back" => {
             "Espacio reproducir/pausar · ←/→ avanzar · Ctrl+K buscar · Esc volver"
         }
+        "Space play/pause · ←/→ seek · ⌘K search · Esc back" => {
+            "Espacio reproducir/pausar · ←/→ avanzar · ⌘K buscar · Esc volver"
+        }
         "Tap the heart on any song to save it here." => {
             "Pulsa el corazón de una canción para guardarla aquí."
         }
@@ -590,10 +593,40 @@ fn localized_cache_subject(label: &str) -> &str {
     }
 }
 
+/// The keys that focus the search field, as they are written on this platform.
+pub const SEARCH_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘K"
+} else {
+    "Ctrl+K"
+};
+
+/// The line in About that lists the main keys. It is a translation key: both spellings have a
+/// Spanish entry.
+pub const KEYS_HELP: &str = if cfg!(target_os = "macos") {
+    "Space play/pause · ←/→ seek · ⌘K search · Esc back"
+} else {
+    "Space play/pause · ←/→ seek · Ctrl+K search · Esc back"
+};
+
 #[cfg(test)]
 mod tests {
     use super::translate;
     use crate::preferences::UiLanguage;
+
+    #[test]
+    fn the_key_help_names_the_platform_shortcut_in_both_languages() {
+        use super::{KEYS_HELP, SEARCH_SHORTCUT};
+        assert!(KEYS_HELP.contains(SEARCH_SHORTCUT));
+        let spanish = translate(UiLanguage::Spanish, KEYS_HELP);
+        assert_ne!(spanish, KEYS_HELP, "the line must have a Spanish entry");
+        assert!(spanish.contains(SEARCH_SHORTCUT));
+        for variant in [
+            "Space play/pause · ←/→ seek · Ctrl+K search · Esc back",
+            "Space play/pause · ←/→ seek · ⌘K search · Esc back",
+        ] {
+            assert_ne!(translate(UiLanguage::Spanish, variant), variant);
+        }
+    }
 
     #[test]
     fn export_message_translates_for_any_absolute_path() {

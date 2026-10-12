@@ -418,7 +418,15 @@ impl App {
                     // The shortcut hint only where there is room and a keyboard.
                     let hint = hint && width >= NARROW_W;
                     Element::from(
-                        label(if hint { "Ctrl+K" } else { "" }, TEXT_CAPTION).color(FADED),
+                        label(
+                            if hint {
+                                crate::i18n::SEARCH_SHORTCUT
+                            } else {
+                                ""
+                            },
+                            TEXT_CAPTION,
+                        )
+                        .color(FADED),
                     )
                 } else {
                     button(icon("close", 16.0, INK))

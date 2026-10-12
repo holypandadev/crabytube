@@ -799,10 +799,7 @@ impl App {
                     std::env::consts::OS,
                     std::env::consts::ARCH
                 )),
-                line(
-                    self.tr("Space play/pause · ←/→ seek · Ctrl+K search · Esc back")
-                        .into_owned(),
-                ),
+                line(self.tr(crate::i18n::KEYS_HELP).into_owned()),
                 line(
                     self.tr("GPL-3.0-or-later. Not affiliated with Google or YouTube.")
                         .into_owned(),
