@@ -77,6 +77,34 @@ fn configuration_refused(error: &StreamError) -> bool {
     )
 }
 
+/// Runs one resolution, which reports whether it used a saved player configuration. A saved configuration
+/// that YouTube refuses is forgotten, and the track is resolved once more with the pages fetched again. A
+/// refusal of that second attempt is final.
+async fn retry_once_without_a_refused_configuration<T, Attempt, Attempted, Forget, Forgotten>(
+    mut attempt: Attempt,
+    mut forget: Forget,
+) -> Result<T, StreamError>
+where
+    T: Send,
+    Attempt: FnMut() -> Attempted,
+    Attempted: std::future::Future<Output = (Result<T, StreamError>, bool)> + Send,
+    Forget: FnMut() -> Forgotten,
+    Forgotten: std::future::Future<Output = ()> + Send,
+{
+    let (result, used_saved) = attempt().await;
+    match result {
+        Err(error) if used_saved && configuration_refused(&error) => {
+            warn!(
+                ?error,
+                "saved player configuration refused; fetching the pages again"
+            );
+            forget().await;
+            attempt().await.0
+        }
+        result => result,
+    }
+}
+
 /// The player runtime a saved configuration describes. The signature timestamp is not saved: it is read
 /// again from the cached player JavaScript.
 fn runtime_from_saved(
@@ -1584,24 +1612,20 @@ impl StreamResolver for YouTubeStreamResolver {
         quality: AudioQuality,
         cancellation: CancellationToken,
     ) -> Result<ValidatedPlaybackResolution, StreamError> {
-        let mut used_saved = false;
-        match self
-            .resolve_attempt(track, quality, cancellation.clone(), &mut used_saved)
-            .await
-        {
-            // A saved configuration that YouTube refuses is forgotten, and the track is resolved once more
-            // with the pages fetched again.
-            Err(error) if used_saved && configuration_refused(&error) => {
-                warn!(
-                    ?error,
-                    "saved player configuration refused; fetching the pages again"
-                );
-                self.forget_player_config().await;
-                self.resolve_attempt(track, quality, cancellation, &mut false)
-                    .await
-            }
-            result => result,
-        }
+        retry_once_without_a_refused_configuration(
+            move || {
+                let cancellation = cancellation.clone();
+                async move {
+                    let mut used_saved = false;
+                    let result = self
+                        .resolve_attempt(track, quality, cancellation, &mut used_saved)
+                        .await;
+                    (result, used_saved)
+                }
+            },
+            move || self.forget_player_config(),
+        )
+        .await
     }
 }
 
@@ -2580,6 +2604,76 @@ mod tests {
         assert!(!configuration_refused(&StreamError::Cancelled));
     }
 
+    #[tokio::test]
+    async fn a_refused_saved_configuration_is_forgotten_and_retried_once() {
+        let attempts = AtomicU32::new(0);
+        let forgotten = AtomicU32::new(0);
+        let (attempts, forgotten) = (&attempts, &forgotten);
+        let result = retry_once_without_a_refused_configuration(
+            move || async move {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                if attempt == 1 {
+                    (Err(StreamError::MediaRejected("403".into())), true)
+                } else {
+                    (Ok(attempt), false)
+                }
+            },
+            move || async move {
+                forgotten.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .await;
+        assert!(matches!(result, Ok(2)));
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(forgotten.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_refusal_after_the_fetch_is_final() {
+        let attempts = AtomicU32::new(0);
+        let forgotten = AtomicU32::new(0);
+        let (attempts, forgotten) = (&attempts, &forgotten);
+        let result: Result<u32, StreamError> = retry_once_without_a_refused_configuration(
+            move || async move {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                (Err(StreamError::Cipher("signature".into())), attempt == 1)
+            },
+            move || async move {
+                forgotten.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(StreamError::Cipher(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(forgotten.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn only_a_refused_saved_configuration_is_forgotten() {
+        let cases: [(fn() -> StreamError, bool); 2] = [
+            (|| StreamError::PlayerUnavailable("page".into()), true),
+            (|| StreamError::Cipher("signature".into()), false),
+        ];
+        for (error, used_saved) in cases {
+            let attempts = AtomicU32::new(0);
+            let forgotten = AtomicU32::new(0);
+            let (attempts, forgotten) = (&attempts, &forgotten);
+            let result: Result<u32, StreamError> = retry_once_without_a_refused_configuration(
+                move || async move {
+                    attempts.fetch_add(1, Ordering::SeqCst);
+                    (Err(error()), used_saved)
+                },
+                move || async move {
+                    forgotten.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(attempts.load(Ordering::SeqCst), 1);
+            assert_eq!(forgotten.load(Ordering::SeqCst), 0);
+        }
+    }
+
     #[test]
     fn a_fetched_runtime_round_trips_through_its_saved_form() {
         let profile = ClientProfile::WebMusic.config();
@@ -2683,6 +2777,8 @@ mod tests {
         assert!(!runtime_is_fresh(fetched, fetched + PLAYER_RUNTIME_TTL));
     }
 
+    use std::sync::atomic::{AtomicU32, Ordering};
+
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
 
@@ -2692,8 +2788,8 @@ mod tests {
         YouTubeStreamResolver, choose_aac_format, configuration_refused, has_video_id_gvs_binding,
         is_live_content, is_live_media_url, now_unix, parse_signature_timestamp, parse_yt_at_n,
         parse_ytcfg, persisted_player_js_ready, player_config, player_js_to_prewarm, player_js_url,
-        player_request, retryable_config_status, runtime_from_saved, saved_from_runtime,
-        set_po_token,
+        player_request, retry_once_without_a_refused_configuration, retryable_config_status,
+        runtime_from_saved, saved_from_runtime, set_po_token,
     };
 
     #[test]
