@@ -1,0 +1,142 @@
+//! Track menu actions beyond the queue: "Start radio" and the "Go to" destinations a track names.
+
+use super::now_playing::QueueNotice;
+use super::*;
+
+impl App {
+    /// Starts the catalog radio of `track` in the background. The queue is replaced when it
+    /// arrives, so the track plays first.
+    pub(super) fn start_radio(&mut self, track: Track) -> Task<Message> {
+        self.queue_notice = Some(QueueNotice::RadioLoading);
+        let service = Arc::clone(&self.music_service);
+        let video = track.video_id.clone();
+        let generation = self.queue_generation;
+        Task::perform(
+            async move {
+                service
+                    .radio(&video)
+                    .await
+                    .map_err(|error| error.user_message())
+            },
+            move |result| Message::StartRadioLoaded {
+                track,
+                generation,
+                result,
+            },
+        )
+    }
+
+    /// Plays the radio that came back for `track`: the track first, then the radio in its order.
+    /// When the queue changed while the radio loaded (the user picked something else), the radio
+    /// is dropped, so a late answer never takes over what is playing.
+    pub(super) fn start_radio_loaded(
+        &mut self,
+        track: Track,
+        generation: u64,
+        result: Result<Vec<Track>, String>,
+    ) -> Task<Message> {
+        if generation != self.queue_generation {
+            if self.queue_notice == Some(QueueNotice::RadioLoading) {
+                self.queue_notice = None;
+            }
+            return Task::none();
+        }
+        let Ok(radio) = result else {
+            self.queue_notice = Some(QueueNotice::RadioFailed);
+            return Task::none();
+        };
+        let tracks: Vec<Track> = std::iter::once(track).chain(radio).collect();
+        self.update(Message::PlayContext(Arc::from(tracks), 0))
+    }
+}
+
+/// The "Go to" entries of a track menu, in menu order. Only the destinations the catalog named
+/// are offered.
+pub(super) fn go_to_destinations(track: &Track) -> Vec<(&'static str, BrowseTarget)> {
+    [
+        ("Go to artist", track.artist_page.clone()),
+        ("Go to album", track.album_page.clone()),
+    ]
+    .into_iter()
+    .filter_map(|(label, page)| page.map(|page| (label, page)))
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(id: &str) -> Track {
+        Track {
+            video_id: id.into(),
+            title: format!("Title {id}"),
+            artist: "Artist".into(),
+            album: None,
+            artist_page: None,
+            album_page: None,
+            thumbnail_url: None,
+            duration_secs: None,
+        }
+    }
+
+    fn page(id: &str) -> BrowseTarget {
+        BrowseTarget {
+            browse_id: id.into(),
+            params: None,
+            page_type: None,
+        }
+    }
+
+    #[test]
+    fn go_to_offers_only_the_destinations_the_catalog_named() {
+        let mut known = track("a");
+        known.artist_page = Some(page("UCartist"));
+        assert_eq!(
+            go_to_destinations(&known),
+            vec![("Go to artist", page("UCartist"))]
+        );
+        assert!(go_to_destinations(&track("b")).is_empty());
+        known.album_page = Some(page("MPalbum"));
+        let labels: Vec<_> = go_to_destinations(&known)
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect();
+        assert_eq!(labels, ["Go to artist", "Go to album"]);
+    }
+
+    #[test]
+    fn a_radio_plays_the_track_first_and_then_the_radio_in_order() {
+        let mut app = App::default();
+        let generation = app.queue_generation;
+        let _ = app.start_radio_loaded(
+            track("seed"),
+            generation,
+            Ok(vec![track("two"), track("three")]),
+        );
+        let queued: Vec<&str> = app.queue.iter().map(|t| t.video_id.as_str()).collect();
+        assert_eq!(queued, ["seed", "two", "three"]);
+        assert_eq!(app.queue_index, Some(0));
+    }
+
+    #[test]
+    fn a_failed_radio_leaves_the_queue_alone_and_says_so() {
+        let mut app = App::default();
+        let generation = app.queue_generation;
+        let _ = app.start_radio_loaded(track("seed"), generation, Err("offline".into()));
+        assert!(app.queue.is_empty());
+        assert_eq!(app.queue_notice, Some(QueueNotice::RadioFailed));
+    }
+
+    #[test]
+    fn a_radio_that_arrives_after_the_queue_changed_is_dropped() {
+        let mut app = App::default();
+        let asked_at = app.queue_generation;
+        app.queue_notice = Some(QueueNotice::RadioLoading);
+        // The user plays something else while the radio loads.
+        let _ = app.update(Message::PlayContext(Arc::from(vec![track("other")]), 0));
+        let _ = app.start_radio_loaded(track("seed"), asked_at, Ok(vec![track("two")]));
+        let queued: Vec<&str> = app.queue.iter().map(|t| t.video_id.as_str()).collect();
+        assert_eq!(queued, ["other"]);
+        assert_ne!(app.queue_notice, Some(QueueNotice::RadioLoading));
+    }
+}

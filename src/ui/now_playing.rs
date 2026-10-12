@@ -134,6 +134,10 @@ pub(super) enum QueueNotice {
     Limited(usize),
     AddedToQueue,
     PlaysNext,
+    /// "Start radio" is loading the radio of the chosen track.
+    RadioLoading,
+    /// "Start radio" could not load its radio.
+    RadioFailed,
 }
 
 impl App {
@@ -365,6 +369,8 @@ impl App {
                 .replacen("{}", &entries.to_string(), 1),
             QueueNotice::AddedToQueue => self.tr("Added to queue").into_owned(),
             QueueNotice::PlaysNext => self.tr("Plays next").into_owned(),
+            QueueNotice::RadioLoading => self.tr("[ LOADING RADIO ]").into_owned(),
+            QueueNotice::RadioFailed => self.tr("[ RADIO FAILED ]").into_owned(),
         }
     }
 

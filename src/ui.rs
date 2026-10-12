@@ -15,6 +15,7 @@ mod subscriptions;
 mod theme;
 #[cfg(feature = "diagnostics")]
 mod timing;
+mod track_actions;
 use collection::CollectionState;
 
 use std::time::Duration;
@@ -652,7 +653,9 @@ impl App {
             | Message::SelectTrack(..)
             | Message::PlayQueueIndex(..)
             | Message::PlayNext(..)
-            | Message::AddToQueue(..) => return self.update_playback(message),
+            | Message::AddToQueue(..)
+            | Message::StartRadio(..)
+            | Message::StartRadioLoaded { .. } => return self.update_playback(message),
             Message::CatalogCompleted { request_id, result } => {
                 if request_id != self.search_request_id {
                     return Task::none();

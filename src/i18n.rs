@@ -217,6 +217,10 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
         }
         "About" => "Acerca de",
         "Add to queue" => "Añadir a la cola",
+        "Start radio" => "Iniciar radio",
+        "Go to artist" => "Ir al artista",
+        "Go to album" => "Ir al álbum",
+        "[ RADIO FAILED ]" => "[ ERROR DE RADIO ]",
         "Remove from queue" => "Quitar de la cola",
         "Clear up next" => "Vaciar a continuación",
         "Artwork cache" => "Caché de carátulas",

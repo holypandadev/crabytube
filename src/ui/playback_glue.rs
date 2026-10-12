@@ -948,6 +948,17 @@ impl App {
                 self.row_menu = None;
                 return self.enqueue(track, false);
             }
+            Message::StartRadio(track) => {
+                self.row_menu = None;
+                return self.start_radio(track);
+            }
+            Message::StartRadioLoaded {
+                track,
+                generation,
+                result,
+            } => {
+                return self.start_radio_loaded(track, generation, result);
+            }
             _ => unreachable!("update_inner routes only this group here"),
         }
         Task::none()

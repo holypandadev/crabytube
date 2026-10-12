@@ -303,6 +303,15 @@ pub(super) enum Message {
     ToggleRowMenu(RowMenu),
     PlayNext(Track),
     AddToQueue(Track),
+    /// "Start radio": loads the catalog radio of the track, then plays it with the track first.
+    StartRadio(Track),
+    /// The radio asked for by "Start radio", or the reason it could not be loaded.
+    StartRadioLoaded {
+        track: Track,
+        /// The queue generation when the radio was asked for; a queue changed since then wins.
+        generation: u64,
+        result: Result<Vec<Track>, String>,
+    },
     /// Likes or unlikes a track that may not be in the queue or results.
     LikeTrack(Track),
     /// The first press on Reset. The reset itself waits for the confirmation.

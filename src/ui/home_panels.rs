@@ -5,6 +5,7 @@ use super::home::{
     CHIPS_H, GREETING_GAP, GREETING_SUBLINE_GAP, GreetingSize, HomeLayout, JUMP_HEADING_GAP,
     JUMP_ROW_GAP, MAX_CHIPS, STATUS_H,
 };
+use super::messages::RowMenu;
 use super::shell::{fit, section_heading};
 use super::theme::{
     self, BLACK, DIM, FADED, MONO, MONO_BOLD, RULE, TEXT_BODY, TEXT_CAPTION, hrule, icon, label,
@@ -23,6 +24,8 @@ use std::time::Duration;
 pub(super) const JUMP_THUMB: f32 = 36.0;
 /// Width of the duration or track count at the end of a "Jump back in" entry.
 const JUMP_META_W: f32 = 96.0;
+/// Room for the ••• button of a track entry, with its spacing.
+const JUMP_MORE_W: f32 = 42.0;
 /// Gap between the two columns of "Jump back in".
 const JUMP_COLUMN_GAP: f32 = 16.0;
 const CHIP_TEXT_SIZE: f32 = TEXT_CAPTION;
@@ -266,10 +269,17 @@ impl App {
         };
         let entries: Vec<&RecentPlay> = self.recent.iter().take(layout.jump).collect();
         let mut grid = column![].spacing(JUMP_ROW_GAP);
-        for chunk in entries.chunks(per_row) {
+        for (chunk_index, chunk) in entries.chunks(per_row).enumerate() {
             let cells: Vec<Element<'_, Message>> = chunk
                 .iter()
-                .map(|play| self.jump_entry(play, cell_width))
+                .enumerate()
+                .map(|(offset, play)| {
+                    let menu = RowMenu {
+                        list: "jump",
+                        index: chunk_index * per_row + offset,
+                    };
+                    self.jump_cell(play, menu, cell_width)
+                })
                 .collect();
             grid = grid.push(row(cells).spacing(JUMP_COLUMN_GAP));
         }
@@ -283,7 +293,29 @@ impl App {
         .into()
     }
 
-    fn jump_entry(&self, play: &RecentPlay, width: f32) -> Element<'_, Message> {
+    /// One "Jump back in" entry. A track entry has its ••• button; its actions open under it.
+    fn jump_cell<'a>(
+        &'a self,
+        play: &'a RecentPlay,
+        menu: RowMenu,
+        width: f32,
+    ) -> Element<'a, Message> {
+        let open = self.row_menu.as_ref() == Some(&menu);
+        let entry = self.jump_entry(play, width, Some(menu));
+        match play {
+            RecentPlay::Track(track) if open => {
+                column![entry, self.row_actions_with(track, None)].into()
+            }
+            _ => entry,
+        }
+    }
+
+    fn jump_entry(
+        &self,
+        play: &RecentPlay,
+        width: f32,
+        menu: Option<RowMenu>,
+    ) -> Element<'_, Message> {
         let variant = crate::artwork::variant_for_pixels(JUMP_THUMB * self.pixel_scale());
         let (url, title, detail, meta, action) = match play {
             RecentPlay::Track(track) => (
@@ -318,21 +350,37 @@ impl App {
         } else {
             format!("{title} — {detail}")
         };
-        let text_width = (width - JUMP_THUMB - JUMP_META_W - 36.0).max(40.0);
-        button(
-            row![
-                self.cover(url, JUMP_THUMB, variant),
-                container(label(fit(&line, text_width, TEXT_BODY), TEXT_BODY)).width(Length::Fill),
-                label(meta, TEXT_CAPTION).color(DIM),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        )
-        .on_press(action)
-        .width(Length::Fill)
-        .padding([2, 6])
-        .style(theme::row_button)
-        .into()
+        // A track entry's ••• button takes room from the title.
+        let more_width = if menu.is_some() && matches!(play, RecentPlay::Track(_)) {
+            JUMP_MORE_W
+        } else {
+            0.0
+        };
+        let text_width = (width - JUMP_THUMB - JUMP_META_W - 36.0 - more_width).max(40.0);
+        let mut content = row![
+            self.cover(url, JUMP_THUMB, variant),
+            container(label(fit(&line, text_width, TEXT_BODY), TEXT_BODY)).width(Length::Fill),
+            label(meta, TEXT_CAPTION).color(DIM),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        if let (Some(menu), RecentPlay::Track(_)) = (menu, play) {
+            // The entry keeps the plain row style, so its ••• button does too, even for the
+            // track that is playing.
+            let open = self.row_menu.as_ref() == Some(&menu);
+            content = content.push(
+                button(icon("more", 18.0, theme::row_ink(false).icon))
+                    .on_press(Message::ToggleRowMenu(menu))
+                    .padding(6)
+                    .style(theme::row_icon_button(false, open)),
+            );
+        }
+        button(content)
+            .on_press(action)
+            .width(Length::Fill)
+            .padding([2, 6])
+            .style(theme::row_button)
+            .into()
     }
 
     /// The status line at the foot of Home: memory and CPU of this process on the left, the

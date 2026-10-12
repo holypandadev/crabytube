@@ -1009,6 +1009,10 @@ impl App {
                 Message::AddToQueue(track.clone())
             ),
             action(
+                self.tr("Start radio").into_owned(),
+                Message::StartRadio(track.clone())
+            ),
+            action(
                 self.tr(if liked {
                     "Remove favorite"
                 } else {
@@ -1020,6 +1024,13 @@ impl App {
         ]
         .spacing(10)
         .align_y(Alignment::Center);
+        // Only the artist and album the catalog named; a track without them gets no "Go to".
+        for (label, page) in super::track_actions::go_to_destinations(track) {
+            actions = actions.push(action(
+                self.tr(label).into_owned(),
+                Message::OpenCollection(page),
+            ));
+        }
         if let Some(index) = queue_index {
             actions = actions.push(action(
                 self.tr("Remove from queue").into_owned(),
