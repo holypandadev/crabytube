@@ -1460,6 +1460,15 @@ fn refused_by_googlevideo(error: &EngineError) -> bool {
 
 const MAX_HTTP_RANGE_BYTES: u64 = 1_048_576;
 
+/// Tracks up to this size arrive in one response. The demuxer reads positions across the whole file before the
+/// first frame, and every read past the downloaded part starts another request. Longer tracks keep the first
+/// chunk, and seeks keep their chunks either way.
+const WHOLE_TRACK_BYTES: u64 = 16 * 1024 * 1024;
+
+fn is_whole_track(content_length: Option<u64>) -> bool {
+    content_length.is_some_and(|length| length <= WHOLE_TRACK_BYTES)
+}
+
 #[derive(Debug, Error)]
 enum YoutubeHttpError {
     #[error("HTTP stream request failed: {0}")]
@@ -1570,11 +1579,14 @@ impl SourceStream for YoutubeHttpSource {
             content_length,
             last_error,
         };
-        let end = source
-            .content_length
-            .map(|length| length.saturating_sub(1).min(MAX_HTTP_RANGE_BYTES - 1))
-            .unwrap_or(MAX_HTTP_RANGE_BYTES - 1);
-        let response = source.request_range(format!("bytes=0-{end}")).await?;
+        // A whole track comes in one response, so the reads that jump across it do not start new requests.
+        let window = match source.content_length {
+            Some(length) if is_whole_track(Some(length)) => length,
+            _ => MAX_HTTP_RANGE_BYTES,
+        };
+        let response = source
+            .request_range(format!("bytes=0-{}", window.saturating_sub(1)))
+            .await?;
         source.set_response(response);
         Ok(source)
     }
@@ -1666,10 +1678,15 @@ async fn open_stream(
     ))
     .await
     .map_err(|error| EngineError::Network(error.to_string()))?;
+    // The prefetch covers the whole response, so the download does not pause while the demuxer reads the file.
+    let prefetch = match stream.content_length {
+        Some(length) if is_whole_track(Some(length)) => length,
+        _ => 384 * 1024,
+    };
     let reader = StreamDownload::from_stream(
         source,
         TempStorageProvider::new_in(stream_temp_dir()),
-        Settings::default().prefetch_bytes(384 * 1024),
+        Settings::default().prefetch_bytes(prefetch),
     )
     .await
     .map_err(|error| {
@@ -2343,6 +2360,55 @@ mod tests {
             .expect("the request reached the test server");
         assert!(request.to_ascii_lowercase().contains("x-stream-token: abc"));
         assert!(request.to_ascii_lowercase().contains("range: bytes=0-3"));
+    }
+
+    #[test]
+    fn a_track_up_to_the_limit_is_fetched_in_one_response() {
+        use super::is_whole_track;
+        assert!(is_whole_track(Some(4_557_665)));
+        assert!(is_whole_track(Some(super::WHOLE_TRACK_BYTES)));
+        assert!(!is_whole_track(Some(super::WHOLE_TRACK_BYTES + 1)));
+        assert!(!is_whole_track(None));
+    }
+
+    #[tokio::test]
+    async fn the_first_request_asks_for_the_whole_track_or_one_chunk() {
+        use super::YoutubeHttpSource;
+        use stream_download::source::SourceStream;
+        let client = super::shared_media_client().expect("shared client").clone();
+        let open = |port: u16, length: Option<u64>| {
+            YoutubeHttpSource::create((
+                client.clone(),
+                reqwest::Url::parse(&format!("http://127.0.0.1:{port}/audio")).unwrap(),
+                reqwest::header::HeaderMap::new(),
+                length,
+                Arc::new(std::sync::Mutex::new(None)),
+            ))
+        };
+        let empty =
+            "HTTP/1.1 206 Partial Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+        let (port, requests) = serve_one_capturing(empty);
+        assert!(open(port, Some(4_557_665)).await.is_ok());
+        let request = requests
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the request reached the test server");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("range: bytes=0-4557664")
+        );
+
+        let (port, requests) = serve_one_capturing(empty);
+        assert!(open(port, Some(40 * 1024 * 1024)).await.is_ok());
+        let request = requests
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the request reached the test server");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("range: bytes=0-1048575")
+        );
     }
 
     #[tokio::test]
