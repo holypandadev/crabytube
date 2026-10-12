@@ -57,8 +57,8 @@ application menu.
 1. Download the `.zip` file and extract it to a folder of your choice. Keep all the files together.
 2. Run `CrabyTube.exe`. Windows SmartScreen shows "Windows protected your PC" because the app is not
    signed. Click **More info**, then **Run anyway**. You only need to do this once.
-3. If Windows reports a missing `VCRUNTIME140.dll` or `MSVCP140.dll`, install the Microsoft Visual C++
-   Redistributable for x64 (free from Microsoft) and start CrabyTube again.
+
+Nothing else needs to be installed: the Visual C++ runtime is built into the executables.
 
 ### macOS
 
