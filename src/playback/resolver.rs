@@ -1102,21 +1102,18 @@ impl StreamResolver for YouTubeStreamResolver {
                 return Err(StreamError::Cancelled);
             }
             let mut runtime = self.player_runtime(&cancellation).await?;
-            if self.profile == ClientProfile::WebMusic && runtime.signature_timestamp.is_none() {
-                self.ensure_signature_timestamp(&mut runtime, &track.0, &cancellation)
-                    .await?;
-            }
             let visitor_data = runtime_visitor_data(&runtime)?;
+            // The tokens come from the page configuration, not from the player JS, so they are minted while
+            // the JS is loaded for the signature timestamp.
+            let needs_tokens = runtime.profile.requires_gvs_po_token;
+            let token_request = po_token_request(&runtime, &visitor_data, track);
             let tokens_future = async {
-                if !runtime.profile.requires_gvs_po_token {
+                if !needs_tokens {
                     return Ok(None);
                 }
                 match self
                     .token_provider
-                    .tokens(
-                        po_token_request(&runtime, &visitor_data, track),
-                        cancellation.child_token(),
-                    )
+                    .tokens(token_request, cancellation.child_token())
                     .await
                 {
                     Ok(tokens) => Ok(Some(tokens)),
@@ -1131,12 +1128,18 @@ impl StreamResolver for YouTubeStreamResolver {
                     }
                 }
             };
+            let player_future = async {
+                if self.profile == ClientProfile::WebMusic && runtime.signature_timestamp.is_none()
+                {
+                    self.ensure_signature_timestamp(&mut runtime, &track.0, &cancellation)
+                        .await?;
+                }
+                self.post_player(&runtime, &visitor_data, track).await
+            };
+            // The player request needs the signature timestamp from the JS, the tokens do not, so both overlap.
             // The player request carries no PO token, so it runs while the tokens are minted. The first
             // failure ends the wait, so a slow mint does not hold back a network error.
-            let (tokens, payload) = tokio::select! {
-                _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                joined = async { tokio::try_join!(tokens_future, self.post_player(&runtime, &visitor_data, track)) } => joined?,
-            };
+            let (tokens, payload) = together(tokens_future, player_future, &cancellation).await?;
             // Tokens restored from the saved cache are the only ones a 403 can blame on stale state.
             let tokens_reused = tokens.as_ref().is_some_and(|tokens| tokens.reused);
             let player_response_fp =
@@ -1888,6 +1891,19 @@ async fn off_runtime<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'stati
     }
 }
 
+/// Awaits two requests that do not need each other's result, so their waits overlap. The first failure
+/// ends the wait, so a slow request does not hold back a network error, and a cancelled resolution stops both.
+async fn together<T, U>(
+    first: impl std::future::Future<Output = Result<T, StreamError>>,
+    second: impl std::future::Future<Output = Result<U, StreamError>>,
+    cancellation: &CancellationToken,
+) -> Result<(T, U), StreamError> {
+    tokio::select! {
+        _ = cancellation.cancelled() => Err(StreamError::Cancelled),
+        joined = async { tokio::try_join!(first, second) } => joined,
+    }
+}
+
 /// A player's text with its SHA-256 fingerprint. Players are megabytes, so the hash runs off the runtime.
 async fn with_fingerprint(text: String) -> (String, String) {
     off_runtime(move || {
@@ -2301,6 +2317,57 @@ mod tests {
         assert!(resolver.prewarming.lock().unwrap().is_none());
         // A second play finds nothing left to cancel.
         resolver.cancel_prewarm();
+    }
+
+    #[tokio::test]
+    async fn requests_that_do_not_need_each_other_overlap() {
+        // The first request cannot finish until the second has started, so this completes only when both
+        // are in flight at once.
+        let cancellation = CancellationToken::new();
+        let (started, started_seen) = tokio::sync::oneshot::channel::<()>();
+        let first = async move {
+            started_seen.await.map_err(|_| StreamError::Cancelled)?;
+            Ok::<u8, StreamError>(1)
+        };
+        let second = async move {
+            let _ = started.send(());
+            Ok::<u8, StreamError>(2)
+        };
+        let joined = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::together(first, second, &cancellation),
+        )
+        .await;
+        assert!(matches!(joined, Ok(Ok((1, 2)))));
+    }
+
+    #[tokio::test]
+    async fn a_failure_ends_the_wait_for_the_other_request() {
+        let cancellation = CancellationToken::new();
+        let failing = async { Err::<u8, StreamError>(StreamError::Network("refused".into())) };
+        let waiting = std::future::pending::<Result<u8, StreamError>>();
+        let joined = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::together(failing, waiting, &cancellation),
+        )
+        .await;
+        assert!(matches!(joined, Ok(Err(StreamError::Network(_)))));
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_resolution_stops_both_requests() {
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let joined = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::together(
+                std::future::pending::<Result<u8, StreamError>>(),
+                std::future::pending::<Result<u8, StreamError>>(),
+                &cancellation,
+            ),
+        )
+        .await;
+        assert!(matches!(joined, Ok(Err(StreamError::Cancelled))));
     }
 
     #[test]
