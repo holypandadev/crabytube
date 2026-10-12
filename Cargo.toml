@@ -75,6 +75,14 @@ ksni = "0.3.6"
 [target.'cfg(target_os = "macos")'.dependencies]
 # Process memory and CPU readings for the status line; already in the build through other crates.
 libc = "0.2"
+# Now Playing and the media keys, through the system's MediaPlayer framework. All of these but the
+# last are already in the build through the audio and window crates.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSObject", "NSString", "NSValue"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent", "objc2-app-kit", "objc2-core-foundation"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 iced = { version = "0.14", features = ["advanced", "image-without-codecs", "svg", "tokio"] }
