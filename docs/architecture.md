@@ -171,6 +171,6 @@ individually.
 ## Development tools
 
 The `diagnostics` feature adds command-line test modes (`--scroll-test`, `--soak`, `--autoplay`,
-`--screenshots`, `--exit-after`), environment overrides for the helper paths and fault injection,
-and Iced's debug overlay. Release builds contain none of these. `scripts/peak-rss.sh` and
+`--screenshots`, `--exit-after`), environment overrides for the helper paths, a lyric fixture for
+the screenshots, fault injection, and Iced's debug overlay. Release builds contain none of these. `scripts/peak-rss.sh` and
 `scripts/soak-memory-cpu.sh` measure memory and CPU on Linux.

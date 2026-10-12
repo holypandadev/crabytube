@@ -48,6 +48,10 @@ pub struct Lyrics {
     pub source: String,
     pub lines: Vec<Line>,
     pub plain: Option<String>,
+    /// Plain text from a record of another length: no record of this track's length had timed lines or
+    /// text, so the text is shown unsynced and marked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub length_mismatch: bool,
 }
 impl Lyrics {
     pub fn active(&self, seconds: f64) -> Option<usize> {
@@ -294,6 +298,7 @@ pub fn lrc(input: &str, source: &str) -> Lyrics {
     }
     Lyrics {
         source: source.into(),
+        length_mismatch: false,
         plain: lines.is_empty().then(|| input.to_owned()),
         lines,
     }
@@ -372,6 +377,7 @@ pub fn ttml(input: &str) -> Option<Lyrics> {
     (!lines.is_empty()).then(|| Lyrics {
         source: "Better Lyrics / TTML".into(),
         lines,
+        length_mismatch: false,
         plain: None,
     })
 }
@@ -459,6 +465,7 @@ pub fn qrc(input: &str) -> Option<Lyrics> {
     (!lines.is_empty()).then(|| Lyrics {
         source: "QQ Music via Better Lyrics".into(),
         lines,
+        length_mismatch: false,
         plain: None,
     })
 }
@@ -533,6 +540,14 @@ pub async fn load_with_progress<F>(
 where
     F: FnMut(Lyrics) + Send + 'static,
 {
+    // Screenshots only: CRABYTUBE_LYRICS_FIXTURE=<json file> answers every lookup with the saved lyrics, so the
+    // lyric views can be captured without third-party text.
+    #[cfg(feature = "diagnostics")]
+    if let Some(path) = std::env::var_os("CRABYTUBE_LYRICS_FIXTURE") {
+        return std::fs::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|error| error.to_string()));
+    }
     let started = std::time::Instant::now();
     // Sources add credits around the song; the labels and the title and artist are this track's.
     let (title, artist) = (track.title.clone(), track.artist.clone());
@@ -819,8 +834,30 @@ fn plain_found(source: &str, text: &str) -> Found {
     Found::Plain(Lyrics {
         source: source.into(),
         lines: vec![],
+        length_mismatch: false,
         plain: Some(text.into()),
     })
+}
+
+/// The plain text of the first record with this title and artist, whatever its length.
+fn fallback_plain(entries: &[Value], title: &str, artist: &str) -> Option<String> {
+    entries
+        .iter()
+        .filter(|v| {
+            v.get("trackName")
+                .and_then(Value::as_str)
+                .is_some_and(|s| titles_match(title, s))
+                && v.get("artistName")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| artists_match(artist, s))
+        })
+        .find_map(|v| {
+            v.get("plainLyrics")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned)
+        })
 }
 
 /// LRCLIB records carry the length of the version they time. A record of another version, such as a video
@@ -856,7 +893,17 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
         .filter(|v| record_matches_duration(v, duration))
         .min_by_key(|v| v.get("syncedLyrics").and_then(Value::as_str).is_none());
     let Some(entry) = best else {
-        return Found::Missing;
+        // No record of this length has timed lines or text. Text from a record of another length is shown
+        // unsynced and marked, so the timing of that other version is never applied.
+        return match fallback_plain(&entries, &track.title, &track.artist) {
+            Some(text) => Found::Plain(Lyrics {
+                source: "LRCLIB".into(),
+                lines: Vec::new(),
+                plain: Some(text),
+                length_mismatch: true,
+            }),
+            None => Found::Missing,
+        };
     };
     if let Some(s) = entry.get("syncedLyrics").and_then(Value::as_str) {
         return Found::Line(lrc(s, "LRCLIB"));
@@ -1108,6 +1155,7 @@ mod tests {
                 line(10.0, vec![10.0, 10.5, 11.0]),
                 line(14.0, vec![14.0, 14.4]),
             ],
+            length_mismatch: false,
             plain: None,
         };
         // Inside a line: the next word of that line.
@@ -1235,6 +1283,7 @@ mod tests {
         let salvaged: Result<Lyrics, String> = Ok(Lyrics {
             source: "fixture".into(),
             lines: Vec::new(),
+            length_mismatch: false,
             plain: Some("words".into()),
         });
         assert!(super::stored_form(&salvaged, true).is_none());
@@ -1337,6 +1386,21 @@ mod tests {
             lyrics_cache_path(&t, Duration::from_secs(228)),
             lyrics_cache_path(&t, Duration::from_secs(282))
         );
+    }
+
+    #[test]
+    fn a_plain_text_of_another_length_is_the_fallback_only() {
+        // Placeholder text: no third-party lyrics in tests.
+        let entries = vec![
+            serde_json::json!({"trackName": "Song", "artistName": "Artist", "duration": 228.0, "plainLyrics": ""}),
+            serde_json::json!({"trackName": "Other", "artistName": "Artist", "plainLyrics": "wrong title"}),
+            serde_json::json!({"trackName": "Song", "artistName": "Artist", "duration": 262.0, "plainLyrics": "placeholder text"}),
+        ];
+        assert_eq!(
+            fallback_plain(&entries, "Song", "Artist").as_deref(),
+            Some("placeholder text")
+        );
+        assert!(fallback_plain(&[], "Song", "Artist").is_none());
     }
 
     #[test]
@@ -1452,6 +1516,7 @@ mod tests {
                 timed_line(23.0, "The river knows the way back home"),
                 timed_line(230.0, "Written by: Someone Else"),
             ],
+            length_mismatch: false,
             plain: None,
         };
         let cleaned = drop_credit_lines(lyrics, "Paper Lanterns", "The Quiet Harbors");
@@ -1476,6 +1541,7 @@ mod tests {
                 timed_line(40.0, "Lyrics by: a bridge credit"),
                 timed_line(60.0, "The river knows the way"),
             ],
+            length_mismatch: false,
             plain: None,
         };
         let cleaned = drop_credit_lines(lyrics, "Paper Lanterns", "The Quiet Harbors");
@@ -1528,6 +1594,7 @@ mod tests {
         let lyrics = Lyrics {
             source: "Plain".into(),
             lines: Vec::new(),
+            length_mismatch: false,
             plain: Some(
                 "Lyrics by: X\nfirst line\nLyrics by: a middle credit\nsecond line\nComposed by: Y"
                     .into(),

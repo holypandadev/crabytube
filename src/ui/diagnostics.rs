@@ -63,6 +63,8 @@ impl App {
                         let open = self.update(Message::SetNowPlayingTab(NowPlayingTab::Lyrics));
                         // The capture shows a part of the song with an active line and word timing.
                         // CRABYTUBE_TOUR_LYRICS_AT=<seconds> picks another part, for example a line with background vocals.
+                        // CRABYTUBE_LYRICS_FIXTURE=<json file>, read by the lyrics loader, answers every lyric lookup with
+                        // the lyrics in that file, so the lyric captures never show third-party text.
                         let at = std::env::var("CRABYTUBE_TOUR_LYRICS_AT")
                             .ok()
                             .and_then(|value| value.parse::<f64>().ok())

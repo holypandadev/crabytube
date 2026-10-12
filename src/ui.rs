@@ -3760,6 +3760,7 @@ mod tests {
                 romanization: None,
                 background: None,
             }],
+            length_mismatch: false,
             plain: None,
         };
         let mut app = App {
@@ -3791,6 +3792,7 @@ mod tests {
         app.lyrics = Some(crate::lyrics::Lyrics {
             source: "plain".into(),
             lines: Vec::new(),
+            length_mismatch: false,
             plain: Some("no timing".into()),
         });
         assert!(!app.karaoke_active());
@@ -3813,6 +3815,7 @@ mod tests {
             lyrics: Some(crate::lyrics::Lyrics {
                 source: "line-timed".into(),
                 lines: vec![line(10.0, "first"), line(13.0, "second")],
+                length_mismatch: false,
                 plain: None,
             }),
             ..App::default()
@@ -3852,6 +3855,7 @@ mod tests {
             lyrics: Some(crate::lyrics::Lyrics {
                 source: "line-timed".into(),
                 lines: vec![line(10.0, "first"), line(13.0, "second")],
+                length_mismatch: false,
                 plain: None,
             }),
             ..App::default()
@@ -3893,6 +3897,7 @@ mod tests {
                     line(13.0, "second"),
                     line(20.0, "third"),
                 ],
+                length_mismatch: false,
                 plain: None,
             }),
             ..App::default()
@@ -3969,6 +3974,7 @@ mod tests {
         app.lyrics = Some(crate::lyrics::Lyrics {
             source: "fixture".into(),
             lines: [0.0, 10.0, 20.0].into_iter().map(line).collect(),
+            length_mismatch: false,
             plain: None,
         });
         let track = song("Track");
@@ -4740,6 +4746,24 @@ mod tests {
     }
 
     #[test]
+    fn the_lyric_buttons_move_this_songs_lyrics_by_half_a_second() {
+        let track = lyrics_test_track("abc");
+        let mut app = App {
+            playback_status: super::PlaybackStatus {
+                track: Some(track),
+                ..super::PlaybackStatus::default()
+            },
+            ..App::default()
+        };
+        assert_eq!(app.current_lyrics_offset(), 0);
+        drop(app.update(Message::AdjustLyricsOffset(500)));
+        assert_eq!(app.current_lyrics_offset(), 500);
+        drop(app.update(Message::AdjustLyricsOffset(-500)));
+        drop(app.update(Message::AdjustLyricsOffset(-500)));
+        assert_eq!(app.current_lyrics_offset(), -500);
+    }
+
+    #[test]
     fn a_known_track_length_starts_the_search_at_once() {
         let mut app = App::default();
         app.known_durations
@@ -4755,6 +4779,7 @@ mod tests {
         let early = Lyrics {
             source: "LRCLIB".into(),
             lines: Vec::new(),
+            length_mismatch: false,
             plain: Some("Available text".into()),
         };
         let mut app = App {
@@ -4777,6 +4802,7 @@ mod tests {
             lyrics: Lyrics {
                 source: "stale".into(),
                 lines: Vec::new(),
+                length_mismatch: false,
                 plain: Some("old song".into()),
             },
         }));
@@ -4920,6 +4946,7 @@ mod tests {
                 romanization: None,
                 background: None,
             }],
+            length_mismatch: false,
             plain: None,
         };
         let mut app = App {
