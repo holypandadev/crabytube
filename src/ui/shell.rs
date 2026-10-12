@@ -477,7 +477,7 @@ impl App {
                     .style(theme::seek_style),
             );
         }
-        control.into()
+        super::keyboard::wheel_volume(control)
     }
 
     /// Elapsed time, seek rail and total time. A live broadcast has no rail and no

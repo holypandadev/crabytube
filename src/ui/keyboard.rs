@@ -129,6 +129,18 @@ impl App {
         Task::batch([unmute, set, save])
     }
 
+    /// The wheel over a volume control: a notch up raises the volume.
+    pub(super) fn volume_scrolled(&mut self, delta: iced::mouse::ScrollDelta) -> Task<Message> {
+        let notches = match delta {
+            iced::mouse::ScrollDelta::Lines { y, .. } => y,
+            iced::mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
+        };
+        if !notches.is_finite() || notches == 0.0 {
+            return Task::none();
+        }
+        self.step_volume(VOLUME_STEP * notches.signum() * notches.abs().ceil().min(4.0))
+    }
+
     /// Moves the lyrics of the current song, when they are timed and a song is playing.
     fn step_lyrics(&mut self, delta_ms: i64) -> Task<Message> {
         let timed = self
@@ -140,6 +152,13 @@ impl App {
         }
         self.update(Message::AdjustLyricsOffset(delta_ms))
     }
+}
+
+/// Makes the mouse wheel over `content` change the volume.
+pub(super) fn wheel_volume<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    iced::widget::mouse_area(content)
+        .on_scroll(Message::VolumeScrolled)
+        .into()
 }
 
 #[cfg(test)]
@@ -255,6 +274,22 @@ mod tests {
         drop(app.step_volume(VOLUME_STEP));
         assert!(!app.preferences.muted);
         assert_eq!(app.preferences.volume, 0.05);
+    }
+
+    #[test]
+    fn the_wheel_raises_and_lowers_the_volume_a_notch_at_a_time() {
+        let mut app = App::default();
+        app.preferences.volume = 0.5;
+        let lines = |y| iced::mouse::ScrollDelta::Lines { x: 0.0, y };
+        drop(app.volume_scrolled(lines(1.0)));
+        assert_eq!(app.preferences.volume, 0.55);
+        drop(app.volume_scrolled(lines(-2.0)));
+        assert_eq!(app.preferences.volume, 0.45);
+        drop(app.volume_scrolled(lines(0.0)));
+        drop(app.volume_scrolled(lines(f32::NAN)));
+        assert_eq!(app.preferences.volume, 0.45);
+        drop(app.volume_scrolled(iced::mouse::ScrollDelta::Pixels { x: 0.0, y: 40.0 }));
+        assert_eq!(app.preferences.volume, 0.5);
     }
 
     fn timed_lyrics() -> crate::lyrics::Lyrics {

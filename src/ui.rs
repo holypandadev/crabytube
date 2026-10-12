@@ -1733,6 +1733,7 @@ impl App {
                 }
             }
             Message::Shortcut { shortcut, typing } => return self.apply_shortcut(shortcut, typing),
+            Message::VolumeScrolled(delta) => return self.volume_scrolled(delta),
             Message::SuggestionsCompleted { request_id, result } => {
                 if request_id != self.suggest_request_id {
                     return Task::none();

@@ -279,7 +279,7 @@ impl App {
         let group = row![
             self.like_button(Some(track.video_id.as_str()), END_ICON),
             self.transport_controls(TRANSPORT_ICON, true),
-            volume_button,
+            super::keyboard::wheel_volume(volume_button),
         ]
         .spacing(GROUP_GAP)
         .align_y(Alignment::Center);
@@ -307,13 +307,14 @@ impl App {
     }
 
     fn volume_rail_slider(&self, width: f32) -> Element<'_, Message> {
-        iced::widget::slider(0.0..=1.0, self.preferences.volume, Message::SetVolume)
-            .on_release(Message::PersistState)
-            .step(0.01_f32)
-            .width(width.max(1.0))
-            .height(theme::SLIDER_H)
-            .style(theme::seek_style)
-            .into()
+        super::keyboard::wheel_volume(
+            iced::widget::slider(0.0..=1.0, self.preferences.volume, Message::SetVolume)
+                .on_release(Message::PersistState)
+                .step(0.01_f32)
+                .width(width.max(1.0))
+                .height(theme::SLIDER_H)
+                .style(theme::seek_style),
+        )
     }
 
     fn side_panel(&self, width: f32) -> Element<'_, Message> {

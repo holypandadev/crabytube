@@ -246,6 +246,8 @@ pub(super) enum Message {
         shortcut: super::keyboard::Shortcut,
         typing: bool,
     },
+    /// The mouse wheel turned over a volume control.
+    VolumeScrolled(iced::mouse::ScrollDelta),
     CatalogCompleted {
         request_id: u64,
         result: Option<Result<crate::music::CatalogPage, String>>,
