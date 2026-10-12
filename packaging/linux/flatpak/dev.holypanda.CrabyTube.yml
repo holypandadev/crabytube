@@ -46,6 +46,7 @@ modules:
         skip:
           - .git
           - target
+          - .flatpak-builder
       # Every crate in Cargo.lock, vendored, plus the two git dependencies. Regenerate it whenever
       # Cargo.lock changes; tests/flatpak_sources.rs fails while a registry crate is missing:
       #   python3 -I flatpak-cargo-generator.py <path to Cargo.lock> -o packaging/linux/flatpak/cargo-sources.json
