@@ -241,6 +241,11 @@ pub(super) enum Message {
     SuggestionChosen(String),
     DismissSuggestions,
     KeyPressed(iced::keyboard::Event),
+    /// A key shortcut, with whether the search field had the focus when it was pressed.
+    Shortcut {
+        shortcut: super::keyboard::Shortcut,
+        typing: bool,
+    },
     CatalogCompleted {
         request_id: u64,
         result: Option<Result<crate::music::CatalogPage, String>>,
