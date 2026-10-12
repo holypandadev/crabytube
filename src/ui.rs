@@ -263,6 +263,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ClockTick
         | Message::StatusReading(_)
         | Message::Resized { .. }
+        | Message::MonitorMeasured(_)
         | Message::ResizeWorkDue(_)
         | Message::DisplayScaleChanged(_)
         | Message::WindowFocusChanged(_)
@@ -736,6 +737,40 @@ impl App {
                 }
             }
 
+            Message::MonitorMeasured(monitor) => {
+                let Some(monitor) = monitor else {
+                    return Task::none();
+                };
+                // Like the window sizes, the monitor size arrives divided by the zoom.
+                let monitor = (monitor.width * self.ui_zoom, monitor.height * self.ui_zoom);
+                let current = self.os_window;
+                let (width, height) = layout::fit_to_monitor(current, monitor);
+                let scale = self.preferences.scale_with_window;
+                // Iced centred the window using the size it was asked for, which the zoom then
+                // enlarged. Moving by half the difference between that size and the final one
+                // puts the window in the middle of the monitor, whatever the zoom.
+                let asked = requested_window_size(current, scale);
+                let size = resize_request((width, height), self.ui_zoom);
+                let resize = (width, height) != current;
+                return iced::window::latest().and_then(move |id| {
+                    iced::window::position(id).then(move |position| {
+                        let mut tasks = Vec::new();
+                        if resize {
+                            tasks.push(iced::window::resize(id, size));
+                        }
+                        if let Some(position) = position {
+                            tasks.push(iced::window::move_to(
+                                id,
+                                iced::Point::new(
+                                    position.x + (asked.width - width) / 2.0,
+                                    position.y + (asked.height - height) / 2.0,
+                                ),
+                            ));
+                        }
+                        Task::batch(tasks)
+                    })
+                });
+            }
             Message::Resized { width, height } => {
                 // Sizes arrive divided by the zoom in effect; undo it first.
                 self.os_window = (width * self.ui_zoom, height * self.ui_zoom);
@@ -2111,6 +2146,9 @@ impl App {
         };
         let (window_width, window_height) =
             layout::clamped_window(app.preferences.window_width, app.preferences.window_height);
+        #[cfg(feature = "diagnostics")]
+        let (window_width, window_height) =
+            diagnostic_window_size().unwrap_or((window_width, window_height));
         app.os_window = (window_width, window_height);
         app.apply_ui_zoom();
         app.area = estimated_area(app.window_width, app.window_height);
@@ -2125,6 +2163,13 @@ impl App {
         let display_scale = iced::window::latest()
             .and_then(iced::window::scale_factor)
             .map(Message::DisplayScaleChanged);
+        let fit_to_monitor = if opens_at_default_size() {
+            iced::window::latest()
+                .and_then(iced::window::monitor_size)
+                .map(Message::MonitorMeasured)
+        } else {
+            Task::none()
+        };
         app.mpris.update(app.mpris_player_state());
         #[cfg(feature = "diagnostics")]
         let diagnostic_exit = Task::batch([
@@ -2144,6 +2189,7 @@ impl App {
                 tray_task,
                 restore_window,
                 display_scale,
+                fit_to_monitor,
                 diagnostic_exit,
             ]),
         )
@@ -2297,10 +2343,7 @@ impl App {
         self.library_notice = None;
         self.liked = self.favorites.iter().map(|t| t.video_id.clone()).collect();
         self.persist();
-        let size = requested_window_size(
-            (window_width, window_height),
-            self.preferences.scale_with_window,
-        );
+        let size = resize_request((window_width, window_height), self.ui_zoom);
         iced::window::latest().and_then(move |id| iced::window::resize(id, size))
     }
 
@@ -2999,19 +3042,34 @@ async fn fetch_player_artwork(
 fn startup_state() -> &'static Result<crate::preferences::Snapshot, String> {
     static STATE: std::sync::OnceLock<Result<crate::preferences::Snapshot, String>> =
         std::sync::OnceLock::new();
-    STATE.get_or_init(|| crate::preferences::load(&crate::preferences::state_path()))
+    STATE.get_or_init(|| {
+        let path = crate::preferences::state_path();
+        let _ = FIRST_LAUNCH.set(!path.exists());
+        crate::preferences::load(&path)
+    })
 }
+
+/// Whether the window opens at the default size: there was no saved state, or it was unreadable.
+/// The size is then fitted to the monitor once the window exists. Diagnostics runs that ask for a
+/// window size keep it.
+fn opens_at_default_size() -> bool {
+    #[cfg(feature = "diagnostics")]
+    if diagnostic_window_size().is_some() || diagnostic_viewport().is_some() {
+        return false;
+    }
+    let state = startup_state();
+    state.is_err() || FIRST_LAUNCH.get().copied().unwrap_or(false)
+}
+
+static FIRST_LAUNCH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 /// The saved window size, so the window opens at it instead of being resized
 /// after mapping (Wayland compositors may ignore a later resize request).
 fn initial_window_size() -> iced::Size {
     // Diagnostics: `CRABYTUBE_WINDOW=1280x720` opens at that size.
     #[cfg(feature = "diagnostics")]
-    if let Some((width, height)) = std::env::var("CRABYTUBE_WINDOW").ok().and_then(|value| {
-        let (width, height) = value.split_once('x')?;
-        Some((width.parse::<f32>().ok()?, height.parse::<f32>().ok()?))
-    }) {
-        return iced::Size::new(width, height);
+    if let Some(os_size) = diagnostic_window_size() {
+        return requested_window_size(os_size, true);
     }
     let saved = startup_state().as_ref().ok().map(|snapshot| {
         (
@@ -3031,6 +3089,21 @@ fn initial_window_size() -> iced::Size {
         }
     };
     requested_window_size((width, height), scale_with_window)
+}
+
+/// The window size asked for with `CRABYTUBE_WINDOW=1280x720`, as the system will see it.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn diagnostic_window_size() -> Option<(f32, f32)> {
+    let value = std::env::var("CRABYTUBE_WINDOW").ok()?;
+    let (width, height) = value.split_once('x')?;
+    Some((width.parse().ok()?, height.parse().ok()?))
+}
+
+/// The size to hand to Iced to resize a window that is open so that it ends up `os_size` big.
+/// Iced multiplies the request by the zoom in effect now, which is that of the current size and
+/// not of the new one.
+fn resize_request(os_size: (f32, f32), current_zoom: f32) -> iced::Size {
+    iced::Size::new(os_size.0 / current_zoom, os_size.1 / current_zoom)
 }
 
 /// The size to hand to Iced so the window ends up `os_size` big. Iced multiplies every size it
@@ -3213,6 +3286,11 @@ pub fn run() -> iced::Result {
         .scale_factor(|app: &App| app.ui_zoom)
         .window(iced::window::Settings {
             size: initial_window_size(),
+            position: if opens_at_default_size() {
+                iced::window::Position::Centered
+            } else {
+                iced::window::Position::Default
+            },
             min_size: Some(iced::Size::new(layout::MIN_WIDTH, layout::MIN_HEIGHT)),
             icon: window_icon(),
             #[cfg(target_os = "linux")]
@@ -3248,6 +3326,11 @@ mod tests {
             assert!((requested.width * zoom - os_size.0).abs() < 0.01);
             assert!((requested.height * zoom - os_size.1).abs() < 0.01);
         }
+        // A resize is divided by the zoom of the size the window has now.
+        let now = ui_zoom_for(1440.0, 900.0, true);
+        let request = resize_request((1280.0, 720.0), now);
+        assert!((request.width * now - 1280.0).abs() < 0.01);
+        assert!((request.height * now - 720.0).abs() < 0.01);
         // With the zoom off the size is passed through.
         assert_eq!(
             requested_window_size((1440.0, 900.0), false),

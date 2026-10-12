@@ -65,6 +65,8 @@ pub(super) enum Message {
         width: f32,
         height: f32,
     },
+    /// The size of the monitor the window opened on, asked for after a first launch.
+    MonitorMeasured(Option<iced::Size>),
     DisplayScaleChanged(f32),
     LyricsLoaded {
         generation: u64,

@@ -17,6 +17,18 @@ pub fn default_window_size() -> (f32, f32) {
     }
 }
 
+/// Share of the monitor the default window may take.
+const DEFAULT_WINDOW_SHARE: f32 = 0.9;
+
+/// The default window size, limited to about 90 % of the monitor so that a first launch fits on a
+/// small screen. A size that already fits is kept, and the result never drops below the minimum.
+pub fn fit_to_monitor(size: (f32, f32), monitor: (f32, f32)) -> (f32, f32) {
+    clamped_window(
+        size.0.min(monitor.0 * DEFAULT_WINDOW_SHARE),
+        size.1.min(monitor.1 * DEFAULT_WINDOW_SHARE),
+    )
+}
+
 pub fn clamped_window(width: f32, height: f32) -> (f32, f32) {
     (width.max(MIN_WIDTH), height.max(MIN_HEIGHT))
 }
@@ -60,6 +72,27 @@ mod tests {
         assert_eq!(MIN_WIDTH, 360.0);
         assert_eq!(MIN_HEIGHT, 560.0);
         assert_eq!(clamped_window(320.0, 400.0), (360.0, 560.0));
+    }
+
+    #[test]
+    fn the_default_window_is_limited_to_nine_tenths_of_the_monitor() {
+        // A large monitor keeps the default.
+        assert_eq!(
+            fit_to_monitor((1440.0, 900.0), (2560.0, 1440.0)),
+            (1440.0, 900.0)
+        );
+        // A 1440x900 laptop gets 90 % of each side.
+        let (width, height) = fit_to_monitor((1440.0, 900.0), (1440.0, 900.0));
+        assert!((width - 1296.0).abs() < 0.01 && (height - 810.0).abs() < 0.01);
+        // Only the side that does not fit shrinks.
+        let (width, height) = fit_to_monitor((1440.0, 900.0), (2560.0, 800.0));
+        assert_eq!(width, 1440.0);
+        assert!((height - 720.0).abs() < 0.01);
+        // A tiny monitor never takes the window below the minimum.
+        assert_eq!(
+            fit_to_monitor((1440.0, 900.0), (400.0, 300.0)),
+            (MIN_WIDTH, MIN_HEIGHT)
+        );
     }
 
     #[test]

@@ -435,11 +435,11 @@ pub(super) fn diagnostic_tour_task() -> Task<Message> {
     }
     diagnostic_state_changed();
     // The compositor may ignore the size requested at creation; ask again once mapped.
-    let resize = match std::env::var("CRABYTUBE_WINDOW").ok().and_then(|value| {
-        let (width, height) = value.split_once('x')?;
-        Some(iced::Size::new(width.parse().ok()?, height.parse().ok()?))
-    }) {
-        Some(size) => iced::window::latest().and_then(move |id| iced::window::resize(id, size)),
+    let resize = match super::diagnostic_window_size() {
+        Some(os_size) => {
+            let size = super::requested_window_size(os_size, true);
+            iced::window::latest().and_then(move |id| iced::window::resize(id, size))
+        }
         None => Task::none(),
     };
     Task::batch([
