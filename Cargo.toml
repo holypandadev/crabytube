@@ -6,14 +6,6 @@ license = "GPL-3.0-or-later"
 
 build = "build.rs"
 
-[package.metadata.bundle]
-# `cargo bundle --release` (cargo-bundle) builds the macOS .app with this icon.
-name = "CrabyTube"
-identifier = "app.crabytube.CrabyTube"
-icon = ["packaging/macos/crabytube.icns", "packaging/icons/hicolor/512x512/apps/dev.holypanda.CrabyTube.png"]
-category = "public.app-category.music"
-short_description = "Lightweight YouTube Music player"
-
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
