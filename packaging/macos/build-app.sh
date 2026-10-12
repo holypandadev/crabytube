@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Builds CrabyTube.app for macOS and zips it: universal binaries (arm64 and x86_64 joined with
 # lipo), the two helper programs next to the executable, an Info.plist, the icon and an ad hoc
-# signature. The app is not notarized and not built with the hardened runtime.
+# signature. The app is not notarized and not built with the hardened runtime. The zip also holds
+# the first-launch note, the license and the third-party notices.
 #
 #   packaging/macos/build-app.sh
 #
@@ -111,14 +112,30 @@ done
 codesign --force --sign - --identifier "$app_id" "$app"
 codesign --verify --strict --verbose=2 "$app"
 
+# What goes into the zip, at its top level: the app and the files a user reads first. The notices
+# are docs/licenses.md; its links to files of the repository point to the repository on GitHub,
+# because those files are not in the zip, and the one to the license points to the copy beside it.
+stage="$out/zip-contents"
+rm -rf "$stage"
+mkdir -p "$stage"
+ditto "$app" "$stage/CrabyTube.app"
+cp "$here/README-first-launch.txt" "$stage/README-first-launch.txt"
+cp "$root/LICENSE" "$stage/LICENSE.txt"
+sed -e 's#](\.\./LICENSE)#](LICENSE.txt)#' \
+    -e 's#](\.\./#](https://github.com/holypandadev/crabytube/blob/main/#' \
+    "$root/docs/licenses.md" > "$stage/THIRD-PARTY-LICENSES.md"
+
 zip="$out/CrabyTube-$version-macos-universal.zip"
 rm -f "$zip"
-ditto -c -k --keepParent "$app" "$zip"
+ditto -c -k --norsrc --noextattr --noacl "$stage" "$zip"
 
 echo
 echo "Architectures:"
 for program in "$executable" $helpers; do
     printf '  %s: %s\n' "$program" "$(lipo -archs "$app/Contents/MacOS/$program")"
 done
+echo "In the zip:"
+unzip -Z1 "$zip" | grep -v '/.' | sed 's/^/  /'
 echo "App: $app"
 echo "Zip: $zip"
+echo "SHA-256: $(shasum -a 256 "$zip" | cut -d ' ' -f 1)"

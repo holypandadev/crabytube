@@ -64,15 +64,20 @@ warning. `-NoBuild` packs the executables already in `target\release\`.
 
 ## macOS
 
-An application bundle can be built with `cargo-bundle`:
+`packaging/macos/build-app.sh` builds the signed application bundle and the zip for users:
 
 ```sh
-cargo install cargo-bundle
-cargo bundle --release
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+packaging/macos/build-app.sh
 ```
 
-Then copy `target/release/botguard-helper` and `target/release/js-challenge-helper` into
-`CrabyTube.app/Contents/MacOS/`, next to the main executable.
+It compiles both architectures, joins them into universal binaries with `lipo`, puts the two helper
+programs in `CrabyTube.app/Contents/MacOS/` next to the executable, writes the `Info.plist`, signs
+the helpers and then the bundle ad hoc (no certificate, no hardened runtime, no notarization) and
+zips the result into `target/macos/CrabyTube-<version>-macos-universal.zip`. The zip also holds
+`README-first-launch.txt` (how to get past the first-start warning of macOS and where the data is),
+`LICENSE.txt` and `THIRD-PARTY-LICENSES.md`. Set `TARGETS=aarch64-apple-darwin` for a quick build of
+one architecture.
 
 The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
 on Linux. On macOS the media keys and Now Playing work from the application bundle.
