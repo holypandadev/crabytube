@@ -1,6 +1,7 @@
 mod engine;
 mod live;
 pub mod output;
+pub(crate) mod player_config;
 pub(crate) mod pot;
 mod process_job;
 mod resolver;

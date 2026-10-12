@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use super::{BotguardHelper, PoTokenError, PoTokenProvider, PoTokenRequest};
+use super::{BotguardHelper, PoTokenError, PoTokenProvider, PoTokenRequest, player_config};
 
 const MWEB_UA: &str = "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)";
 const BOTGUARD_UA: &str =
@@ -50,6 +50,74 @@ fn runtime_is_fresh(fetched_at: std::time::Instant, now: std::time::Instant) -> 
     now.saturating_duration_since(fetched_at) < PLAYER_RUNTIME_TTL
 }
 
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// A saved configuration that YouTube refuses shows up as a signature that no longer decodes, tokens it
+/// does not accept, or a media request it refuses.
+fn configuration_refused(error: &StreamError) -> bool {
+    matches!(
+        error,
+        StreamError::Cipher(_) | StreamError::PoToken(_) | StreamError::MediaRejected(_)
+    )
+}
+
+/// The player runtime a saved configuration describes. The signature timestamp is not saved: it is read
+/// again from the cached player JavaScript.
+fn runtime_from_saved(
+    saved: player_config::SavedPlayerConfig,
+    profile: PlayerClient,
+) -> PlayerRuntime {
+    let age = Duration::from_secs(now_unix().saturating_sub(saved.saved_at));
+    PlayerRuntime {
+        fetched_at: std::time::Instant::now()
+            .checked_sub(age)
+            .unwrap_or_else(std::time::Instant::now),
+        profile,
+        endpoint: saved.endpoint,
+        origin: saved.origin,
+        header_id: saved.header_id,
+        version: saved.version,
+        user_agent: saved.user_agent,
+        signature_timestamp: None,
+        player_js_url: saved.player_js_url,
+        context: saved.context,
+        botguard_ytcfg_json: saved.botguard_ytcfg_json,
+        botguard_user_agent: saved.botguard_user_agent,
+        homepage_challenge_json: saved.homepage_challenge_json,
+        event_id: saved.event_id,
+        gvs_binding: if saved.gvs_video_id {
+            GvsPoBinding::VideoId
+        } else {
+            GvsPoBinding::VisitorData
+        },
+        from_disk: true,
+    }
+}
+
+/// The values a fresh fetch saves for the next launch.
+fn saved_from_runtime(runtime: &PlayerRuntime) -> player_config::SavedPlayerConfig {
+    player_config::SavedPlayerConfig {
+        saved_at: now_unix(),
+        profile: runtime.profile.name.to_owned(),
+        endpoint: runtime.endpoint.clone(),
+        origin: runtime.origin.clone(),
+        header_id: runtime.header_id.clone(),
+        version: runtime.version.clone(),
+        user_agent: runtime.user_agent.clone(),
+        player_js_url: runtime.player_js_url.clone(),
+        context: runtime.context.clone(),
+        botguard_ytcfg_json: runtime.botguard_ytcfg_json.clone(),
+        botguard_user_agent: runtime.botguard_user_agent.clone(),
+        homepage_challenge_json: runtime.homepage_challenge_json.clone(),
+        event_id: runtime.event_id.clone(),
+        gvs_video_id: runtime.gvs_binding == GvsPoBinding::VideoId,
+    }
+}
+
 #[derive(Clone)]
 struct PlayerRuntime {
     fetched_at: std::time::Instant,
@@ -67,6 +135,8 @@ struct PlayerRuntime {
     homepage_challenge_json: Option<String>,
     event_id: Option<String>,
     gvs_binding: GvsPoBinding,
+    /// Read from the configuration an earlier launch saved, rather than fetched by this one.
+    from_disk: bool,
 }
 
 impl ClientProfile {
@@ -565,520 +635,13 @@ fn trim_persisted_player_js_cache(directory: &std::path::Path) {
 }
 
 impl YouTubeStreamResolver {
-    pub fn new(session: YouTubeSession) -> Self {
-        let token_provider: std::sync::Arc<dyn PoTokenProvider> =
-            std::sync::Arc::new(BotguardHelper::new());
-        Self {
-            token_provider: std::sync::Arc::clone(&token_provider),
-            profile: ClientProfile::WebMusic,
-            runtime: tokio::sync::Mutex::new(None),
-            player_cache: tokio::sync::Mutex::new(HashMap::new()),
-            prewarming: std::sync::Mutex::new(None),
-            live_fallback: Some(Box::new(Self::with_provider(
-                session,
-                token_provider,
-                ClientProfile::Mweb,
-            ))),
-        }
-    }
-
-    pub fn with_provider(
-        _session: YouTubeSession,
-        token_provider: std::sync::Arc<dyn PoTokenProvider>,
-        profile: ClientProfile,
-    ) -> Self {
-        Self {
-            token_provider,
-            profile,
-            runtime: tokio::sync::Mutex::new(None),
-            player_cache: tokio::sync::Mutex::new(HashMap::new()),
-            prewarming: std::sync::Mutex::new(None),
-            live_fallback: None,
-        }
-    }
-
-    /// Stops an unfinished prewarm, so a Play fetches the player data alone rather than wait for it.
-    fn cancel_prewarm(&self) {
-        let token = self
-            .prewarming
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(token) = token {
-            token.cancel();
-        }
-    }
-
-    fn client() -> Result<&'static Client, StreamError> {
-        crate::network::shared().map_err(StreamError::Network)
-    }
-
-    async fn fetch_player_runtime(
-        profile: PlayerClient,
-        cancellation: &CancellationToken,
-    ) -> Result<PlayerRuntime, StreamError> {
-        let page = Self::fetch_page(
-            profile.config_url,
-            (!profile.user_agent.is_empty()).then_some(profile.user_agent),
-            cancellation,
-        )
-        .await?;
-        // The page is large, so the search and the JSON parse run off the playback runtime.
-        let config = off_runtime(move || parse_ytcfg(&page))
-            .await
-            .ok_or_else(|| {
-                StreamError::Config(
-                    "client config did not contain an Innertube configuration".into(),
-                )
-            })?;
-        let mut context = config
-            .get("INNERTUBE_CONTEXT")
-            .and_then(Value::as_object)
-            .cloned()
-            .map(Value::Object)
-            .ok_or_else(|| {
-                StreamError::Config("client config is missing Innertube context".into())
-            })?;
-        let client_context = context
-            .get_mut("client")
-            .and_then(Value::as_object_mut)
-            .ok_or_else(|| {
-                StreamError::Config("client config is missing its client context".into())
-            })?;
-        client_context.insert("hl".into(), Value::String("en".into()));
-        client_context.insert("timeZone".into(), Value::String("UTC".into()));
-        client_context.insert("utcOffsetMinutes".into(), Value::Number(0.into()));
-        let version = client_context
-            .get("clientVersion")
-            .and_then(Value::as_str)
-            .unwrap_or(profile.version)
-            .to_owned();
-        let user_agent = client_context
-            .get("userAgent")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .or_else(|| (!profile.user_agent.is_empty()).then(|| profile.user_agent.to_owned()));
-        let header_id = config
-            .get("INNERTUBE_CONTEXT_CLIENT_NAME")
-            .and_then(Value::as_u64)
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| profile.fallback_client_id().to_owned());
-        let api_host = config
-            .get("INNERTUBE_HOST")
-            .and_then(Value::as_str)
-            .unwrap_or(profile.api_host);
-        let api_key = config
-            .get("INNERTUBE_API_KEY")
-            .and_then(Value::as_str)
-            .unwrap_or("AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30");
-        let signature_timestamp = config.get("STS").and_then(Value::as_u64);
-        // By default BotGuard runs with a desktop browser identity, separate from MWEB.
-        // The opt-in unified profile exists only for diagnosing GVS stability.
-        let botguard_user_agent = if profile.name == "MWEB"
-            && std::env::var("CRABYTUBE_UA_PROFILE").as_deref() == Ok("unified-mweb")
-        {
-            profile.user_agent
-        } else {
-            BOTGUARD_UA
-        };
-        let botguard_page = if profile.requires_gvs_po_token {
-            Some(
-                Self::fetch_page(
-                    "https://www.youtube.com/",
-                    Some(botguard_user_agent),
-                    cancellation,
-                )
-                .await?,
-            )
-        } else {
-            None
-        };
-        let (botguard_config, homepage_challenge_json) = off_runtime(move || {
-            let config = botguard_page.as_deref().and_then(parse_ytcfg);
-            let challenge = botguard_page
-                .as_deref()
-                .and_then(parse_yt_at_n)
-                .and_then(|attestation| attestation.get("bgChallenge").cloned())
-                .and_then(|challenge| serde_json::to_string(&challenge).ok());
-            (config, challenge)
-        })
-        .await;
-        let event_id = botguard_config
-            .as_ref()
-            .unwrap_or(&config)
-            .get("EVENT_ID")
-            .and_then(Value::as_str)
-            .filter(|event| !event.is_empty())
-            .map(str::to_owned);
-        if profile.requires_gvs_po_token && event_id.is_some() && homepage_challenge_json.is_none()
-        {
-            warn!(
-                "BotGuard homepage challenge unavailable while EVENT_ID is present; legacy challenge fallback is not equivalent for this session"
-            );
-        }
-        let gvs_binding = if has_video_id_gvs_binding(&config) {
-            GvsPoBinding::VideoId
-        } else {
-            GvsPoBinding::VisitorData
-        };
-        let botguard_ytcfg_json = serde_json::to_string(
-            botguard_config.as_ref().unwrap_or(&config),
-        )
-        .map_err(|error| StreamError::Config(format!("ytcfg serialization failed: {error}")))?;
-        let endpoint =
-            format!("https://{api_host}/youtubei/v1/player?key={api_key}&prettyPrint=false");
-        let origin = format!("https://{api_host}");
-        let api_key_present = config
-            .get("INNERTUBE_API_KEY")
-            .and_then(|value| value.as_str())
-            .is_some();
-        let visitor_data_present = context
-            .pointer("/client/visitorData")
-            .and_then(|value| value.as_str())
-            .is_some();
-        let user_agent_present = user_agent.is_some();
-        let user_agent_fp = user_agent
-            .as_deref()
-            .map(|value| fingerprint8(value.as_bytes()));
-        let signature_timestamp_present = signature_timestamp.is_some();
-        let context_client_keys = context
-            .pointer("/client")
-            .and_then(|value| value.as_object())
-            .map(|client| client.keys().cloned().collect::<Vec<_>>());
-        info!(
-            client = profile.name,
-            client_version = %version,
-            client_id = %header_id,
-            api_key_present,
-            visitor_data_present,
-            user_agent_present,
-            user_agent_fp = ?user_agent_fp,
-            signature_timestamp_present,
-            context_client_keys = ?context_client_keys,
-            event_id_present = event_id.is_some(),
-            homepage_challenge_present = homepage_challenge_json.is_some(),
-            bg_visitor_matches_player_visitor = botguard_config.as_ref().and_then(|cfg| cfg.pointer("/INNERTUBE_CONTEXT/client/visitorData")).and_then(|value| value.as_str()) == context.pointer("/client/visitorData").and_then(|value| value.as_str()),
-            gvs_binding = gvs_binding.label(),
-            api_host,
-            "Innertube client config loaded"
-        );
-        Ok(PlayerRuntime {
-            fetched_at: std::time::Instant::now(),
-            profile,
-            endpoint,
-            origin,
-            header_id,
-            version,
-            user_agent,
-            botguard_user_agent: botguard_user_agent.to_owned(),
-            signature_timestamp,
-            player_js_url: player_js_url(&config),
-            context,
-            botguard_ytcfg_json,
-            homepage_challenge_json,
-            event_id,
-            gvs_binding,
-        })
-    }
-
-    async fn fetch_page(
-        url: &str,
-        user_agent: Option<&str>,
-        cancellation: &CancellationToken,
-    ) -> Result<String, StreamError> {
-        const MAX_ATTEMPTS: u8 = 3;
-        for attempt in 1..=MAX_ATTEMPTS {
-            if cancellation.is_cancelled() {
-                return Err(StreamError::Cancelled);
-            }
-            let mut request = Self::client()?.get(url);
-            if let Some(user_agent) = user_agent {
-                request = request.header(reqwest::header::USER_AGENT, user_agent);
-            }
-            let response = tokio::select! {
-                _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                response = request.send() => match response {
-                    Ok(response) => response,
-                    Err(error) if attempt < MAX_ATTEMPTS && transient_reqwest_error(&error) => {
-                        retry_config_get(attempt, url, None, cancellation).await?;
-                        continue;
-                    }
-                    Err(error) => return Err(StreamError::Network(error.to_string())),
-                },
-            };
-            let status = response.status();
-            if retryable_config_status(status) {
-                if attempt < MAX_ATTEMPTS {
-                    retry_config_get(
-                        attempt,
-                        url,
-                        response
-                            .headers()
-                            .get(reqwest::header::RETRY_AFTER)
-                            .and_then(|value| value.to_str().ok())
-                            .and_then(|value| value.parse::<u64>().ok()),
-                        cancellation,
-                    )
-                    .await?;
-                    continue;
-                }
-                return Err(StreamError::Network(format!(
-                    "configuration GET returned HTTP {status} after {attempt} attempts"
-                )));
-            }
-            if !status.is_success() {
-                return Err(StreamError::Config(format!(
-                    "configuration GET returned HTTP {status}"
-                )));
-            }
-            let page = tokio::select! {
-                _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                page = response.text() => match page {
-                    Ok(page) => page,
-                    Err(error) if attempt < MAX_ATTEMPTS && transient_reqwest_error(&error) => {
-                        retry_config_get(attempt, url, None, cancellation).await?;
-                        continue;
-                    }
-                    Err(error) => return Err(StreamError::Network(format!("configuration response read failed: {error}"))),
-                },
-            };
-            return Ok(page);
-        }
-        Err(StreamError::Network(
-            "configuration GET retry limit exhausted".into(),
-        ))
-    }
-
-    /// Posts the player request for one track and returns the parsed response.
-    async fn post_player(
-        &self,
-        runtime: &PlayerRuntime,
-        visitor_data: &str,
-        track: &TrackId,
-    ) -> Result<Value, StreamError> {
-        let request = player_request(
-            &track.0,
-            runtime.context.clone(),
-            runtime.signature_timestamp,
-        );
-        let mut player_request = Self::client()?
-            .post(&runtime.endpoint)
-            .header("X-YouTube-Client-Name", &runtime.header_id)
-            .header("X-YouTube-Client-Version", &runtime.version)
-            .header("Origin", &runtime.origin)
-            .header("X-Goog-Visitor-Id", visitor_data);
-        if let Some(user_agent) = runtime.user_agent.as_deref() {
-            player_request = player_request.header(reqwest::header::USER_AGENT, user_agent);
-        }
-        let response = player_request
-            .json(&request)
-            .send()
-            .await
-            .map_err(|error| StreamError::Network(error.to_string()))?;
-        response
-            .error_for_status()
-            .map_err(|error| StreamError::Network(error.to_string()))?
-            .json::<Value>()
-            .await
-            .map_err(|error| StreamError::Resolution(error.to_string()))
-    }
-
-    async fn player_runtime(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<PlayerRuntime, StreamError> {
-        // The lock covers only the lookup and the store, never the page fetch, so callers do not queue behind it.
-        let cached = self.runtime.lock().await.clone();
-        if let Some(runtime) =
-            cached.filter(|runtime| runtime_is_fresh(runtime.fetched_at, std::time::Instant::now()))
-        {
-            return Ok(runtime);
-        }
-        let mut loaded = Self::fetch_player_runtime(self.profile.config(), cancellation).await?;
-        adopt_visitor(&mut loaded);
-        *self.runtime.lock().await = Some(loaded.clone());
-        Ok(loaded)
-    }
-
-    async fn ensure_signature_timestamp(
-        &self,
-        runtime: &mut PlayerRuntime,
-        video_id: &str,
-        cancellation: &CancellationToken,
-    ) -> Result<(), StreamError> {
-        if runtime.signature_timestamp.is_some() {
-            return Ok(());
-        }
-        if runtime.player_js_url.is_none() {
-            // WEB_REMIX config comes from music.youtube.com; when it lacks PLAYER_JS_URL,
-            // the standard watch page provides it.
-            let webpage_url = format!(
-                "https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1"
-            );
-            let webpage = Self::fetch_page(&webpage_url, None, cancellation).await?;
-            runtime.player_js_url = off_runtime(move || {
-                parse_ytcfg(&webpage).and_then(|config| player_js_url(&config))
-            })
-            .await;
-            let mut cached_runtime = self.runtime.lock().await;
-            if let Some(cached) = cached_runtime.as_mut() {
-                cached.player_js_url = runtime.player_js_url.clone();
-            }
-        }
-        let Some(js_url) = runtime.player_js_url.clone() else {
-            warn!(
-                client = runtime.profile.name,
-                "player JS URL unavailable in music and watch-page config"
-            );
-            return Ok(());
-        };
-        let player_url = Url::parse("https://www.youtube.com/")
-            .and_then(|base| base.join(&js_url))
-            .map_err(|error| StreamError::Resolution(format!("invalid player JS URL: {error}")))?;
-        let player_cache_key = sha256_hex(player_url.as_str().as_bytes());
-        // A saved copy for this URL is reused, so a restart does not download the player again.
-        let saved = off_runtime({
-            let key = player_cache_key.clone();
-            move || saved_raw_player_js(&key)
-        })
-        .await;
-        let (player_js, source_fp, source_path) = match saved {
-            Some(saved) => {
-                info!(client = runtime.profile.name, "player JS reused from disk");
-                saved
-            }
-            None => {
-                let player_js = Self::fetch_page(
-                    player_url.as_str(),
-                    runtime.user_agent.as_deref(),
-                    cancellation,
-                )
-                .await?;
-                let (player_js, source_fp) = with_fingerprint(player_js).await;
-                let source_path = raw_player_js_path(&player_cache_key, &source_fp);
-                if let Some(path) = &source_path {
-                    store_raw_player_js(path, &player_js);
-                }
-                (player_js, source_fp, source_path)
-            }
-        };
-        runtime.signature_timestamp = parse_signature_timestamp(&player_js);
-        drop(player_js);
-        {
-            let mut cache = self.player_cache.lock().await;
-            let prepared = cache
-                .get(&player_cache_key)
-                .filter(|entry| entry.source_fp == source_fp)
-                .and_then(|entry| entry.preprocessed_path.clone());
-            if !cache.contains_key(&player_cache_key) && cache.len() >= 4 {
-                cache.clear();
-            }
-            cache.insert(
-                player_cache_key,
-                PlayerJsCacheEntry {
-                    source_fp,
-                    source_path,
-                    preprocessed_path: prepared,
-                },
-            );
-        }
-        if let Some(signature_timestamp) = runtime.signature_timestamp {
-            let mut cached_runtime = self.runtime.lock().await;
-            if let Some(cached) = cached_runtime.as_mut()
-                && cached.player_js_url.as_deref() == Some(js_url.as_str())
-            {
-                cached.signature_timestamp = Some(signature_timestamp);
-            }
-            info!(
-                client = runtime.profile.name,
-                signature_timestamp, "signature timestamp extracted from player JS"
-            );
-        } else {
-            warn!(
-                client = runtime.profile.name,
-                "player JS contained no signature timestamp"
-            );
-        }
-        Ok(())
-    }
-}
-
-/// A body cut off mid-transfer reports as a decode error, so it counts as transient too.
-fn transient_reqwest_error(error: &reqwest::Error) -> bool {
-    error.is_timeout() || error.is_connect() || error.is_body() || error.is_decode()
-}
-
-fn sanitized_reqwest_error(error: &reqwest::Error) -> String {
-    format!(
-        "timeout={} connect={} body={} status={}",
-        error.is_timeout(),
-        error.is_connect(),
-        error.is_body(),
-        error
-            .status()
-            .map_or_else(|| "none".to_owned(), |status| status.to_string()),
-    )
-}
-
-fn retryable_config_status(status: reqwest::StatusCode) -> bool {
-    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
-}
-
-/// How long to wait before a retry: the server's Retry-After, held to one second, or a short backoff.
-fn retry_delay(attempt: u8, url: &str, retry_after_secs: Option<u64>) -> Duration {
-    // Stable per URL/attempt jitter, avoiding another RNG dependency while
-    // spreading retries slightly across concurrent desktop clients.
-    let fingerprint = sha256_hex(format!("{url}:{attempt}").as_bytes());
-    let jitter = u64::from_str_radix(&fingerprint[..2], 16).unwrap_or(0) % 61;
-    let exponential_ms = u64::from(attempt) * 80;
-    let retry_after_ms = retry_after_secs.unwrap_or(0).saturating_mul(1000).min(1000);
-    Duration::from_millis(retry_after_ms.max(exponential_ms + jitter))
-}
-
-async fn retry_config_get(
-    attempt: u8,
-    url: &str,
-    retry_after_secs: Option<u64>,
-    cancellation: &CancellationToken,
-) -> Result<(), StreamError> {
-    let delay = retry_delay(attempt, url, retry_after_secs);
-    warn!(
-        attempt,
-        delay_ms = delay.as_millis(),
-        "retrying transient idempotent configuration GET"
-    );
-    tokio::select! {
-        _ = cancellation.cancelled() => Err(StreamError::Cancelled),
-        _ = tokio::time::sleep(delay) => Ok(()),
-    }
-}
-
-#[async_trait]
-impl StreamResolver for YouTubeStreamResolver {
-    async fn prewarm(&self) {
-        let token = CancellationToken::new();
-        *self
-            .prewarming
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
-        let result = self.player_runtime(&token).await;
-        *self
-            .prewarming
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        match result {
-            Ok(_) => info!("player runtime prewarmed"),
-            Err(StreamError::Cancelled) => info!("player runtime prewarm stopped for a play"),
-            Err(error) => warn!(?error, "player runtime prewarm failed"),
-        }
-    }
-
-    #[instrument(skip(self, cancellation), fields(track_id_fp = %fingerprint8(track.0.as_bytes())))]
-    async fn resolve(
+    /// One resolution attempt. `used_saved` reports whether the player configuration came from disk.
+    async fn resolve_attempt(
         &self,
         track: &TrackId,
         quality: AudioQuality,
         cancellation: CancellationToken,
+        used_saved: &mut bool,
     ) -> Result<ValidatedPlaybackResolution, StreamError> {
         self.cancel_prewarm();
         let mut max_validation_attempts = if self.profile == ClientProfile::WebMusic {
@@ -1102,6 +665,7 @@ impl StreamResolver for YouTubeStreamResolver {
                 return Err(StreamError::Cancelled);
             }
             let mut runtime = self.player_runtime(&cancellation).await?;
+            *used_saved = runtime.from_disk;
             let visitor_data = runtime_visitor_data(&runtime)?;
             // The tokens come from the page configuration, not from the player JS, so they are minted while
             // the JS is loaded for the signature timestamp.
@@ -1442,6 +1006,560 @@ impl StreamResolver for YouTubeStreamResolver {
         Err(StreamError::Network(
             "GVS preflight retry limit exhausted".into(),
         ))
+    }
+
+    pub fn new(session: YouTubeSession) -> Self {
+        let token_provider: std::sync::Arc<dyn PoTokenProvider> =
+            std::sync::Arc::new(BotguardHelper::new());
+        Self {
+            token_provider: std::sync::Arc::clone(&token_provider),
+            profile: ClientProfile::WebMusic,
+            runtime: tokio::sync::Mutex::new(None),
+            player_cache: tokio::sync::Mutex::new(HashMap::new()),
+            prewarming: std::sync::Mutex::new(None),
+            live_fallback: Some(Box::new(Self::with_provider(
+                session,
+                token_provider,
+                ClientProfile::Mweb,
+            ))),
+        }
+    }
+
+    pub fn with_provider(
+        _session: YouTubeSession,
+        token_provider: std::sync::Arc<dyn PoTokenProvider>,
+        profile: ClientProfile,
+    ) -> Self {
+        Self {
+            token_provider,
+            profile,
+            runtime: tokio::sync::Mutex::new(None),
+            player_cache: tokio::sync::Mutex::new(HashMap::new()),
+            prewarming: std::sync::Mutex::new(None),
+            live_fallback: None,
+        }
+    }
+
+    /// Stops an unfinished prewarm, so a Play fetches the player data alone rather than wait for it.
+    fn cancel_prewarm(&self) {
+        let token = self
+            .prewarming
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(token) = token {
+            token.cancel();
+        }
+    }
+
+    fn client() -> Result<&'static Client, StreamError> {
+        crate::network::shared().map_err(StreamError::Network)
+    }
+
+    async fn fetch_player_runtime(
+        profile: PlayerClient,
+        cancellation: &CancellationToken,
+    ) -> Result<PlayerRuntime, StreamError> {
+        let page = Self::fetch_page(
+            profile.config_url,
+            (!profile.user_agent.is_empty()).then_some(profile.user_agent),
+            cancellation,
+        )
+        .await?;
+        // The page is large, so the search and the JSON parse run off the playback runtime.
+        let config = off_runtime(move || parse_ytcfg(&page))
+            .await
+            .ok_or_else(|| {
+                StreamError::Config(
+                    "client config did not contain an Innertube configuration".into(),
+                )
+            })?;
+        let mut context = config
+            .get("INNERTUBE_CONTEXT")
+            .and_then(Value::as_object)
+            .cloned()
+            .map(Value::Object)
+            .ok_or_else(|| {
+                StreamError::Config("client config is missing Innertube context".into())
+            })?;
+        let client_context = context
+            .get_mut("client")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| {
+                StreamError::Config("client config is missing its client context".into())
+            })?;
+        client_context.insert("hl".into(), Value::String("en".into()));
+        client_context.insert("timeZone".into(), Value::String("UTC".into()));
+        client_context.insert("utcOffsetMinutes".into(), Value::Number(0.into()));
+        let version = client_context
+            .get("clientVersion")
+            .and_then(Value::as_str)
+            .unwrap_or(profile.version)
+            .to_owned();
+        let user_agent = client_context
+            .get("userAgent")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| (!profile.user_agent.is_empty()).then(|| profile.user_agent.to_owned()));
+        let header_id = config
+            .get("INNERTUBE_CONTEXT_CLIENT_NAME")
+            .and_then(Value::as_u64)
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| profile.fallback_client_id().to_owned());
+        let api_host = config
+            .get("INNERTUBE_HOST")
+            .and_then(Value::as_str)
+            .unwrap_or(profile.api_host);
+        let api_key = config
+            .get("INNERTUBE_API_KEY")
+            .and_then(Value::as_str)
+            .unwrap_or("AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30");
+        let signature_timestamp = config.get("STS").and_then(Value::as_u64);
+        // By default BotGuard runs with a desktop browser identity, separate from MWEB.
+        // The opt-in unified profile exists only for diagnosing GVS stability.
+        let botguard_user_agent = if profile.name == "MWEB"
+            && std::env::var("CRABYTUBE_UA_PROFILE").as_deref() == Ok("unified-mweb")
+        {
+            profile.user_agent
+        } else {
+            BOTGUARD_UA
+        };
+        let botguard_page = if profile.requires_gvs_po_token {
+            Some(
+                Self::fetch_page(
+                    "https://www.youtube.com/",
+                    Some(botguard_user_agent),
+                    cancellation,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let (botguard_config, homepage_challenge_json) = off_runtime(move || {
+            let config = botguard_page.as_deref().and_then(parse_ytcfg);
+            let challenge = botguard_page
+                .as_deref()
+                .and_then(parse_yt_at_n)
+                .and_then(|attestation| attestation.get("bgChallenge").cloned())
+                .and_then(|challenge| serde_json::to_string(&challenge).ok());
+            (config, challenge)
+        })
+        .await;
+        let event_id = botguard_config
+            .as_ref()
+            .unwrap_or(&config)
+            .get("EVENT_ID")
+            .and_then(Value::as_str)
+            .filter(|event| !event.is_empty())
+            .map(str::to_owned);
+        if profile.requires_gvs_po_token && event_id.is_some() && homepage_challenge_json.is_none()
+        {
+            warn!(
+                "BotGuard homepage challenge unavailable while EVENT_ID is present; legacy challenge fallback is not equivalent for this session"
+            );
+        }
+        let gvs_binding = if has_video_id_gvs_binding(&config) {
+            GvsPoBinding::VideoId
+        } else {
+            GvsPoBinding::VisitorData
+        };
+        let botguard_ytcfg_json = serde_json::to_string(
+            botguard_config.as_ref().unwrap_or(&config),
+        )
+        .map_err(|error| StreamError::Config(format!("ytcfg serialization failed: {error}")))?;
+        let endpoint =
+            format!("https://{api_host}/youtubei/v1/player?key={api_key}&prettyPrint=false");
+        let origin = format!("https://{api_host}");
+        let api_key_present = config
+            .get("INNERTUBE_API_KEY")
+            .and_then(|value| value.as_str())
+            .is_some();
+        let visitor_data_present = context
+            .pointer("/client/visitorData")
+            .and_then(|value| value.as_str())
+            .is_some();
+        let user_agent_present = user_agent.is_some();
+        let user_agent_fp = user_agent
+            .as_deref()
+            .map(|value| fingerprint8(value.as_bytes()));
+        let signature_timestamp_present = signature_timestamp.is_some();
+        let context_client_keys = context
+            .pointer("/client")
+            .and_then(|value| value.as_object())
+            .map(|client| client.keys().cloned().collect::<Vec<_>>());
+        info!(
+            client = profile.name,
+            client_version = %version,
+            client_id = %header_id,
+            api_key_present,
+            visitor_data_present,
+            user_agent_present,
+            user_agent_fp = ?user_agent_fp,
+            signature_timestamp_present,
+            context_client_keys = ?context_client_keys,
+            event_id_present = event_id.is_some(),
+            homepage_challenge_present = homepage_challenge_json.is_some(),
+            bg_visitor_matches_player_visitor = botguard_config.as_ref().and_then(|cfg| cfg.pointer("/INNERTUBE_CONTEXT/client/visitorData")).and_then(|value| value.as_str()) == context.pointer("/client/visitorData").and_then(|value| value.as_str()),
+            gvs_binding = gvs_binding.label(),
+            api_host,
+            "Innertube client config loaded"
+        );
+        Ok(PlayerRuntime {
+            fetched_at: std::time::Instant::now(),
+            profile,
+            endpoint,
+            origin,
+            header_id,
+            version,
+            user_agent,
+            botguard_user_agent: botguard_user_agent.to_owned(),
+            signature_timestamp,
+            player_js_url: player_js_url(&config),
+            context,
+            botguard_ytcfg_json,
+            homepage_challenge_json,
+            event_id,
+            gvs_binding,
+            from_disk: false,
+        })
+    }
+
+    async fn fetch_page(
+        url: &str,
+        user_agent: Option<&str>,
+        cancellation: &CancellationToken,
+    ) -> Result<String, StreamError> {
+        const MAX_ATTEMPTS: u8 = 3;
+        for attempt in 1..=MAX_ATTEMPTS {
+            if cancellation.is_cancelled() {
+                return Err(StreamError::Cancelled);
+            }
+            let mut request = Self::client()?.get(url);
+            if let Some(user_agent) = user_agent {
+                request = request.header(reqwest::header::USER_AGENT, user_agent);
+            }
+            let response = tokio::select! {
+                _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
+                response = request.send() => match response {
+                    Ok(response) => response,
+                    Err(error) if attempt < MAX_ATTEMPTS && transient_reqwest_error(&error) => {
+                        retry_config_get(attempt, url, None, cancellation).await?;
+                        continue;
+                    }
+                    Err(error) => return Err(StreamError::Network(error.to_string())),
+                },
+            };
+            let status = response.status();
+            if retryable_config_status(status) {
+                if attempt < MAX_ATTEMPTS {
+                    retry_config_get(
+                        attempt,
+                        url,
+                        response
+                            .headers()
+                            .get(reqwest::header::RETRY_AFTER)
+                            .and_then(|value| value.to_str().ok())
+                            .and_then(|value| value.parse::<u64>().ok()),
+                        cancellation,
+                    )
+                    .await?;
+                    continue;
+                }
+                return Err(StreamError::Network(format!(
+                    "configuration GET returned HTTP {status} after {attempt} attempts"
+                )));
+            }
+            if !status.is_success() {
+                return Err(StreamError::Config(format!(
+                    "configuration GET returned HTTP {status}"
+                )));
+            }
+            let page = tokio::select! {
+                _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
+                page = response.text() => match page {
+                    Ok(page) => page,
+                    Err(error) if attempt < MAX_ATTEMPTS && transient_reqwest_error(&error) => {
+                        retry_config_get(attempt, url, None, cancellation).await?;
+                        continue;
+                    }
+                    Err(error) => return Err(StreamError::Network(format!("configuration response read failed: {error}"))),
+                },
+            };
+            return Ok(page);
+        }
+        Err(StreamError::Network(
+            "configuration GET retry limit exhausted".into(),
+        ))
+    }
+
+    /// Posts the player request for one track and returns the parsed response.
+    async fn post_player(
+        &self,
+        runtime: &PlayerRuntime,
+        visitor_data: &str,
+        track: &TrackId,
+    ) -> Result<Value, StreamError> {
+        let request = player_request(
+            &track.0,
+            runtime.context.clone(),
+            runtime.signature_timestamp,
+        );
+        let mut player_request = Self::client()?
+            .post(&runtime.endpoint)
+            .header("X-YouTube-Client-Name", &runtime.header_id)
+            .header("X-YouTube-Client-Version", &runtime.version)
+            .header("Origin", &runtime.origin)
+            .header("X-Goog-Visitor-Id", visitor_data);
+        if let Some(user_agent) = runtime.user_agent.as_deref() {
+            player_request = player_request.header(reqwest::header::USER_AGENT, user_agent);
+        }
+        let response = player_request
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| StreamError::Network(error.to_string()))?;
+        response
+            .error_for_status()
+            .map_err(|error| StreamError::Network(error.to_string()))?
+            .json::<Value>()
+            .await
+            .map_err(|error| StreamError::Resolution(error.to_string()))
+    }
+
+    async fn player_runtime(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<PlayerRuntime, StreamError> {
+        // The lock covers only the lookup and the store, never the page fetch, so callers do not queue behind it.
+        let cached = self.runtime.lock().await.clone();
+        if let Some(runtime) =
+            cached.filter(|runtime| runtime_is_fresh(runtime.fetched_at, std::time::Instant::now()))
+        {
+            return Ok(runtime);
+        }
+        // The configuration of an earlier launch is read from disk while it is fresh, so its pages are not
+        // downloaded again. The file is read off the playback runtime, as it can be large.
+        let profile = self.profile.config();
+        let name = profile.name;
+        let mut loaded = match off_runtime(move || player_config::load(name)).await {
+            Some(saved) => runtime_from_saved(saved, profile),
+            None => {
+                let fetched = Self::fetch_player_runtime(profile, cancellation).await?;
+                let saved = saved_from_runtime(&fetched);
+                let _ = off_runtime(move || player_config::store(&saved)).await;
+                fetched
+            }
+        };
+        adopt_visitor(&mut loaded);
+        *self.runtime.lock().await = Some(loaded.clone());
+        Ok(loaded)
+    }
+
+    /// Forgets the saved configuration, here and on disk, so the next fetch reads the pages again.
+    async fn forget_player_config(&self) {
+        *self.runtime.lock().await = None;
+        let _ = off_runtime(player_config::forget).await;
+    }
+
+    async fn ensure_signature_timestamp(
+        &self,
+        runtime: &mut PlayerRuntime,
+        video_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), StreamError> {
+        if runtime.signature_timestamp.is_some() {
+            return Ok(());
+        }
+        if runtime.player_js_url.is_none() {
+            // WEB_REMIX config comes from music.youtube.com; when it lacks PLAYER_JS_URL,
+            // the standard watch page provides it.
+            let webpage_url = format!(
+                "https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1"
+            );
+            let webpage = Self::fetch_page(&webpage_url, None, cancellation).await?;
+            runtime.player_js_url = off_runtime(move || {
+                parse_ytcfg(&webpage).and_then(|config| player_js_url(&config))
+            })
+            .await;
+            let mut cached_runtime = self.runtime.lock().await;
+            if let Some(cached) = cached_runtime.as_mut() {
+                cached.player_js_url = runtime.player_js_url.clone();
+            }
+        }
+        let Some(js_url) = runtime.player_js_url.clone() else {
+            warn!(
+                client = runtime.profile.name,
+                "player JS URL unavailable in music and watch-page config"
+            );
+            return Ok(());
+        };
+        let player_url = Url::parse("https://www.youtube.com/")
+            .and_then(|base| base.join(&js_url))
+            .map_err(|error| StreamError::Resolution(format!("invalid player JS URL: {error}")))?;
+        let player_cache_key = sha256_hex(player_url.as_str().as_bytes());
+        // A saved copy for this URL is reused, so a restart does not download the player again.
+        let saved = off_runtime({
+            let key = player_cache_key.clone();
+            move || saved_raw_player_js(&key)
+        })
+        .await;
+        let (player_js, source_fp, source_path) = match saved {
+            Some(saved) => {
+                info!(client = runtime.profile.name, "player JS reused from disk");
+                saved
+            }
+            None => {
+                let player_js = Self::fetch_page(
+                    player_url.as_str(),
+                    runtime.user_agent.as_deref(),
+                    cancellation,
+                )
+                .await?;
+                let (player_js, source_fp) = with_fingerprint(player_js).await;
+                let source_path = raw_player_js_path(&player_cache_key, &source_fp);
+                if let Some(path) = &source_path {
+                    store_raw_player_js(path, &player_js);
+                }
+                (player_js, source_fp, source_path)
+            }
+        };
+        runtime.signature_timestamp = parse_signature_timestamp(&player_js);
+        drop(player_js);
+        {
+            let mut cache = self.player_cache.lock().await;
+            let prepared = cache
+                .get(&player_cache_key)
+                .filter(|entry| entry.source_fp == source_fp)
+                .and_then(|entry| entry.preprocessed_path.clone());
+            if !cache.contains_key(&player_cache_key) && cache.len() >= 4 {
+                cache.clear();
+            }
+            cache.insert(
+                player_cache_key,
+                PlayerJsCacheEntry {
+                    source_fp,
+                    source_path,
+                    preprocessed_path: prepared,
+                },
+            );
+        }
+        if let Some(signature_timestamp) = runtime.signature_timestamp {
+            let mut cached_runtime = self.runtime.lock().await;
+            if let Some(cached) = cached_runtime.as_mut()
+                && cached.player_js_url.as_deref() == Some(js_url.as_str())
+            {
+                cached.signature_timestamp = Some(signature_timestamp);
+            }
+            info!(
+                client = runtime.profile.name,
+                signature_timestamp, "signature timestamp extracted from player JS"
+            );
+        } else {
+            warn!(
+                client = runtime.profile.name,
+                "player JS contained no signature timestamp"
+            );
+        }
+        Ok(())
+    }
+}
+
+/// A body cut off mid-transfer reports as a decode error, so it counts as transient too.
+fn transient_reqwest_error(error: &reqwest::Error) -> bool {
+    error.is_timeout() || error.is_connect() || error.is_body() || error.is_decode()
+}
+
+fn sanitized_reqwest_error(error: &reqwest::Error) -> String {
+    format!(
+        "timeout={} connect={} body={} status={}",
+        error.is_timeout(),
+        error.is_connect(),
+        error.is_body(),
+        error
+            .status()
+            .map_or_else(|| "none".to_owned(), |status| status.to_string()),
+    )
+}
+
+fn retryable_config_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+/// How long to wait before a retry: the server's Retry-After, held to one second, or a short backoff.
+fn retry_delay(attempt: u8, url: &str, retry_after_secs: Option<u64>) -> Duration {
+    // Stable per URL/attempt jitter, avoiding another RNG dependency while
+    // spreading retries slightly across concurrent desktop clients.
+    let fingerprint = sha256_hex(format!("{url}:{attempt}").as_bytes());
+    let jitter = u64::from_str_radix(&fingerprint[..2], 16).unwrap_or(0) % 61;
+    let exponential_ms = u64::from(attempt) * 80;
+    let retry_after_ms = retry_after_secs.unwrap_or(0).saturating_mul(1000).min(1000);
+    Duration::from_millis(retry_after_ms.max(exponential_ms + jitter))
+}
+
+async fn retry_config_get(
+    attempt: u8,
+    url: &str,
+    retry_after_secs: Option<u64>,
+    cancellation: &CancellationToken,
+) -> Result<(), StreamError> {
+    let delay = retry_delay(attempt, url, retry_after_secs);
+    warn!(
+        attempt,
+        delay_ms = delay.as_millis(),
+        "retrying transient idempotent configuration GET"
+    );
+    tokio::select! {
+        _ = cancellation.cancelled() => Err(StreamError::Cancelled),
+        _ = tokio::time::sleep(delay) => Ok(()),
+    }
+}
+
+#[async_trait]
+impl StreamResolver for YouTubeStreamResolver {
+    async fn prewarm(&self) {
+        let token = CancellationToken::new();
+        *self
+            .prewarming
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());
+        let result = self.player_runtime(&token).await;
+        *self
+            .prewarming
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        match result {
+            Ok(_) => info!("player runtime prewarmed"),
+            Err(StreamError::Cancelled) => info!("player runtime prewarm stopped for a play"),
+            Err(error) => warn!(?error, "player runtime prewarm failed"),
+        }
+    }
+
+    #[instrument(skip(self, cancellation), fields(track_id_fp = %fingerprint8(track.0.as_bytes())))]
+    async fn resolve(
+        &self,
+        track: &TrackId,
+        quality: AudioQuality,
+        cancellation: CancellationToken,
+    ) -> Result<ValidatedPlaybackResolution, StreamError> {
+        let mut used_saved = false;
+        match self
+            .resolve_attempt(track, quality, cancellation.clone(), &mut used_saved)
+            .await
+        {
+            // A saved configuration that YouTube refuses is forgotten, and the track is resolved once more
+            // with the pages fetched again.
+            Err(error) if used_saved && configuration_refused(&error) => {
+                warn!(
+                    ?error,
+                    "saved player configuration refused; fetching the pages again"
+                );
+                self.forget_player_config().await;
+                self.resolve_attempt(track, quality, cancellation, &mut false)
+                    .await
+            }
+            result => result,
+        }
     }
 }
 
@@ -2371,6 +2489,77 @@ mod tests {
     }
 
     #[test]
+    fn only_refusals_a_stale_configuration_causes_retry_the_fetch() {
+        assert!(configuration_refused(&StreamError::Cipher("x".into())));
+        assert!(configuration_refused(&StreamError::PoToken("x".into())));
+        assert!(configuration_refused(&StreamError::MediaRejected(
+            "x".into()
+        )));
+        assert!(!configuration_refused(&StreamError::PlayerUnavailable(
+            "x".into()
+        )));
+        assert!(!configuration_refused(&StreamError::Cancelled));
+    }
+
+    #[test]
+    fn a_fetched_runtime_round_trips_through_its_saved_form() {
+        let profile = ClientProfile::WebMusic.config();
+        let runtime = PlayerRuntime {
+            fetched_at: std::time::Instant::now(),
+            profile,
+            endpoint: "https://music.youtube.com/youtubei/v1/player".into(),
+            origin: "https://music.youtube.com".into(),
+            header_id: "67".into(),
+            version: "1.0".into(),
+            user_agent: None,
+            signature_timestamp: Some(20732),
+            player_js_url: Some("/s/player/abc/base.js".into()),
+            context: json!({"client": {"visitorData": "v"}}),
+            botguard_ytcfg_json: "{}".into(),
+            botguard_user_agent: "agent".into(),
+            homepage_challenge_json: None,
+            event_id: Some("event".into()),
+            gvs_binding: GvsPoBinding::VideoId,
+            from_disk: false,
+        };
+        let restored = runtime_from_saved(saved_from_runtime(&runtime), profile);
+        assert!(restored.from_disk);
+        // The timestamp is read again from the cached player JavaScript, never trusted from disk.
+        assert_eq!(restored.signature_timestamp, None);
+        assert_eq!(restored.player_js_url, runtime.player_js_url);
+        assert_eq!(restored.event_id, runtime.event_id);
+        assert_eq!(restored.gvs_binding, GvsPoBinding::VideoId);
+        assert_eq!(restored.profile.name, "WEB_REMIX");
+    }
+
+    #[tokio::test]
+    async fn forgetting_the_configuration_clears_the_one_in_memory() {
+        let resolver = super::YouTubeStreamResolver::new(crate::music::YouTubeSession::default());
+        let runtime = runtime_from_saved(
+            player_config::SavedPlayerConfig {
+                saved_at: now_unix(),
+                profile: "WEB_REMIX".into(),
+                endpoint: String::new(),
+                origin: String::new(),
+                header_id: String::new(),
+                version: String::new(),
+                user_agent: None,
+                player_js_url: None,
+                context: json!({}),
+                botguard_ytcfg_json: String::new(),
+                botguard_user_agent: String::new(),
+                homepage_challenge_json: None,
+                event_id: None,
+                gvs_video_id: false,
+            },
+            ClientProfile::WebMusic.config(),
+        );
+        *resolver.runtime.lock().await = Some(runtime);
+        resolver.forget_player_config().await;
+        assert!(resolver.runtime.lock().await.is_none());
+    }
+
+    #[test]
     fn a_player_runtime_is_reused_for_six_hours_only() {
         use super::{PLAYER_RUNTIME_TTL, runtime_is_fresh};
         let fetched = std::time::Instant::now();
@@ -2387,11 +2576,11 @@ mod tests {
 
     use super::{
         AudioCodec, AudioQuality, AudioStream, AudioStreamDiagnostics, ClientProfile, GvsPoBinding,
-        MWEB_UA, StreamError, StreamResolver, TrackId, ValidatedPlaybackResolution,
-        YouTubeStreamResolver, choose_aac_format, has_video_id_gvs_binding, is_live_content,
-        is_live_media_url, parse_signature_timestamp, parse_yt_at_n, parse_ytcfg,
-        persisted_player_js_ready, player_js_url, player_request, retryable_config_status,
-        set_po_token,
+        MWEB_UA, PlayerRuntime, StreamError, StreamResolver, TrackId, ValidatedPlaybackResolution,
+        YouTubeStreamResolver, choose_aac_format, configuration_refused, has_video_id_gvs_binding,
+        is_live_content, is_live_media_url, now_unix, parse_signature_timestamp, parse_yt_at_n,
+        parse_ytcfg, persisted_player_js_ready, player_config, player_js_url, player_request,
+        retryable_config_status, runtime_from_saved, saved_from_runtime, set_po_token,
     };
 
     #[test]
