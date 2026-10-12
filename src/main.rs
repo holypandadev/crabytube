@@ -74,10 +74,14 @@ fn parse_diagnostic_args() {
 }
 
 /// The screenshot tour and the churn loop write state, so they run against a throwaway
-/// profile unless the XDG directories already point into the temporary directory.
+/// profile unless the directories already point into the temporary directory. The directories
+/// come from the XDG variables, except on macOS, where they all hang from the home directory.
 /// Returns the directory to remove when the run ends.
 #[cfg(feature = "diagnostics")]
 fn isolate_diagnostic_profile() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    const VARIABLES: [&str; 1] = ["HOME"];
+    #[cfg(not(target_os = "macos"))]
     const VARIABLES: [&str; 4] = [
         "XDG_CONFIG_HOME",
         "XDG_CACHE_HOME",
