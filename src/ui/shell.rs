@@ -56,8 +56,8 @@ const TITLE_TAGS: [&str; 7] = [
 ];
 
 /// The title as shown: trailing tags such as "(Official Video)" or "[Lyrics]" are dropped, in any
-/// case. The stored title, search, MPRIS, Discord and notifications keep the original. A title that
-/// would be left empty is shown whole.
+/// case. The system media controls (MPRIS, Now Playing) and Discord get the same title. The stored
+/// title, search and notifications keep the original. A title that would be left empty is shown whole.
 pub(super) fn display_title(title: &str) -> &str {
     let mut shown = title.trim_end();
     loop {

@@ -510,7 +510,7 @@ impl App {
         let track = self.playback_status.track.as_ref();
         let position = self.playback_status.position;
         crate::mpris::PlayerState {
-            title: track.map(|track| track.title.clone()),
+            title: track.map(|track| super::shell::display_title(&track.title).to_owned()),
             artist: track.map(|track| track.artist.clone()),
             album: track.and_then(|track| track.album.clone()),
             art_url: track.and_then(|track| track.thumbnail_url.clone()),

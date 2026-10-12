@@ -3051,26 +3051,36 @@ impl App {
             return;
         }
 
-        let paused_label = self.tr("Paused").into_owned();
-        let listen_label = self.tr("Listen on YouTube Music").into_owned();
-        self.discord_presence.update(crate::discord::Presence {
-            video_id: track.video_id.clone(),
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            artwork_url: track.thumbnail_url,
-            position,
+        let presence = self.presence_for(track, position, paused);
+        self.discord_presence.update(presence);
+        self.discord_presence_key = Some(key);
+        self.discord_presence_position = position;
+        self.discord_presence_updated_at = Some(std::time::Instant::now());
+    }
+
+    /// What Discord shows for a track: the title as the app shows it, without trailing tags such
+    /// as "(Official Video)".
+    fn presence_for(
+        &self,
+        track: Track,
+        position: Duration,
+        paused: bool,
+    ) -> crate::discord::Presence {
+        crate::discord::Presence {
+            title: shell::display_title(&track.title).to_owned(),
             duration: self
                 .playback_status
                 .duration
                 .or_else(|| self.track_duration(&track.video_id)),
+            paused_label: self.tr("Paused").into_owned(),
+            listen_label: self.tr("Listen on YouTube Music").into_owned(),
+            video_id: track.video_id,
+            artist: track.artist,
+            album: track.album,
+            artwork_url: track.thumbnail_url,
+            position,
             paused,
-            paused_label,
-            listen_label,
-        });
-        self.discord_presence_key = Some(key);
-        self.discord_presence_position = position;
-        self.discord_presence_updated_at = Some(std::time::Instant::now());
+        }
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -3437,6 +3447,36 @@ mod tests {
         assert_eq!(
             requested_window_size((1440.0, 900.0), false),
             iced::Size::new(1440.0, 900.0)
+        );
+    }
+
+    #[test]
+    fn the_system_controls_and_discord_get_the_title_the_app_shows() {
+        let mut app = App::default();
+        app.playback_status.track = Some(song("Song (Official Video) [Lyrics]"));
+        // MPRIS, Now Playing and the other system controls read the player state.
+        assert_eq!(app.mpris_player_state().title.as_deref(), Some("Song"));
+        let presence = app.presence_for(
+            song("Song (Official Video) [Lyrics]"),
+            Duration::ZERO,
+            false,
+        );
+        assert_eq!(presence.title, "Song");
+        // A tag in the middle, and a title that is only a tag, are kept whole.
+        assert_eq!(
+            app.presence_for(song("Song (Live)"), Duration::ZERO, false)
+                .title,
+            "Song (Live)"
+        );
+        assert_eq!(
+            app.presence_for(song("(Official Video)"), Duration::ZERO, false)
+                .title,
+            "(Official Video)"
+        );
+        // The stored track keeps the original.
+        assert_eq!(
+            app.playback_status.track.as_ref().unwrap().title,
+            "Song (Official Video) [Lyrics]"
         );
     }
 
