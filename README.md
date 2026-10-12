@@ -64,16 +64,19 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
 
 1. Download the `.zip` file, extract it and move `CrabyTube.app` to `/Applications`. The app is
    universal and runs natively on Apple Silicon and Intel Macs.
-2. The app is signed ad hoc and not notarized, so macOS blocks the first start. Either:
-   - Control-click `CrabyTube.app`, choose **Open**, then **Open** again; or
-   - run this once in Terminal, then open the app normally:
+2. The app is signed ad hoc and not notarized, so macOS blocks the first start. Allow it once:
+   - On macOS 15 and later, double-click `CrabyTube.app` and click **Done** in the message that
+     says it was not opened. Then open **System Settings → Privacy & Security**, scroll to
+     **Security**, click **Open Anyway** next to the message about CrabyTube and confirm with your
+     password or Touch ID. Control-click → **Open** no longer skips the warning there.
+   - On macOS 14 and earlier, Control-click `CrabyTube.app`, choose **Open**, then **Open** again.
+   - Or run this once in Terminal, then open the app normally:
 
      ```bash
-     xattr -cr /Applications/CrabyTube.app
+     xattr -dr com.apple.quarantine /Applications/CrabyTube.app
      ```
 
-   On recent macOS versions you can also allow it under **System Settings → Privacy & Security →
-   Open Anyway**.
+   The zip also contains a short first-launch note, the license and the third-party notices.
 
 ## Privacy
 
