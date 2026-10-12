@@ -83,7 +83,7 @@ impl Lyrics {
 
 /// Normalize for cache keys and matching: lowercase, trim, collapse spaces,
 /// round duration to whole seconds to avoid Debug-format duplication.
-pub fn normalized_identity(track: &Track, duration: Option<Duration>) -> String {
+pub fn normalized_identity(track: &Track, duration: Duration) -> String {
     fn norm(s: &str) -> String {
         s.trim()
             .to_lowercase()
@@ -91,7 +91,7 @@ pub fn normalized_identity(track: &Track, duration: Option<Duration>) -> String 
             .collect::<Vec<_>>()
             .join(" ")
     }
-    let secs = duration.map(|d| d.as_secs()).unwrap_or(u64::MAX);
+    let secs = duration.as_secs();
     format!(
         "v{PARSER_VERSION}:{}|{}|{}|{}|{secs}",
         track.video_id.trim(),
@@ -101,7 +101,8 @@ pub fn normalized_identity(track: &Track, duration: Option<Duration>) -> String 
     )
 }
 
-pub fn lyrics_cache_path(track: &Track, duration: Option<Duration>) -> std::path::PathBuf {
+/// Every key names the track length: a result is only ever stored for a length that was known.
+pub fn lyrics_cache_path(track: &Track, duration: Duration) -> std::path::PathBuf {
     let key = normalized_identity(track, duration);
     crate::app_dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -496,7 +497,7 @@ fn shared_client() -> Result<reqwest::Client, String> {
         .map_err(|_| "Lyrics network setup failed".to_owned())
 }
 
-pub async fn load(track: Track, duration: Option<Duration>) -> Result<Lyrics, String> {
+pub async fn load(track: Track, duration: Duration) -> Result<Lyrics, String> {
     load_with_progress(track, duration, |_| {}).await
 }
 
@@ -526,7 +527,7 @@ fn stored_form(result: &Result<Lyrics, String>, salvaged: bool) -> Option<Vec<u8
 
 pub async fn load_with_progress<F>(
     track: Track,
-    duration: Option<Duration>,
+    duration: Duration,
     mut on_progress: F,
 ) -> Result<Lyrics, String>
 where
@@ -549,10 +550,7 @@ where
             return Err(NOT_FOUND.into());
         }
     }
-    info!(
-        duration_secs = duration.map(|d| d.as_secs()),
-        "lyrics search started"
-    );
+    info!(duration_secs = duration.as_secs(), "lyrics search started");
     // Keep the newest plain text, so a deadline can still return it.
     let latest_plain = std::sync::Arc::new(std::sync::Mutex::new(None::<Lyrics>));
     let stash = std::sync::Arc::clone(&latest_plain);
@@ -825,11 +823,16 @@ fn plain_found(source: &str, text: &str) -> Found {
     })
 }
 
-async fn lrclib_provider(
-    client: &reqwest::Client,
-    track: &Track,
-    duration: Option<Duration>,
-) -> Found {
+/// LRCLIB records carry the length of the version they time. A record of another version, such as a video
+/// with an intro or an extended ending, is timed for a different recording, so it is rejected.
+fn record_matches_duration(record: &Value, duration: Duration) -> bool {
+    record
+        .get("duration")
+        .and_then(Value::as_f64)
+        .is_some_and(|seconds| (seconds - duration.as_secs_f64()).abs() < 3.0)
+}
+
+async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Duration) -> Found {
     let params = vec![
         ("track_name", track.title.clone()),
         ("artist_name", track.artist.clone()),
@@ -850,13 +853,7 @@ async fn lrclib_provider(
                     .and_then(Value::as_str)
                     .is_some_and(|s| artists_match(&track.artist, s))
         })
-        .filter(|v| {
-            duration.is_none_or(|d| {
-                v.get("duration")
-                    .and_then(Value::as_f64)
-                    .is_some_and(|n| (n - d.as_secs_f64()).abs() < 3.0)
-            })
-        })
+        .filter(|v| record_matches_duration(v, duration))
         .min_by_key(|v| v.get("syncedLyrics").and_then(Value::as_str).is_none());
     let Some(entry) = best else {
         return Found::Missing;
@@ -921,34 +918,31 @@ async fn better_lyrics_kugou_provider(
 
 async fn load_inner<F>(
     track: Track,
-    duration: Option<Duration>,
+    duration: Duration,
     mut on_progress: F,
 ) -> Result<Lyrics, String>
 where
     F: FnMut(Lyrics),
 {
     let client = shared_client()?;
-    let mut params = vec![
+    let params = vec![
         ("s", track.title.clone()),
         ("a", track.artist.clone()),
-        // Album and duration substantially improve matching and provider cache hits.
+        // Album and length substantially improve matching and provider cache hits.
         ("al", track.album.clone().unwrap_or_default()),
         ("videoId", track.video_id.clone()),
+        ("d", duration.as_secs().to_string()),
     ];
-    if let Some(d) = duration {
-        params.push(("d", d.as_secs().to_string()));
-    }
-    // Every provider starts at once. The Better Lyrics sources need a duration.
+    // Every provider starts at once.
     let mut running = FuturesUnordered::new();
-    let mut started = 1_usize;
     running.push(lrclib_provider(&client, &track, duration).boxed());
-    if duration.is_some() {
+    {
         let (client, params) = (&client, &params);
         running.push(better_lyrics_provider(client, params).boxed());
         running.push(better_lyrics_qq_provider(client, params).boxed());
         running.push(better_lyrics_kugou_provider(client, params).boxed());
-        started += 3;
     }
+    let started = 4_usize;
     let mut best_line: Option<Lyrics> = None;
     let mut best_plain: Option<Lyrics> = None;
     // The first result that does not name its track, and when it arrived.
@@ -1324,11 +1318,37 @@ mod tests {
     #[test]
     fn normalized_identity_avoids_duration_debug_duplication() {
         let t = fixture_track("  Hello   World ", "Artist");
-        let a = normalized_identity(&t, Some(Duration::from_secs(183)));
-        let b = normalized_identity(&t, Some(Duration::from_millis(183_400)));
+        let a = normalized_identity(&t, Duration::from_secs(183));
+        let b = normalized_identity(&t, Duration::from_millis(183_400));
         assert_eq!(a, b);
-        let c = normalized_identity(&t, Some(Duration::from_secs(184)));
+        let c = normalized_identity(&t, Duration::from_secs(184));
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn every_lyrics_key_names_a_known_track_length() {
+        // Results chosen without a length used to share one key with an unknown-length marker. Every key
+        // now carries the length, so such results are never read or written again.
+        let t = fixture_track("Song", "Artist");
+        let key = normalized_identity(&t, Duration::from_secs(228));
+        assert!(key.ends_with("|228"), "{key}");
+        assert!(!key.contains(&u64::MAX.to_string()));
+        assert_ne!(
+            lyrics_cache_path(&t, Duration::from_secs(228)),
+            lyrics_cache_path(&t, Duration::from_secs(282))
+        );
+    }
+
+    #[test]
+    fn a_record_is_accepted_only_within_three_seconds_of_the_track_length() {
+        let track = Duration::from_secs(282);
+        let record = |seconds: f64| serde_json::json!({ "duration": seconds });
+        // The video of this track runs 4:42; the album record runs 3:48.
+        assert!(!record_matches_duration(&record(228.0), track));
+        assert!(record_matches_duration(&record(281.0), track));
+        assert!(record_matches_duration(&record(284.9), track));
+        assert!(!record_matches_duration(&record(285.5), track));
+        assert!(!record_matches_duration(&serde_json::json!({}), track));
     }
 
     #[test]
@@ -1532,7 +1552,7 @@ mod tests {
             thumbnail_url: None,
             duration_secs: Some(213),
         };
-        let lyrics = load(track, Some(Duration::from_secs(213)))
+        let lyrics = load(track, Duration::from_secs(213))
             .await
             .expect("the providers answered");
         let first = lyrics

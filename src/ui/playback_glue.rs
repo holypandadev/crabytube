@@ -89,12 +89,8 @@ impl App {
         tasks.extend(seek_notice);
         tasks.append(&mut metadata_tasks);
 
-        // Search tracks may not have a duration until the existing playback
-        // resolver finishes. Retry synced lyrics once the stream reports its
-        // actual duration.
-        if self.lyrics_waiting_for_duration
-            && !self.lyrics_loading
-            && self.playback_status.duration.is_some()
+        // Lyrics wait for the track length. The stream reports it once it resolves, so the search starts then.
+        if self.lyrics_retry_due()
             && let Some(track) = self.playback_status.track.clone()
         {
             tasks.push(self.load_lyrics(track));

@@ -871,9 +871,6 @@ impl App {
                 match result {
                     Ok(lyrics) => {
                         self.lyrics_error = None;
-                        if !lyrics.lines.is_empty() {
-                            self.lyrics_waiting_for_duration = false;
-                        }
                         self.lyrics = Some(lyrics);
                         self.rebuild_lyrics_heights();
                     }
@@ -2509,7 +2506,7 @@ impl App {
         if let Some(duration) = duration {
             let lyrics_track = next.clone();
             drop(tokio::spawn(async move {
-                let _ = crate::lyrics::load(lyrics_track, Some(duration)).await;
+                let _ = crate::lyrics::load(lyrics_track, duration).await;
             }));
         }
         self.playback.prefetch(next);
@@ -2912,7 +2909,7 @@ impl App {
         self.lyric_active = None;
         self.lyrics_scroll = AbsoluteOffset::default();
         self.lyrics_heights.clear();
-        self.lyrics_loading = true;
+        let scroll = operation::scroll_to("lyrics", AbsoluteOffset::<f32>::default());
         let duration = self.track_duration(&track.video_id).or_else(|| {
             self.playback_status
                 .track
@@ -2920,7 +2917,23 @@ impl App {
                 .filter(|current| current.video_id == track.video_id)
                 .and(self.playback_status.duration)
         });
-        self.lyrics_waiting_for_duration = duration.is_none();
+        // LRCLIB only accepts a record whose length matches, so the search waits for the length. A track that
+        // plays reports it once its stream resolves, and the retry in playback_glue starts the search then.
+        let Some(duration) = duration else {
+            let playing = self
+                .playback_status
+                .track
+                .as_ref()
+                .is_some_and(|current| current.video_id == track.video_id);
+            self.lyrics_waiting_for_duration = playing;
+            self.lyrics_loading = playing;
+            if !playing {
+                self.lyrics_error = Some(self.tr("Press play to load the lyrics.").into_owned());
+            }
+            return scroll;
+        };
+        self.lyrics_waiting_for_duration = false;
+        self.lyrics_loading = true;
         let token = CancellationToken::new();
         self.lyrics_cancel = Some(token.clone());
         let generation = self.lyrics_generation;
@@ -2943,11 +2956,14 @@ impl App {
             },
             move |result| Message::LyricsLoaded { generation, result },
         );
-        Task::batch([
-            operation::scroll_to("lyrics", AbsoluteOffset::<f32>::default()),
-            load,
-            progress,
-        ])
+        Task::batch([scroll, load, progress])
+    }
+
+    /// Whether lyrics that waited for the track length can start their search now.
+    pub(super) fn lyrics_retry_due(&self) -> bool {
+        self.lyrics_waiting_for_duration
+            && self.playback_status.duration.is_some()
+            && self.playback_status.track.is_some()
     }
 
     fn lyrics_layout_width(&self) -> f32 {
@@ -4637,6 +4653,60 @@ mod tests {
 
         assert_eq!(app.home_shelves.len(), 1);
         assert_eq!(app.home_shelves[0].title, "Current shelf");
+    }
+
+    fn lyrics_test_track(video_id: &str) -> crate::music::Track {
+        crate::music::Track {
+            duration_secs: None,
+            video_id: video_id.into(),
+            title: "Song".into(),
+            artist: "Artist".into(),
+            album: None,
+            thumbnail_url: None,
+        }
+    }
+
+    #[test]
+    fn lyrics_of_a_playing_track_wait_for_its_length_and_search_once() {
+        let track = lyrics_test_track("abc");
+        let mut app = App {
+            playback_status: super::PlaybackStatus {
+                track: Some(track.clone()),
+                ..super::PlaybackStatus::default()
+            },
+            ..App::default()
+        };
+        drop(app.load_lyrics(track.clone()));
+        assert!(app.lyrics_loading && app.lyrics_waiting_for_duration);
+        assert!(app.lyrics.is_none());
+        // The stream reports the length: the retry is due, and the search starts.
+        app.playback_status.duration = Some(Duration::from_secs(228));
+        assert!(app.lyrics_retry_due());
+        drop(app.load_lyrics(track));
+        assert!(app.lyrics_loading && !app.lyrics_waiting_for_duration);
+        assert!(!app.lyrics_retry_due());
+    }
+
+    #[test]
+    fn lyrics_of_a_track_that_is_not_playing_ask_for_playback_without_a_length() {
+        let mut app = App::default();
+        app.preferences.ui_language = crate::preferences::UiLanguage::English;
+        drop(app.load_lyrics(lyrics_test_track("xyz")));
+        assert!(!app.lyrics_loading && !app.lyrics_waiting_for_duration);
+        assert_eq!(
+            app.lyrics_error.as_deref(),
+            Some("Press play to load the lyrics.")
+        );
+    }
+
+    #[test]
+    fn a_known_track_length_starts_the_search_at_once() {
+        let mut app = App::default();
+        app.known_durations
+            .insert("xyz".into(), Duration::from_secs(228));
+        drop(app.load_lyrics(lyrics_test_track("xyz")));
+        assert!(app.lyrics_loading && !app.lyrics_waiting_for_duration);
+        assert!(!app.lyrics_retry_due());
     }
 
     #[test]
