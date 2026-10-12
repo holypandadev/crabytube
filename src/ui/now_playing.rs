@@ -657,14 +657,63 @@ impl App {
         if bottom_spacer > 0.0 {
             lines = lines.push(Space::new().height(bottom_spacer));
         }
-        // Plain text is shown only when there is no synced text, so the two never mix.
+        // Plain text is shown only when there is no synced text, so the two never mix. Each line takes the
+        // row padding and spacing of a synced line, so unsynced text keeps the same reading rhythm.
         if let Some(plain) = lyrics.plain.as_ref().filter(|_| lyrics.lines.is_empty()) {
-            lines =
-                lines.push(container(text(plain.clone()).size(size).font(MONO)).padding([4, 12]));
+            for plain_line in plain.lines() {
+                // A blank line keeps its height, so the gaps between stanzas stay.
+                let shown = if plain_line.trim().is_empty() {
+                    " "
+                } else {
+                    plain_line
+                };
+                lines = lines
+                    .push(container(text(shown.to_owned()).size(size).font(MONO)).padding([4, 12]));
+            }
+        }
+        // The source, and for timed lyrics the controls that move this song's lyrics by half a second.
+        let mut header = row![label(self.lyrics_source_label(lyrics), TEXT_CAPTION).color(FADED)]
+            .spacing(12)
+            .align_y(Alignment::Center);
+        if !lyrics.lines.is_empty() {
+            header = header
+                .push(Space::new().width(Length::Fill))
+                .push(
+                    button(label(self.tr("Earlier").into_owned(), TEXT_CAPTION))
+                        .on_press(Message::AdjustLyricsOffset(-500))
+                        .padding([6, 12])
+                        .style(theme::outline_button),
+                )
+                .push(
+                    label(
+                        format!("{:+.1} s", self.current_lyrics_offset() as f64 / 1000.0),
+                        TEXT_CAPTION,
+                    )
+                    .color(FADED),
+                )
+                .push(
+                    button(label(self.tr("Later").into_owned(), TEXT_CAPTION))
+                        .on_press(Message::AdjustLyricsOffset(500))
+                        .padding([6, 12])
+                        .style(theme::outline_button),
+                );
+        }
+        let mut heading = column![container(header).padding([10, 12])];
+        if lyrics.length_mismatch {
+            heading = heading.push(
+                container(
+                    label(
+                        self.tr("Timed lyrics don't match this version")
+                            .into_owned(),
+                        TEXT_CAPTION,
+                    )
+                    .color(FADED),
+                )
+                .padding([0, 12]),
+            );
         }
         let mut content = column![
-            container(label(self.lyrics_source_label(lyrics), TEXT_CAPTION).color(FADED))
-                .padding([10, 12]),
+            heading,
             scrollable(lines)
                 .id("lyrics")
                 .on_scroll(|viewport| Message::LyricsScrolled(viewport.absolute_offset()))

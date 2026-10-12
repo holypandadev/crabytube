@@ -202,6 +202,11 @@ pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
             "YouTube exige iniciar sesión para esta canción; no se puede reproducir sin una cuenta."
         }
         "Lyrics only" => "Solo letras",
+        "Earlier" => "Antes",
+        "Later" => "Después",
+        "Timed lyrics don't match this version" => {
+            "La letra sincronizada no coincide con esta versión"
+        }
         "Scale with window" => "Escalar con la ventana",
         "Keeps the layout's proportions on large windows." => {
             "Mantiene las proporciones en ventanas grandes."
