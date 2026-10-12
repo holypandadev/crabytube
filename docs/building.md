@@ -82,6 +82,16 @@ one architecture.
 The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
 on Linux. On macOS the media keys and Now Playing work from the application bundle.
 
+## Release builds on GitHub
+
+The workflow `.github/workflows/release.yml` builds the three packages on GitHub's runners: the
+Flatpak bundle (`packaging/linux/flatpak`), the Windows zip (`packaging/windows/build-zip.ps1`) and
+the universal macOS zip (`packaging/macos/build-app.sh`). It starts only by hand (**Actions →
+Release builds → Run workflow**, or `gh workflow run release.yml`) and keeps the packages as
+artifacts of the run. It publishes nothing, needs no secrets and only reads the repository. Every
+third-party action and the Flatpak container image are pinned by commit or digest; update them
+deliberately and keep the version in the comment beside each one.
+
 ## Local data
 
 CrabyTube stores everything on your device:

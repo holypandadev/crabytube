@@ -1,0 +1,99 @@
+name: Release builds
+
+# Builds the three packages that users download: the Flatpak bundle for Linux, the zip for
+# Windows and the universal zip for macOS. Each one is kept as an artifact of the workflow run
+# (Actions tab, Artifacts). Nothing is published: this workflow does not create a release, a
+# tag or a draft.
+#
+# It starts by hand only: Actions tab, "Release builds", "Run workflow", or
+#   gh workflow run release.yml
+on:
+  workflow_dispatch:
+
+# The jobs only read the repository. The artifact upload uses the run's own credential.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Built inside the image of the Flatpak project's GitHub action, which has flatpak and
+  # flatpak-builder installed; the runtime and the SDK come from Flathub during the build. The
+  # image is the one for the runtime version named in the manifest (org.freedesktop.Platform 26.08).
+  linux-flatpak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08@sha256:6ed6921bb5a9e1a916989971844f159b854b7b225880c381fa34f7a158863039
+      options: --privileged
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # flatpak/flatpak-github-actions v6.8. The build cache is off so that a release build never
+      # reuses what an earlier run left behind.
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3
+        with:
+          manifest-path: packaging/linux/flatpak/dev.holypanda.CrabyTube.yml
+          bundle: CrabyTube.flatpak
+          arch: x86_64
+          cache: false
+          upload-artifact: false
+      # actions/upload-artifact v7.0.2. With archive off the bundle is uploaded as it is, and the
+      # artifact takes the name of the file.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: CrabyTube.flatpak
+          archive: false
+          if-no-files-found: error
+
+  windows-zip:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable-x86_64-pc-windows-msvc
+          rustc -vV
+      - name: Build the zip
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build-zip.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: target/windows/CrabyTube-windows-x64.zip
+          archive: false
+          if-no-files-found: error
+
+  macos-universal:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # The script builds both architectures on this one runner and checks that the two Rust
+      # targets are installed.
+      - name: Install Rust and both macOS targets
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default stable
+          rustc -vV
+      - name: Build the app and the zip
+        run: packaging/macos/build-app.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: target/macos/CrabyTube-*-macos-universal.zip
+          archive: false
+          if-no-files-found: error
