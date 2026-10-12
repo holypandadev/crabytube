@@ -124,6 +124,56 @@ impl App {
                             ),
                         ])
                     }
+                    14 => {
+                        // The first entry of "Jump back in", with its ••• actions open. Without
+                        // history there is no entry, so the capture shows Home alone.
+                        let navigation = self.update(Message::Navigate(Page::Home));
+                        match self.recent.first() {
+                            Some(crate::preferences::RecentPlay::Track(_)) => Task::batch([
+                                navigation,
+                                self.update(Message::ToggleRowMenu(super::messages::RowMenu {
+                                    list: "jump",
+                                    index: 0,
+                                })),
+                            ]),
+                            _ => navigation,
+                        }
+                    }
+                    15 => match diagnostic_collection(self) {
+                        // A collection page, so its tracks can show the artist and album they name.
+                        Some(target) => self.update(Message::OpenCollection(target)),
+                        None => Task::none(),
+                    },
+                    16 => {
+                        // The first track of that collection, with its ••• actions open.
+                        let first = super::messages::RowMenu {
+                            list: "collection",
+                            index: 0,
+                        };
+                        self.update(Message::ToggleRowMenu(first))
+                    }
+                    17 => match self
+                        .catalog_results
+                        .iter()
+                        .find_map(|item| item.track.clone())
+                    {
+                        // "Start radio" for the first song of the results: its radio starts playing.
+                        Some(track) => self.update(Message::StartRadio(track)),
+                        None => Task::none(),
+                    },
+                    18 => {
+                        // "Go to artist" for the first track of the open collection.
+                        let artist = self
+                            .collection
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.tracks.first())
+                            .and_then(|entry| entry.track.artist_page.clone());
+                        match artist {
+                            Some(page) => self.update(Message::OpenCollection(page)),
+                            None => Task::none(),
+                        }
+                    }
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -321,7 +371,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 /// `--screenshots <dir>`: page name and the wait before each capture. Steps 7 and 8 open the
 /// lyrics without a seek and check that the position moved on between their captures.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 14] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 19] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -336,6 +386,11 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 14] = [
     ("collection", 3_000),
     ("row-menu", 1_000),
     ("search-scrolled", 1_000),
+    ("jump-menu", 1_000),
+    ("collection-open", 3_000),
+    ("collection-menu", 1_000),
+    ("start-radio", 4_000),
+    ("artist-page", 3_000),
 ];
 
 /// The collection the tour opens last: `CRABYTUBE_TOUR_COLLECTION=<browse id>`
