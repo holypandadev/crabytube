@@ -72,6 +72,10 @@ iced = { version = "0.14", default-features = false, features = ["advanced", "im
 zbus = "5.19"
 ksni = "0.3.6"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Process memory and CPU readings for the status line; already in the build through other crates.
+libc = "0.2"
+
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 iced = { version = "0.14", features = ["advanced", "image-without-codecs", "svg", "tokio"] }
 
