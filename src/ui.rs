@@ -1697,9 +1697,6 @@ impl App {
                             _ => {}
                         }
                     }
-                    if let Some(shortcut) = keyboard::shortcut_for(&key, physical_key, modifiers) {
-                        return self.shortcut_pressed(shortcut);
-                    }
                     // Global playback keys; text fields capture their own keys first.
                     if modifiers.is_empty() || modifiers.shift() {
                         match key {
@@ -1735,7 +1732,6 @@ impl App {
                     }
                 }
             }
-            Message::Shortcut { shortcut, typing } => return self.apply_shortcut(shortcut, typing),
             Message::VolumeScrolled(delta) => return self.volume_scrolled(delta),
             Message::SuggestionsCompleted { request_id, result } => {
                 if request_id != self.suggest_request_id {

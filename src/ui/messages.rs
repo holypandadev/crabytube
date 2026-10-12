@@ -241,11 +241,6 @@ pub(super) enum Message {
     SuggestionChosen(String),
     DismissSuggestions,
     KeyPressed(iced::keyboard::Event),
-    /// A key shortcut, with whether the search field had the focus when it was pressed.
-    Shortcut {
-        shortcut: super::keyboard::Shortcut,
-        typing: bool,
-    },
     /// The mouse wheel turned over a volume control.
     VolumeScrolled(iced::mouse::ScrollDelta),
     CatalogCompleted {
