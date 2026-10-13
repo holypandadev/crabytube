@@ -721,6 +721,8 @@ pub struct Persistence {
     pending: SharedPending,
     worker: Option<std::thread::JoinHandle<()>>,
 }
+/// Wait before a save that failed is tried again.
+const RETRY_FAILED_SAVE_AFTER: Duration = Duration::from_secs(2);
 #[derive(Default)]
 struct PendingSnapshot {
     latest: Option<Snapshot>,
@@ -767,9 +769,24 @@ impl Persistence {
                         break;
                     }
                 }
+                // The disk is written without the lock, so a save from the interface never waits
+                // for it.
+                let closing = state.closed;
+                drop(state);
                 snapshot.normalize();
                 if let Err(error) = write(&path, &snapshot) {
                     tracing::warn!(%error,"Could not save local settings");
+                    // A full disk or a folder without permission may clear up: the snapshot is kept
+                    // for another attempt, unless a newer one came in or the app is closing.
+                    if !closing {
+                        if let Ok(mut state) = lock.lock()
+                            && state.latest.is_none()
+                            && !state.closed
+                        {
+                            state.latest = Some(snapshot);
+                        }
+                        std::thread::sleep(RETRY_FAILED_SAVE_AFTER);
+                    }
                 }
             }
         });
