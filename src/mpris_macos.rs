@@ -133,14 +133,32 @@ impl MprisRemote {
         let moved_on = session.published.as_ref().is_some_and(|(published, _, _)| {
             playback(published).position_secs != playback(&state).position_secs
         });
-        if slept {
-            tracing::info!("the Mac slept since the last report; reporting the position again");
-            changes.playback = true;
+        let position = playback(&state).position_secs;
+        let after_sleep = if slept {
+            tracing::info!(
+                position,
+                "the Mac slept since the last report; reporting the position again"
+            );
             session.owes_report_after_sleep = true;
+            true
         } else if session.owes_report_after_sleep && moved_on {
-            tracing::info!("reporting the position again with playback moving after the sleep");
-            changes.playback = true;
+            tracing::info!(
+                position,
+                "reporting the position again with playback moving after the sleep"
+            );
             session.owes_report_after_sleep = false;
+            true
+        } else {
+            false
+        };
+        if after_sleep {
+            changes.playback = true;
+            // The widget keeps the position it extrapolated through the sleep when it is only told a
+            // new one, and takes the new one after a pause, as a pause and resume by hand shows. So
+            // a paused report goes first, at once followed by the playing one below.
+            let mut paused = state.clone();
+            paused.playback_status = String::from("Paused");
+            session.publish(paused, now, wall);
         }
         if !changes.any() && !cover_changed {
             return;
