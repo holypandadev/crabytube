@@ -699,32 +699,44 @@ impl App {
             }
         }
         // The source, and for timed lyrics the controls that move this song's lyrics by half a second.
-        let mut header = row![label(self.lyrics_source_label(lyrics), TEXT_CAPTION).color(FADED)]
+        let source = self.lyrics_source_label(lyrics);
+        let earlier = self.tr("Earlier").into_owned();
+        let later = self.tr("Later").into_owned();
+        let offset = format!("{:+.1} s", self.current_lyrics_offset() as f64 / 1000.0);
+        // In a narrow panel the controls go under the source: on one line a long source such as
+        // "QQ Music via Better Lyrics" pushed "Later" out of sight.
+        let one_line = {
+            use unicode_width::UnicodeWidthStr;
+            let characters = source.width() + earlier.width() + later.width() + offset.width();
+            let needed = characters as f32 * TEXT_CAPTION * 0.6 + 2.0 * 26.0 + 4.0 * 12.0 + 24.0;
+            needed <= self.lyrics_text_width()
+        };
+        let source = label(source, TEXT_CAPTION).color(FADED);
+        let header: Element<'_, Message> = if lyrics.lines.is_empty() {
+            source.into()
+        } else {
+            let controls = row![
+                button(label(earlier, TEXT_CAPTION))
+                    .on_press(Message::AdjustLyricsOffset(-500))
+                    .padding([6, 12])
+                    .style(theme::outline_button),
+                label(offset, TEXT_CAPTION).color(FADED),
+                button(label(later, TEXT_CAPTION))
+                    .on_press(Message::AdjustLyricsOffset(500))
+                    .padding([6, 12])
+                    .style(theme::outline_button),
+            ]
             .spacing(12)
             .align_y(Alignment::Center);
-        if !lyrics.lines.is_empty() {
-            header = header
-                .push(Space::new().width(Length::Fill))
-                .push(
-                    button(label(self.tr("Earlier").into_owned(), TEXT_CAPTION))
-                        .on_press(Message::AdjustLyricsOffset(-500))
-                        .padding([6, 12])
-                        .style(theme::outline_button),
-                )
-                .push(
-                    label(
-                        format!("{:+.1} s", self.current_lyrics_offset() as f64 / 1000.0),
-                        TEXT_CAPTION,
-                    )
-                    .color(FADED),
-                )
-                .push(
-                    button(label(self.tr("Later").into_owned(), TEXT_CAPTION))
-                        .on_press(Message::AdjustLyricsOffset(500))
-                        .padding([6, 12])
-                        .style(theme::outline_button),
-                );
-        }
+            if one_line {
+                row![source, Space::new().width(Length::Fill), controls]
+                    .spacing(12)
+                    .align_y(Alignment::Center)
+                    .into()
+            } else {
+                column![source, controls].spacing(8).into()
+            }
+        };
         let mut heading = column![container(header).padding([10, 12])];
         if lyrics.length_mismatch {
             heading = heading.push(
