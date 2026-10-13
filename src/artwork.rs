@@ -393,10 +393,16 @@ fn artwork_request_url_for(url: &str, width: u32) -> String {
         return url.to_owned();
     };
     let wanted = width.clamp(128, 800);
+    // The size the variant needs, in the shape of the original: a larger original is not
+    // downloaded only to be scaled down, and a smaller one is asked for at the size needed.
+    let scaled_height = if current_width == 0 {
+        wanted
+    } else {
+        (u64::from(height_value) * u64::from(wanted)).div_ceil(u64::from(current_width)) as u32
+    };
     format!(
-        "{prefix}=w{}-h{}{}",
-        current_width.max(wanted),
-        height_value.max(wanted),
+        "{prefix}=w{wanted}-h{}{}",
+        scaled_height.max(1),
         &height[height_len..]
     )
 }
@@ -1037,6 +1043,19 @@ mod tests {
         assert_eq!(
             artwork_request_url("https://lh3.googleusercontent.com/abc=w120-h120-l90-rj"),
             "https://lh3.googleusercontent.com/abc=w800-h800-l90-rj"
+        );
+        // The catalog hands over its largest cover: a thumbnail is not downloaded at that size.
+        assert_eq!(
+            artwork_request_url_for(
+                "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj",
+                128
+            ),
+            "https://lh3.googleusercontent.com/abc=w128-h128-l90-rj"
+        );
+        // A wide original keeps its shape.
+        assert_eq!(
+            artwork_request_url_for("https://lh3.googleusercontent.com/abc=w1280-h720", 320),
+            "https://lh3.googleusercontent.com/abc=w320-h180"
         );
     }
 
