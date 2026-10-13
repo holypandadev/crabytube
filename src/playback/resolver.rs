@@ -48,6 +48,21 @@ const PLAYER_RUNTIME_TTL: std::time::Duration = std::time::Duration::from_secs(6
 /// How long a play waits for a prewarm that still fetches the player data. Past this the play fetches the data
 /// itself.
 const PREWARM_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+/// The largest page or player script read. The player script is about 3 MB.
+const MAX_PAGE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Reads a page or the player script, up to `MAX_PAGE_BYTES`; `None` when it is larger.
+async fn read_page_body(mut response: reqwest::Response) -> Result<Option<String>, reqwest::Error> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > MAX_PAGE_BYTES {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Some(String::from_utf8_lossy(&body).into_owned()))
+}
+
 /// Time allowed for one download of a page or of the player script, which is large.
 const PAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -1327,8 +1342,11 @@ impl YouTubeStreamResolver {
             }
             let page = tokio::select! {
                 _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                page = response.text() => match page {
-                    Ok(page) => page,
+                page = read_page_body(response) => match page {
+                    Ok(Some(page)) => page,
+                    Ok(None) => return Err(StreamError::Config(format!(
+                        "configuration response is larger than {MAX_PAGE_BYTES} bytes"
+                    ))),
                     Err(error) if attempt < MAX_ATTEMPTS && transient_reqwest_error(&error) => {
                         retry_config_get(attempt, url, None, cancellation).await?;
                         continue;

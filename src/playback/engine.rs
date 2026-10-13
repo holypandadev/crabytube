@@ -1632,7 +1632,13 @@ impl YoutubeHttpSource {
         tracing::debug!(status = %response.status(), range, "audio byte range response");
         if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            // An error page names its cause in a short XML body. A success that ignored the range
+            // would send the whole track, which is not read only to be thrown away.
+            let body = if status.is_success() {
+                String::new()
+            } else {
+                read_short_body(response).await
+            };
             let error_code = xml_error_code(&body);
             tracing::warn!(%status, range, ?error_code, "Googlevideo rejected the audio range");
             let error = if status.is_success() {
@@ -1658,6 +1664,20 @@ impl YoutubeHttpSource {
         }
         self.stream = Box::pin(response.bytes_stream());
     }
+}
+
+/// The start of an error response, at most `MAX_ERROR_BODY_BYTES`.
+async fn read_short_body(mut response: reqwest::Response) -> String {
+    const MAX_ERROR_BODY_BYTES: usize = 16 * 1024;
+    let mut body = Vec::new();
+    while body.len() < MAX_ERROR_BODY_BYTES {
+        match response.chunk().await {
+            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    body.truncate(MAX_ERROR_BODY_BYTES);
+    String::from_utf8_lossy(&body).into_owned()
 }
 
 fn xml_error_code(body: &str) -> Option<String> {
