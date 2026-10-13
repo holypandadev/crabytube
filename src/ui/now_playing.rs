@@ -490,7 +490,11 @@ impl App {
         if let Some(error) = &self.radio_error {
             rows = rows.push(
                 row![
-                    label(fit(error, width - 120.0, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    label(
+                        fit(&self.tr(error), width - 120.0, TEXT_CAPTION),
+                        TEXT_CAPTION
+                    )
+                    .color(DIM),
                     button(label(self.tr("Retry").into_owned(), TEXT_CAPTION))
                         .on_press(Message::RetryRadio)
                         .padding([6, 12])

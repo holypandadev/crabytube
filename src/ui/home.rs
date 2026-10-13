@@ -518,7 +518,7 @@ impl App {
             } else if let Some(error) = &self.home_error {
                 column![
                     label(self.tr("[ HOME COULD NOT LOAD ]").into_owned(), TEXT_BODY),
-                    label(fit(error, area.width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    label(fit(&self.tr(error), area.width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
                     button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                         .on_press(Message::ReloadHome)
                         .padding([8, 18])
@@ -674,7 +674,7 @@ impl App {
             content = content.push(Space::new().height(16)).push(
                 column![
                     label(self.tr("[ SEARCH FAILED ]").into_owned(), TEXT_BODY),
-                    label(fit(error, width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    label(fit(&self.tr(error), width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
                     button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                         .on_press(Message::SearchSubmitted)
                         .padding([8, 18])

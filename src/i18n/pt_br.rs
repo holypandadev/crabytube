@@ -4,6 +4,26 @@ use super::Catalog;
 
 pub(super) static CATALOG: Catalog = Catalog {
     entries: &[
+        (
+            "Network setup failed. Please restart the app and try again.",
+            "Falha ao preparar a rede. Reinicie o app e tente de novo.",
+        ),
+        (
+            "Could not reach YouTube Music. Check your connection and try again.",
+            "Não foi possível acessar o YouTube Music. Verifique sua conexão e tente de novo.",
+        ),
+        (
+            "YouTube Music is receiving too many requests. Try again shortly.",
+            "O YouTube Music está recebendo solicitações demais. Tente de novo em instantes.",
+        ),
+        (
+            "YouTube Music could not complete this request. Try again later.",
+            "O YouTube Music não conseguiu concluir esta solicitação. Tente mais tarde.",
+        ),
+        (
+            "YouTube Music returned data this version cannot read.",
+            "O YouTube Music devolveu dados que esta versão não consegue ler.",
+        ),
         ("General", "Geral"),
         ("#", "#"),
         ("BotGuard", "BotGuard"),

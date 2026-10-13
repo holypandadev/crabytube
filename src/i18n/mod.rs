@@ -318,6 +318,35 @@ mod tests {
     }
 
     #[test]
+    fn every_catalog_error_message_has_an_entry_in_every_language() {
+        use crate::music::MusicError;
+        let errors = [
+            MusicError::Client(String::new()),
+            MusicError::HttpStatus(reqwest::StatusCode::TOO_MANY_REQUESTS),
+            MusicError::HttpStatus(reqwest::StatusCode::BAD_GATEWAY),
+            MusicError::InvalidResponse(String::new()),
+        ];
+        // A network error carries a reqwest error, which a test cannot build; its message is this.
+        let messages: Vec<String> = errors
+            .iter()
+            .map(MusicError::user_message)
+            .chain([
+                "Could not reach YouTube Music. Check your connection and try again.".to_owned(),
+            ])
+            .collect();
+        for language in translated_languages() {
+            for message in &messages {
+                let message = message.clone();
+                assert_ne!(
+                    translate(language, &message),
+                    message,
+                    "{language:?}: {message}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn export_message_translates_for_any_absolute_path() {
         assert_eq!(
             translate(

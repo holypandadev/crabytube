@@ -194,7 +194,7 @@ impl App {
         if let Some(error) = &self.collection.error {
             return column![
                 label(self.tr("[ COULD NOT LOAD ]").into_owned(), TEXT_BODY),
-                label(fit(error, width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                label(fit(&self.tr(error), width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
                 button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                     .on_press(Message::RetryCollection)
                     .padding([8, 18])

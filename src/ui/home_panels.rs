@@ -179,7 +179,7 @@ impl App {
         let error = self.refresh_error()?;
         let text = self
             .tr_static("Could not refresh Home: {}")
-            .replacen("{}", error, 1);
+            .replacen("{}", &self.tr(error), 1);
         let retry = self.tr("Retry").into_owned();
         // The button is as wide as its label, plus its padding and border, and the gap before it.
         let retry_room = retry.width() as f32 * TEXT_CAPTION * 0.6 + REFRESH_RETRY_EXTRA;
