@@ -425,6 +425,9 @@ impl YouTubeMusicService {
             .ok_or_else(|| {
                 MusicError::InvalidResponse("live WEB_REMIX client context was missing".into())
             })?;
+        // The public address the page saw. It is kept for hours with the context and would travel on
+        // with every request after a change of network; YouTube reads the address of each request.
+        client.remove("remoteHost");
         let client_name = config
             .get("INNERTUBE_CLIENT_NAME")
             .and_then(Value::as_str)

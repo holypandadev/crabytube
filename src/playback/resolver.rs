@@ -1156,6 +1156,9 @@ impl YouTubeStreamResolver {
                 StreamError::Config("client config is missing its client context".into())
             })?;
         client_context.insert("hl".into(), Value::String("en".into()));
+        // The public address the page saw would travel on with the saved context after a change
+        // of network; YouTube reads the address of each request.
+        client_context.remove("remoteHost");
         client_context.insert("timeZone".into(), Value::String("UTC".into()));
         client_context.insert("utcOffsetMinutes".into(), Value::Number(0.into()));
         let version = client_context
