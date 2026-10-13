@@ -21,7 +21,7 @@
 | :--- | :--- | :--- |
 | Under 100 MB of RAM while playing and a few dozen at rest. Idle CPU stays near zero. | Pure Rust and Iced. No browser, no Electron. Opens fast, and the next track is ready before the current one ends. | Plays YouTube Music anonymously. No sign-in, no cookies, no telemetry. Your data stays on your device. |
 | `04` **SYNCED LYRICS** | `05` **BRUTALIST DESIGN** | `06` **FITS YOUR DESKTOP** |
-| Line-by-line and word-by-word karaoke, with translations, from several sources at once. | Pure black, monospaced type and one-pixel outlines. The layout scales from a phone-sized window to 4K. | Media keys and the system media controls on all three systems; on Linux also a tray icon and track notifications. Discord Rich Presence. Nine languages: English, Spanish, Portuguese, French, German, Italian, Russian, Japanese and Chinese. |
+| Line-by-line synced lyrics, and word-by-word karaoke with translations for many popular songs, from two sources at once. | Pure black, monospaced type and one-pixel outlines. The layout scales from a phone-sized window to 4K. | Media keys and the system media controls on all three systems; on Linux also a tray icon and track notifications. Discord Rich Presence. Nine languages: English, Spanish, Portuguese, French, German, Italian, Russian, Japanese and Chinese. |
 
 ## Screenshots
 
@@ -88,8 +88,9 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
   services LRCLIB and Better Lyrics (see below).
   Discord Rich Presence (off by default) talks only to the Discord client running on your computer.
 - Lyrics come from two services. LRCLIB (lrclib.net) receives the track's title and artist. Better
-  Lyrics (api.betterlyrics.org) receives the title, the artist, the album and the duration when they
-  are known, and the YouTube video ID; its QQ Music and Kugou lookups go through the same service.
+  Lyrics (api.betterlyrics.org) receives the title, the artist and the duration when they are
+  known, and the YouTube video ID; its QQ Music and Kugou lookups go through the same service.
+  Without an API key it answers only for tracks it already holds, mostly popular songs.
   Lyrics are requested when the Lyrics tab is open, and also during the last 30 seconds of a track
   for the next track in the queue, so they are ready when that track starts. Fetched lyrics are
   cached on this computer for 30 days.

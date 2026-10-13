@@ -484,13 +484,34 @@ pub fn qrc(input: &str) -> Option<Lyrics> {
     })
 }
 
-async fn json(client: &reqwest::Client, url: &str, params: &[(&str, String)]) -> Option<Value> {
-    let mut url = reqwest::Url::parse(url).ok()?;
+/// Why a provider gave no lyrics: it has none for the track, or it could not be asked.
+enum NoAnswer {
+    /// The provider answered that it has nothing, including Better Lyrics' "API key required" for a
+    /// track its cache does not hold: asking again would answer the same.
+    Missing,
+    Unreachable,
+}
+
+impl From<NoAnswer> for Found {
+    fn from(reason: NoAnswer) -> Self {
+        match reason {
+            NoAnswer::Missing => Found::Missing,
+            NoAnswer::Unreachable => Found::Unreachable,
+        }
+    }
+}
+
+async fn json(
+    client: &reqwest::Client,
+    url: &str,
+    params: &[(&str, String)],
+) -> Result<Value, NoAnswer> {
+    let mut url = reqwest::Url::parse(url).map_err(|_| NoAnswer::Unreachable)?;
     // Only the host is logged: the query names the track, and the log never holds addresses.
     let host = url.host_str().unwrap_or_default().to_owned();
     let failed = |reason: &str| {
         info!(host, reason, "lyrics provider gave no answer");
-        None
+        Err(NoAnswer::Unreachable)
     };
     url.query_pairs_mut()
         .extend_pairs(params.iter().map(|(key, value)| (*key, value.as_str())));
@@ -505,6 +526,12 @@ async fn json(client: &reqwest::Client, url: &str, params: &[(&str, String)]) ->
         Err(error) => return failed(request_failure(&error)),
     };
     let status = response.status();
+    if matches!(
+        status,
+        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::UNAUTHORIZED
+    ) {
+        return Err(NoAnswer::Missing);
+    }
     if !status.is_success() {
         return failed(&format!("HTTP {}", status.as_u16()));
     }
@@ -527,7 +554,7 @@ async fn json(client: &reqwest::Client, url: &str, params: &[(&str, String)]) ->
         bytes.extend_from_slice(&chunk);
     }
     match serde_json::from_slice(&bytes) {
-        Ok(value) => Some(value),
+        Ok(value) => Ok(value),
         Err(_) => failed("answer is not JSON"),
     }
 }
@@ -947,8 +974,9 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
         ("track_name", track.title.clone()),
         ("artist_name", track.artist.clone()),
     ];
-    let Some(value) = json(client, "https://lrclib.net/api/search", &params).await else {
-        return Found::Unreachable;
+    let value = match json(client, "https://lrclib.net/api/search", &params).await {
+        Ok(value) => value,
+        Err(reason) => return reason.into(),
     };
     let Value::Array(entries) = value else {
         return Found::Missing;
@@ -988,8 +1016,9 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
 }
 
 async fn better_lyrics_provider(client: &reqwest::Client, params: &[(&str, String)]) -> Found {
-    let Some(v) = json(client, "https://api.betterlyrics.org/getLyrics", params).await else {
-        return Found::Unreachable;
+    let v = match json(client, "https://api.betterlyrics.org/getLyrics", params).await {
+        Ok(value) => value,
+        Err(reason) => return reason.into(),
     };
     let confident = v
         .get("score")
@@ -1007,8 +1036,9 @@ async fn better_lyrics_provider(client: &reqwest::Client, params: &[(&str, Strin
 }
 
 async fn better_lyrics_qq_provider(client: &reqwest::Client, params: &[(&str, String)]) -> Found {
-    let Some(v) = json(client, "https://api.betterlyrics.org/qq/getLyrics", params).await else {
-        return Found::Unreachable;
+    let v = match json(client, "https://api.betterlyrics.org/qq/getLyrics", params).await {
+        Ok(value) => value,
+        Err(reason) => return reason.into(),
     };
     let (title, artist) = requested_names(params);
     match v.get("lyrics").and_then(Value::as_str) {
@@ -1021,14 +1051,15 @@ async fn better_lyrics_kugou_provider(
     client: &reqwest::Client,
     params: &[(&str, String)],
 ) -> Found {
-    let Some(v) = json(
+    let v = match json(
         client,
         "https://api.betterlyrics.org/kugou/getLyrics",
         params,
     )
     .await
-    else {
-        return Found::Unreachable;
+    {
+        Ok(value) => value,
+        Err(reason) => return reason.into(),
     };
     match v.get("lyrics").and_then(Value::as_str) {
         Some(text) => kugou_found(text),
@@ -1049,8 +1080,8 @@ where
     let params = vec![
         ("s", track.title.clone()),
         ("a", track.artist.clone()),
-        // Album and length substantially improve matching and provider cache hits.
-        ("al", track.album.clone().unwrap_or_default()),
+        // No album: Better Lyrics answers without an API key only from its cache, which is keyed
+        // by title, artist and length as other clients send them; an album makes every query miss.
         ("videoId", track.video_id.clone()),
         ("d", duration.as_secs().to_string()),
     ];
