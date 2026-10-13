@@ -97,7 +97,12 @@ foreach ($name in $programs.Keys) {
 }
 Copy-TextFile (Join-Path $here 'README-first-launch.txt') (Join-Path $stage 'README-first-launch.txt')
 Copy-TextFile (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
-Copy-TextFile (Join-Path $root 'docs\licenses.md') (Join-Path $stage 'THIRD-PARTY-LICENSES.md')
+# The notices are docs/licenses.md. Its links to files of the repository point to the repository on
+# GitHub, because those files are not in the zip, and the one to the license points to the copy beside it.
+$notices = [IO.File]::ReadAllText((Join-Path $root 'docs\licenses.md'))
+$notices = $notices.Replace('](../LICENSE)', '](LICENSE.txt)').Replace('](../', '](https://github.com/holypandadev/crabytube/blob/main/')
+$notices = $notices -replace "`r`n", "`n" -replace "`n", "`r`n"
+[IO.File]::WriteAllText((Join-Path $stage 'THIRD-PARTY-LICENSES.md'), $notices, (New-Object Text.UTF8Encoding $false))
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
