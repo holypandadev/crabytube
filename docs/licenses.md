@@ -2,7 +2,10 @@
 
 CrabyTube is licensed under GPL-3.0-or-later (see [`LICENSE`](../LICENSE)). It contains, links or
 talks to the third-party components listed below, each under its own license. License texts that
-ship with vendored code are kept next to that code.
+ship with vendored code are kept next to that code. The full license texts of every crate the
+binaries contain, with the font, V8 and its ICU data, are in
+[`packaging/THIRD-PARTY-LICENSES.txt`](../packaging/THIRD-PARTY-LICENSES.txt), which every package
+ships; `scripts/third-party-licenses.py` writes it again after a change to `Cargo.lock`.
 
 ## Vendored source code
 

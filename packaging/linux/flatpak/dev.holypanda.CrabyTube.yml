@@ -38,6 +38,8 @@ modules:
       - install -Dm755 target/release/js-challenge-helper /app/bin/js-challenge-helper
       - install -Dm644 packaging/linux/dev.holypanda.CrabyTube.desktop /app/share/applications/dev.holypanda.CrabyTube.desktop
       - install -Dm644 packaging/linux/flatpak/dev.holypanda.CrabyTube.metainfo.xml /app/share/metainfo/dev.holypanda.CrabyTube.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/dev.holypanda.CrabyTube/LICENSE
+      - install -Dm644 packaging/THIRD-PARTY-LICENSES.txt /app/share/licenses/dev.holypanda.CrabyTube/THIRD-PARTY-LICENSES.txt
       # Flatpak exports icons of at most 512x512, so the 1024 size stays out of the app.
       - mkdir -p /app/share/icons && cp -r packaging/icons/hicolor /app/share/icons/ && rm -r /app/share/icons/hicolor/1024x1024
     sources:

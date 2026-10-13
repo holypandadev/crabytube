@@ -124,6 +124,8 @@ cp "$root/LICENSE" "$stage/LICENSE.txt"
 sed -e 's#](\.\./LICENSE)#](LICENSE.txt)#' \
     -e 's#](\.\./#](https://github.com/holypandadev/crabytube/blob/main/#' \
     "$root/docs/licenses.md" > "$stage/THIRD-PARTY-LICENSES.md"
+# The full license texts of everything the binaries contain (scripts/third-party-licenses.py).
+cp "$root/packaging/THIRD-PARTY-LICENSES.txt" "$stage/THIRD-PARTY-LICENSES.txt"
 
 zip="$out/CrabyTube-$version-macos-universal.zip"
 rm -f "$zip"

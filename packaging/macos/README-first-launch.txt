@@ -13,6 +13,7 @@ What is in this folder
                             CrabyTube starts by itself when it plays a song.
   LICENSE.txt               The license (GPL-3.0-or-later).
   THIRD-PARTY-LICENSES.md   The licenses of the components CrabyTube uses.
+  THIRD-PARTY-LICENSES.txt  The full texts of those licenses.
   README-first-launch.txt   This file.
 
 Drag CrabyTube.app to your Applications folder (or anywhere you like). Do not open or change

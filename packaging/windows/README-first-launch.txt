@@ -14,6 +14,7 @@ What is in this folder
   js-challenge-helper.exe  song. Do not move, rename or delete them.
   LICENSE.txt              The license of CrabyTube (GPL-3.0-or-later).
   THIRD-PARTY-LICENSES.md  The components CrabyTube uses and their licenses.
+  THIRD-PARTY-LICENSES.txt The full texts of those licenses.
   README-first-launch.txt  This file.
 
 Keep all the files together in one folder: CrabyTube looks for its helper programs next to

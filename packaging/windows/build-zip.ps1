@@ -103,6 +103,8 @@ $notices = [IO.File]::ReadAllText((Join-Path $root 'docs\licenses.md'))
 $notices = $notices.Replace('](../LICENSE)', '](LICENSE.txt)').Replace('](../', '](https://github.com/holypandadev/crabytube/blob/main/')
 $notices = $notices -replace "`r`n", "`n" -replace "`n", "`r`n"
 [IO.File]::WriteAllText((Join-Path $stage 'THIRD-PARTY-LICENSES.md'), $notices, (New-Object Text.UTF8Encoding $false))
+# The full license texts of everything the binaries contain (scripts/third-party-licenses.py).
+Copy-TextFile (Join-Path $root 'packaging\THIRD-PARTY-LICENSES.txt') (Join-Path $stage 'THIRD-PARTY-LICENSES.txt')
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
