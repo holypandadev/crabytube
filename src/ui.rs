@@ -785,12 +785,20 @@ impl App {
                 // Sizes arrive divided by the zoom in effect; undo it first.
                 self.os_window = (width * self.ui_zoom, height * self.ui_zoom);
                 self.apply_ui_zoom();
+                // On macOS the question is asked once the resizing settles: for a window without a
+                // border, winit answers it by changing the window style for a moment, and doing
+                // that on every event of a resize by hand ends the resize.
+                #[cfg(target_os = "macos")]
+                return self.schedule_resize_work();
                 // Whether the window is maximized decides if this size is kept.
-                let size = self.os_window;
-                let geometry = iced::window::latest()
-                    .and_then(iced::window::is_maximized)
-                    .map(move |maximized| Message::WindowGeometry { size, maximized });
-                return Task::batch([geometry, self.schedule_resize_work()]);
+                #[cfg(not(target_os = "macos"))]
+                return {
+                    let size = self.os_window;
+                    let geometry = iced::window::latest()
+                        .and_then(iced::window::is_maximized)
+                        .map(move |maximized| Message::WindowGeometry { size, maximized });
+                    Task::batch([geometry, self.schedule_resize_work()])
+                };
             }
             Message::WindowGeometry { size, maximized } => {
                 let ((width, height), maximized) = layout::remembered_geometry(
@@ -807,6 +815,9 @@ impl App {
                 self.preferences.window_width = width;
                 self.preferences.window_height = height;
                 self.preferences.window_maximized = maximized;
+                // Asked for after the save of the settled window, so it is saved again.
+                #[cfg(target_os = "macos")]
+                self.persist();
             }
             Message::SavedWindowMeasured { size, monitor } => {
                 // The window and the monitor were measured together, so the same zoom divides
@@ -846,6 +857,16 @@ impl App {
                     self.rebuild_lyrics_heights();
                     self.persist();
                     let artwork = self.preload_current_page_artwork();
+                    // The geometry of the settled window, which `Resized` leaves to this point on
+                    // macOS.
+                    #[cfg(target_os = "macos")]
+                    let artwork = {
+                        let size = self.os_window;
+                        let geometry = iced::window::latest()
+                            .and_then(iced::window::is_maximized)
+                            .map(move |maximized| Message::WindowGeometry { size, maximized });
+                        Task::batch([artwork, geometry])
+                    };
                     if std::mem::take(&mut self.saved_window_unchecked) {
                         return Task::batch([artwork, Self::measure_saved_window()]);
                     }
@@ -5242,6 +5263,24 @@ mod tests {
         assert!(!app.preferences.window_maximized);
         assert_eq!(app.preferences.window_width, 1300.0);
         assert_eq!(app.preferences.window_height, 800.0);
+    }
+
+    // On macOS, asking winit whether the window is maximized changes its style for a moment, and
+    // doing that on every event of a resize made by hand ends the resize. The question is asked
+    // once the resizing settles.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_resize_event_only_schedules_the_work_for_when_it_settles() {
+        let mut app = App::default();
+        let task = app.update(Message::Resized {
+            width: 900.0,
+            height: 700.0,
+        });
+        assert_eq!(task.units(), 1);
+        let generation = app.resize_work_generation;
+        // When the resizing settles, the geometry is asked for.
+        let settled = app.update(Message::ResizeWorkDue(generation));
+        assert!(settled.units() >= 1);
     }
 
     #[test]
