@@ -310,8 +310,19 @@ impl App {
         let duration_w = if show_duration { 96.0 } else { 0.0 };
         let index_w = if narrow { 28.0 } else { 48.0 };
         let gap = if narrow { 10.0 } else { 16.0 };
-        let gaps = if show_duration { 4.0 } else { 3.0 };
-        let cover = self.preferences.ui_density.collection_cover();
+        // An album's tracks have no covers of their own; its rows then leave the column out instead of
+        // showing an empty frame on every line.
+        let show_covers = data
+            .tracks
+            .iter()
+            .any(|entry| entry.track.thumbnail_url.is_some());
+        // The spacer that stands in for the covers takes a gap too.
+        let gaps = 3.0 + f32::from(u8::from(show_duration));
+        let cover = if show_covers {
+            self.preferences.ui_density.collection_cover()
+        } else {
+            0.0
+        };
         let title_w = width - index_w - cover - duration_w - ROW_MORE_W - gaps * gap - 8.0;
         let mut table_head = row![
             container(label(self.tr("#").into_owned(), TEXT_CAPTION).color(DIM)).width(index_w),
@@ -407,23 +418,36 @@ impl App {
                     .color(ink.title)
                 )
                 .width(index_w),
-                self.cover(
+            ];
+            if show_covers {
+                cells = cells.push(self.cover(
                     track.thumbnail_url.as_deref(),
                     cover,
-                    crate::artwork::THUMB_MAX
-                ),
-                column![
-                    label(
-                        fit(display_title(&track.title), title_w, TEXT_BODY),
-                        TEXT_BODY
-                    )
-                    .color(ink.title),
+                    crate::artwork::THUMB_MAX,
+                ));
+            } else {
+                // Without covers the row keeps their height: the list is laid out by a fixed pitch.
+                cells = cells.push(
+                    Space::new()
+                        .width(0)
+                        .height(self.preferences.ui_density.collection_cover()),
+                );
+            }
+            let mut names = column![
+                label(
+                    fit(display_title(&track.title), title_w, TEXT_BODY),
+                    TEXT_BODY
+                )
+                .color(ink.title),
+            ];
+            // A row without an artist keeps its title alone, centred, rather than over an empty line.
+            if !track.artist.trim().is_empty() {
+                names = names.push(
                     label(fit(&track.artist, title_w, TEXT_CAPTION), TEXT_CAPTION)
                         .color(ink.secondary),
-                ]
-                .spacing(4)
-                .width(Length::Fill),
-            ];
+                );
+            }
+            cells = cells.push(names.spacing(4).width(Length::Fill));
             if show_duration {
                 cells = cells.push(
                     container(label(duration, TEXT_BODY).color(ink.secondary))
