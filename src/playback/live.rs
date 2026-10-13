@@ -365,7 +365,12 @@ async fn fetch_fragments(
         head = answer.head.or(head);
         let fragment = answer.fragment;
         if !sent_init && fragment.init.is_empty() {
-            // The reader needs the track description before any media. Poll again.
+            // The reader needs the track description before any media. Poll again, for as long as
+            // a stalled broadcast is waited for.
+            if edge_stalled(last_progress, Instant::now()) {
+                report_stalled(&fetch_error);
+                return;
+            }
             continue;
         }
         match (requested, answer.sequence) {
