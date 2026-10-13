@@ -111,11 +111,31 @@ impl App {
             }),
             iced::keyboard::listen().map(Message::KeyPressed),
             iced::event::listen_with(mouse_navigation),
+            iced::event::listen_with(search_field_escape),
         ])
     }
 }
 
 /// The mouse back and forward buttons navigate, like Alt+← and Alt+→.
+/// Escape in the search field: the field takes the key to give up its focus, so `keyboard::listen`
+/// never sees it. It is the only text field, so a taken Escape is always the search field's.
+fn search_field_escape(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    match (event, status) {
+        (
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            }),
+            iced::event::Status::Captured,
+        ) => Some(Message::SearchFieldEscape),
+        _ => None,
+    }
+}
+
 fn mouse_navigation(
     event: iced::Event,
     _status: iced::event::Status,
@@ -135,6 +155,38 @@ fn mouse_navigation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_escape_the_search_field_took_is_passed_on() {
+        use iced::keyboard::{Event, Key, Location, Modifiers, key};
+        let window = iced::window::Id::unique();
+        let press = |named| {
+            iced::Event::Keyboard(Event::KeyPressed {
+                key: Key::Named(named),
+                modified_key: Key::Named(named),
+                physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+                location: Location::Standard,
+                modifiers: Modifiers::default(),
+                text: None,
+                repeat: false,
+            })
+        };
+        let captured = iced::event::Status::Captured;
+        assert!(matches!(
+            search_field_escape(press(key::Named::Escape), captured, window),
+            Some(Message::SearchFieldEscape)
+        ));
+        // Elsewhere Escape is not taken, and `keyboard::listen` handles it.
+        assert!(
+            search_field_escape(
+                press(key::Named::Escape),
+                iced::event::Status::Ignored,
+                window
+            )
+            .is_none()
+        );
+        assert!(search_field_escape(press(key::Named::Enter), captured, window).is_none());
+    }
 
     #[test]
     fn the_mouse_back_and_forward_buttons_navigate_and_other_buttons_do_not() {

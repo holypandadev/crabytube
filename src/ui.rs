@@ -1572,6 +1572,21 @@ impl App {
                     }
                 }
             },
+            Message::SearchFieldEscape => {
+                // The field has already given up its focus. Escape still closes the suggestions, or
+                // clears the text, and the field keeps the focus for typing again.
+                if self.show_suggestions {
+                    if let Some(typed) = self.typed_query.take() {
+                        self.search_query = typed;
+                    }
+                    self.invalidate_suggestions();
+                    return operation::focus("search-field");
+                }
+                if !self.search_query.is_empty() {
+                    let cleared = self.update(Message::SearchChanged(String::new()));
+                    return Task::batch([cleared, operation::focus("search-field")]);
+                }
+            }
             Message::SearchEscape(focused) => {
                 if !focused {
                     return self.escape_outside_search();

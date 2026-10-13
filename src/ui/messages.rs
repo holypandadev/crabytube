@@ -241,6 +241,8 @@ pub(super) enum Message {
     SearchChanged(String),
     /// Escape was pressed on Home or Search; the flag says whether the search field had focus.
     SearchEscape(bool),
+    /// Escape pressed in the search field, which takes the key to give up its focus.
+    SearchFieldEscape,
     SearchSubmitted,
     SearchFor(String),
     SuggestionChosen(String),
