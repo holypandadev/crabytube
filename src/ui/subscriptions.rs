@@ -6,10 +6,10 @@ use super::*;
 /// second when no karaoke wake-up drives it. Elsewhere the progress bar ticks 4 times a second.
 const NOW_PLAYING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// The interval of the progress tick on `page`.
 /// How often a window off screen reads the playback position on macOS, for the media session.
 const MEDIA_SESSION_TICK: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The interval of the progress tick on `page`.
 pub(super) fn progress_tick(page: &Page) -> std::time::Duration {
     if *page == Page::NowPlaying {
         NOW_PLAYING_TICK
@@ -116,7 +116,6 @@ impl App {
     }
 }
 
-/// The mouse back and forward buttons navigate, like Alt+← and Alt+→.
 /// Escape in the search field: the field takes the key to give up its focus, so `keyboard::listen`
 /// never sees it. It is the only text field, so a taken Escape is always the search field's.
 fn search_field_escape(
@@ -139,6 +138,7 @@ fn search_field_escape(
     }
 }
 
+/// The mouse back and forward buttons navigate, like Alt+← and Alt+→.
 fn mouse_navigation(
     event: iced::Event,
     _status: iced::event::Status,

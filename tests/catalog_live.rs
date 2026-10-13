@@ -1,6 +1,7 @@
 //! Explicit opt-in read-only catalog checks. No credentials or raw responses are persisted, but the
 //! catalog client keeps its usual caches (web client values, covers) in the user's cache folder. To
-//! leave it untouched, run them with `XDG_CACHE_HOME` pointing at a temporary folder.
+//! leave it untouched on Linux, run them with `XDG_CACHE_HOME` pointing at a temporary folder; macOS
+//! and Windows do not read that variable.
 use crabytube::music::{
     BrowsePage, CatalogFilter, HomeItemKind, MusicService, YouTubeMusicService,
 };

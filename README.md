@@ -96,9 +96,10 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
 - The track that plays and the next one are downloaded to a temporary folder in the cache directory
   while they play. Files left behind by a crash are removed when CrabyTube starts, once they are old
   enough not to be in use.
-- The `CRABYTUBE_NETWORK_DIAGNOSTICS` environment variable, meant for troubleshooting, makes one
-  request to `api64.ipify.org` and logs only the address family, whether a proxy is set, and a
-  truncated hash of the public address. It is off unless you set it.
+- The `CRABYTUBE_NETWORK_DIAGNOSTICS` environment variable, meant for troubleshooting, makes the
+  BotGuard helper send one request to `api64.ipify.org` each time it runs, and print only the address
+  family, whether a proxy is set, and a truncated hash of the public address to its error output.
+  It is off unless you set it.
 
 ## Translations
 

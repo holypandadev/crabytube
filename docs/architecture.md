@@ -20,7 +20,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `ui.rs`, `ui/` | Iced application (`App`): state, `update`, `view`, subscriptions. |
 | `music.rs`, `music/browse.rs` | `MusicService` trait and its YouTube Music implementation: Home feed, search and suggestions, radio, album/artist/playlist pages and continuations. |
 | `playback/` | `resolver.rs` (stream resolution), `pot.rs` (PO tokens via the BotGuard helper), `engine.rs` (playback actor, HTTP streaming, decoding, output), `output.rs` (audio device enumeration and opening). |
-| `network.rs` | Shared HTTP client and optional network diagnostics. |
+| `network.rs` | Shared HTTP client and the switches for network troubleshooting. |
 | `runtime_cache.rs` | Web client values (`ytcfg`) persisted for six hours to avoid fetching the Music page on every launch. |
 | `home_cache.rs` | Size-capped snapshot of the public Home feed, painted on the next launch while it refreshes. |
 | `artwork.rs` | Artwork downloads, size variants, in-memory LRU and disk cache. |
@@ -177,5 +177,6 @@ The `diagnostics` feature adds command-line test modes (`--scroll-test`, `--soak
 `--screenshots`, `--exit-after`), environment overrides for the helper paths, a lyric fixture for
 the screenshots, fault injection, and Iced's debug overlay. Release builds contain none of these,
 apart from a few environment switches for network troubleshooting (`CRABYTUBE_FORCE_IPV4`,
-`CRABYTUBE_HTTP1_ONLY`, `CRABYTUBE_UA_PROFILE`). `scripts/peak-rss.sh` and
+`CRABYTUBE_HTTP1_ONLY`, `CRABYTUBE_UA_PROFILE`, and `CRABYTUBE_NETWORK_DIAGNOSTICS`, which the
+BotGuard helper reads). `scripts/peak-rss.sh` and
 `scripts/soak-memory-cpu.sh` measure memory and CPU on Linux.
