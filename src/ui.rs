@@ -1052,6 +1052,8 @@ impl App {
                             return Task::batch([
                                 self.load_home_task(),
                                 self.preload_current_page_artwork(),
+                                // The tray menu follows the language too.
+                                Task::future(self.tray.set_language(v)).discard(),
                             ]);
                         }
                     }

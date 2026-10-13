@@ -67,6 +67,15 @@ impl TrayRemote {
         self.commands.clone()
     }
 
+    /// Same signature as the Linux tray, which has a menu to translate.
+    #[allow(clippy::manual_async_fn)]
+    pub fn set_language(
+        &self,
+        _language: crate::preferences::UiLanguage,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static {
+        async {}
+    }
+
     // Same signature as the Linux tray: the future must not borrow `self`.
     #[allow(clippy::manual_async_fn)]
     pub fn start_service(

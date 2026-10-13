@@ -83,6 +83,19 @@ impl TrayRemote {
         self.commands.clone()
     }
 
+    /// Writes the menu in `language` from now on. The future does not borrow `self`.
+    pub fn set_language(
+        &self,
+        language: crate::preferences::UiLanguage,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let handle = self.handle.lock().ok().and_then(|handle| handle.clone());
+        async move {
+            if let Some(handle) = handle {
+                handle.update(|tray| tray.language = language).await;
+            }
+        }
+    }
+
     pub fn start_service(
         &self,
     ) -> impl std::future::Future<Output = Result<bool, String>> + Send + 'static {
