@@ -494,6 +494,43 @@ fn generation_matches(active: u64, event: u64) -> bool {
     active == event
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BufferingStep {
+    /// Too little audio is left to keep playing: hold the output until more arrives.
+    Hold,
+    /// Enough audio arrived, or no more is coming: let the output play.
+    Release,
+}
+
+/// What a tick does about the buffer: hold the output when less than an eighth of a second is
+/// left while the decoder still runs, and release it once half a second is ready. Once the
+/// decoder has finished nothing more arrives, so a held output is released to play out the rest.
+fn buffering_step(
+    state: PlaybackState,
+    buffered: u64,
+    decoder_finished: bool,
+    paused_by_user: bool,
+    rate: u32,
+    channels: u16,
+) -> Option<BufferingStep> {
+    if paused_by_user {
+        return None;
+    }
+    let seconds = |fraction: u32| u64::from(channels) * u64::from(rate / fraction);
+    match state {
+        PlaybackState::Playing if !decoder_finished && buffered < seconds(8) => {
+            Some(BufferingStep::Hold)
+        }
+        PlaybackState::Buffering if decoder_finished && buffered > 0 => {
+            Some(BufferingStep::Release)
+        }
+        PlaybackState::Buffering if !decoder_finished && buffered > seconds(2) => {
+            Some(BufferingStep::Release)
+        }
+        _ => None,
+    }
+}
+
 /// Whether a seek lands at or past the end of a track whose length is known.
 fn seek_ends_track(target: Duration, duration: Option<Duration>) -> bool {
     duration.is_some_and(|duration| target >= duration)
@@ -1168,19 +1205,25 @@ async fn actor(
                     }
                     // Samples the decoder has handed over and the output has not played yet.
                     let buffered = audio.produced.load(Ordering::Relaxed).saturating_sub(audio.cursor.load(Ordering::Relaxed));
-                    if !paused_by_user && !decoder_finished {
-                        if buffered < u64::from(audio.channels) * u64::from(audio.rate / 8) && status.state == PlaybackState::Playing {
+                    match buffering_step(status.state, buffered, decoder_finished, paused_by_user, audio.rate, audio.channels) {
+                        Some(BufferingStep::Hold) => {
                             if let Some(output) = output.as_ref() {
                                 output.player.pause();
                             }
                             transition(&mut status, PlaybackState::Buffering);
                             info!("buffering started");
-                        } else if buffered > u64::from(audio.channels) * u64::from(audio.rate / 2) && status.state == PlaybackState::Buffering {
+                        }
+                        Some(BufferingStep::Release) => {
                             if let Some(output) = output.as_ref() {
                                 output.player.play();
                             }
-                            if audio_started { transition(&mut status, PlaybackState::Playing); }
+                            // Without new audio the rest is played out even before the device took a sample.
+                            if audio_started || decoder_finished { transition(&mut status, PlaybackState::Playing); }
+                            if decoder_finished {
+                                info!(buffered, "decoder finished while buffering; playing out the rest");
+                            }
                         }
+                        None => {}
                     }
                     let finished = decoder_finished && buffered == 0;
                     if finished {
@@ -2072,10 +2115,41 @@ mod tests {
     use tokio::sync::watch;
 
     use super::{
-        AudioSource, EngineError, PlaybackState, PlaybackStatus, PlaybackStatusReceiver,
-        ResolvedAudioFormat, engine_error_message, generation_matches, is_valid_transition,
-        playback_status_stream, redact_urls, seek_ends_track,
+        AudioSource, BufferingStep, EngineError, PlaybackState, PlaybackStatus,
+        PlaybackStatusReceiver, ResolvedAudioFormat, buffering_step, engine_error_message,
+        generation_matches, is_valid_transition, playback_status_stream, redact_urls,
+        seek_ends_track,
     };
+
+    #[test]
+    fn a_held_output_plays_out_the_rest_once_the_decoder_has_finished() {
+        use PlaybackState::{Buffering, Paused, Playing};
+        let (rate, channels) = (48_000, 2);
+        let step = |state, buffered, finished, paused| {
+            buffering_step(state, buffered, finished, paused, rate, channels)
+        };
+        let tenth = 9_600; // a tenth of a second of stereo at 48 kHz
+        // While the decoder runs, a low buffer holds the output and half a second releases it.
+        assert_eq!(
+            step(Playing, tenth, false, false),
+            Some(BufferingStep::Hold)
+        );
+        assert_eq!(step(Buffering, tenth, false, false), None);
+        assert_eq!(
+            step(Buffering, 6 * tenth, false, false),
+            Some(BufferingStep::Release)
+        );
+        // The end of a track: nothing more comes, so the last tenth is not waited for.
+        assert_eq!(step(Playing, tenth, true, false), None);
+        assert_eq!(
+            step(Buffering, tenth, true, false),
+            Some(BufferingStep::Release)
+        );
+        assert_eq!(step(Buffering, 0, true, false), None);
+        // A pause by the user is left alone.
+        assert_eq!(step(Buffering, tenth, true, true), None);
+        assert_eq!(step(Paused, tenth, false, false), None);
+    }
 
     #[tokio::test]
     async fn playback_status_stream_emits_state_changes_but_filters_position_ticks() {
