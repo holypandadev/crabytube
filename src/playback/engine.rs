@@ -1677,7 +1677,14 @@ impl Stream for YoutubeHttpSource {
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.get_mut().stream.as_mut().poll_next(cx)
+        let this = self.get_mut();
+        let polled = this.stream.as_mut().poll_next(cx);
+        // Audio that arrives after a failed request shows the download went on, so a failure left by
+        // an attempt to reconnect does not turn the end of the track into a network error.
+        if let std::task::Poll::Ready(Some(Ok(_))) = &polled {
+            clear_fetch_error(&this.last_error);
+        }
+        polled
     }
 }
 
