@@ -30,7 +30,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("GOOD MORNING.", "BUENOS DÍAS."),
         ("GOOD AFTERNOON.", "BUENAS TARDES."),
         ("GOOD EVENING.", "BUENAS NOCHES."),
-        ("STILL UP?", "BUENAS NOCHES."),
+        ("STILL UP?", "¿NO DUERMES?"),
         ("Jump back in", "Seguir escuchando"),
         (
             "Queue limited to {} entries; the selected track stays first.",

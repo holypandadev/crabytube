@@ -354,10 +354,7 @@ mod tests {
             translate(UiLanguage::English, "Jump back in"),
             "Jump back in"
         );
-        assert_eq!(
-            translate(UiLanguage::Spanish, "STILL UP?"),
-            "BUENAS NOCHES."
-        );
+        assert_eq!(translate(UiLanguage::Spanish, "STILL UP?"), "¿NO DUERMES?");
         assert_eq!(translate(UiLanguage::English, "STILL UP?"), "STILL UP?");
     }
 
