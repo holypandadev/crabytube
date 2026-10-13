@@ -3758,6 +3758,31 @@ mod tests {
     }
 
     #[test]
+    fn shuffling_the_whole_queue_keeps_the_playing_track_current_and_first() {
+        let tracks: Vec<Track> = (0..12)
+            .map(|n| fixture_track(&format!("track{n:05}a")))
+            .collect();
+        let mut app = App {
+            queue: Arc::new(tracks.clone()),
+            queue_index: Some(5),
+            ..App::default()
+        };
+        app.preferences.shuffle_all = true;
+        let _ = app.update(Message::ToggleShuffle);
+        assert_eq!(app.queue_index, Some(0));
+        assert_eq!(app.queue[0].video_id, tracks[5].video_id);
+        let mut ids: Vec<_> = app
+            .queue
+            .iter()
+            .map(|track| track.video_id.clone())
+            .collect();
+        ids.sort();
+        let mut expected: Vec<_> = tracks.iter().map(|track| track.video_id.clone()).collect();
+        expected.sort();
+        assert_eq!(ids, expected);
+    }
+
+    #[test]
     fn shuffle_and_repeat_changes_are_recorded_in_preferences() {
         let mut app = App::default();
 

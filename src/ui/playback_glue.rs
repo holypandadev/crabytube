@@ -448,16 +448,24 @@ impl App {
     }
 
     pub(super) fn shuffle_queue(&mut self) {
-        let current = self.queue_index;
-        let start = if self.preferences.shuffle_all {
-            0
-        } else {
-            current.map_or(0, |i| i + 1)
+        let current = self.queue_index.filter(|&index| index < self.queue.len());
+        let start = match current {
+            // The whole queue is shuffled around the track that plays, which goes first so that
+            // every other track is still ahead of it and the index keeps pointing at it.
+            Some(index) if self.preferences.shuffle_all => {
+                let queue = Arc::make_mut(&mut self.queue);
+                let playing = queue.remove(index);
+                queue.insert(0, playing);
+                self.queue_index = Some(0);
+                1
+            }
+            Some(index) => index + 1,
+            None => 0,
         };
         if start < self.queue.len() {
             Arc::make_mut(&mut self.queue)[start..].shuffle(&mut rand::thread_rng());
-            self.queue_generation = self.queue_generation.wrapping_add(1);
         }
+        self.queue_generation = self.queue_generation.wrapping_add(1);
         self.persist();
     }
 
