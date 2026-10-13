@@ -213,6 +213,7 @@ impl<'a> BotguardBuilder<'a> {
     ///
     /// Otherwise, a new Botguard challenge is fetched and solved.
     pub async fn init(self) -> Result<Botguard, Error> {
+        apply_v8_memory_flags();
         if let Some(snapshot_path) = &self.snapshot_path {
             if SNAPSHOT_DATA.get().is_none() && snapshot_path.is_file() {
                 match read_snapshot_file(snapshot_path) {
@@ -223,6 +224,8 @@ impl<'a> BotguardBuilder<'a> {
                     Ok(None) => {}
                     Err(e) => {
                         log::error!("{e}");
+                        // A damaged snapshot would fail the same way at every start until it expires.
+                        let _ = std::fs::remove_file(snapshot_path);
                     }
                 }
             }
@@ -269,13 +272,6 @@ impl<'a> BotguardBuilder<'a> {
     }
 
     async fn try_init(&self, client: &Client) -> Result<Botguard, Error> {
-        // This helper owns one isolate per request; V8 background workers only add RSS here.
-        static BOTGUARD_V8_MEMORY_FLAGS: Once = Once::new();
-        BOTGUARD_V8_MEMORY_FLAGS.call_once(|| {
-            v8::V8::set_flags_from_string(
-                "--initial-old-space-size=8 --max-old-space-size=96 --max-semi-space-size=1 --optimize-for-size --single-threaded",
-            );
-        });
         let mut rt = if self.snapshot_path.is_some() {
             Rt::Snapshotting(JsRuntimeForSnapshot::try_new(RuntimeOptions {
                 extensions: rt_extensions(false),
@@ -582,6 +578,21 @@ fn rt_extensions(from_snapshot: bool) -> Vec<deno_core::Extension> {
 /// <4>  data length in bytes
 /// <dl> snapshot data
 /// ```
+/// Sets the V8 flags once per process, before the first isolate, whether it starts from a snapshot
+/// or not. This helper owns one isolate per request; V8 background workers only add RSS here.
+fn apply_v8_memory_flags() {
+    static BOTGUARD_V8_MEMORY_FLAGS: Once = Once::new();
+    BOTGUARD_V8_MEMORY_FLAGS.call_once(|| {
+        v8::V8::set_flags_from_string(
+            "--initial-old-space-size=8 --max-old-space-size=96 --max-semi-space-size=1 --optimize-for-size --single-threaded",
+        );
+    });
+}
+
+/// The largest snapshot header and data read back. A snapshot is about 9 MB.
+const MAX_SNAPSHOT_INFO_BYTES: u32 = 64 * 1024;
+const MAX_SNAPSHOT_DATA_BYTES: u32 = 64 * 1024 * 1024;
+
 fn read_snapshot_file(path: &Path) -> Result<Option<SnapshotData>, Error> {
     let mut reader = BufReader::new(File::open(path)?);
     let magic = reader.read_u32::<BigEndian>()?;
@@ -590,6 +601,9 @@ fn read_snapshot_file(path: &Path) -> Result<Option<SnapshotData>, Error> {
     }
 
     let info_len = reader.read_u32::<BigEndian>()?;
+    if info_len > MAX_SNAPSHOT_INFO_BYTES {
+        return Err(Error::InvalidSnapshot("info header too long".into()));
+    }
     let mut info_bytes = vec![0; info_len as usize];
     reader.read_exact(&mut info_bytes)?;
     let info = serde_json::from_slice::<SnapshotInfo>(&info_bytes)
@@ -598,9 +612,14 @@ fn read_snapshot_file(path: &Path) -> Result<Option<SnapshotData>, Error> {
         return Ok(None);
     }
 
-    let data_len = reader.read_u32::<BigEndian>()? as usize;
+    let data_len = reader.read_u32::<BigEndian>()?;
+    if data_len > MAX_SNAPSHOT_DATA_BYTES {
+        return Err(Error::InvalidSnapshot("snapshot too long".into()));
+    }
+    let data_len = data_len as usize;
     let mut data = Vec::with_capacity(data_len);
-    reader.read_to_end(&mut data)?;
+    // One byte more than announced shows a file longer than its header says.
+    reader.take(data_len as u64 + 1).read_to_end(&mut data)?;
     if data.len() != data_len {
         return Err(Error::InvalidSnapshot("incomplete data".into()));
     }
@@ -631,7 +650,12 @@ fn write_snapshot_file(path: &Path, info: &SnapshotInfo, data: &[u8]) -> Result<
 }
 
 fn write_snapshot_contents(path: &Path, info: &str, data: &[u8]) -> Result<(), Error> {
-    let mut writer = File::create(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    // Readable by the user alone, like the rest of the app's cache.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut writer = options.open(path)?;
     writer.write_u32::<BigEndian>(SNAPSHOT_MAGIC)?;
     writer.write_u32::<BigEndian>(
         info.len()

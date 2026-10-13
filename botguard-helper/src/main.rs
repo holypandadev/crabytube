@@ -102,7 +102,14 @@ async fn run() -> Result<(), String> {
     }
     let has_homepage_challenge = request.homepage_challenge_json.is_some();
     if let Some(parent) = request.snapshot_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("snapshot directory: {e}"))?;
+        let mut folder = std::fs::DirBuilder::new();
+        folder.recursive(true);
+        // Readable by the user alone, like the rest of the app's cache.
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut folder, 0o700);
+        folder
+            .create(parent)
+            .map_err(|e| format!("snapshot directory: {e}"))?;
     }
 
     let cold = Instant::now();

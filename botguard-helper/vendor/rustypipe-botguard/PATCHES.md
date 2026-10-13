@@ -33,9 +33,11 @@ crate's `CHANGELOG.md` is not included.
 - Diagnostic lines on stderr: the challenge source and payload sizes, and the HTTP status and JSON
   shape of the GenerateIT response (a `json_type` helper names the JSON value type). No token or
   identifier values are printed.
-- V8 flags set once per process to keep the single short-lived isolate small
-  (`--initial-old-space-size=8 --max-old-space-size=96 --max-semi-space-size=1
-  --optimize-for-size --single-threaded`).
+- V8 flags set once per process, before the first isolate whether or not it starts from a
+  snapshot, to keep the single short-lived isolate small (`--initial-old-space-size=8
+  --max-old-space-size=96 --max-semi-space-size=1 --optimize-for-size --single-threaded`).
+- The snapshot file is read with bounds (64 KiB of header, 64 MiB of data, and no more data than
+  the header announces), removed when it cannot be read, and written readable by the user alone.
 - Environment variables read when building the HTTP client:
   `CRABYTUBE_FORCE_IPV4` binds to an IPv4 local address, `CRABYTUBE_HTTP1_ONLY` disables HTTP/2.
 

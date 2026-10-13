@@ -294,6 +294,24 @@ impl BotguardHelper {
         Self::with_snapshot_path(path)
     }
 
+    /// Removes the V8 snapshots the helper keeps beside `snapshot_path` (`botguard-<digest>.bin`).
+    fn remove_snapshots(&self) {
+        let Some(directory) = self.snapshot_path.parent() else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("botguard-") && name.ends_with(".bin") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+        warn!("BotGuard helper exited without an answer; its snapshots were removed");
+    }
+
     /// Create a helper with an isolated snapshot path for diagnostics. Tokens persist beside it.
     pub fn with_snapshot_path(snapshot_path: PathBuf) -> Self {
         let pot_path = snapshot_path.with_file_name(POT_FILE_NAME);
@@ -400,10 +418,18 @@ impl BotguardHelper {
             struct ErrorResponse {
                 error: Option<String>,
             }
-            let message = serde_json::from_slice::<ErrorResponse>(&output.stdout)
+            let Some(message) = serde_json::from_slice::<ErrorResponse>(&output.stdout)
                 .ok()
                 .and_then(|e| e.error)
-                .unwrap_or_else(|| format!("helper exited with {}", output.status));
+            else {
+                // The helper died without an answer, as V8 does on a damaged snapshot. The snapshots
+                // are removed so the next request builds a fresh one instead of dying the same way.
+                self.remove_snapshots();
+                return Err(PoTokenError::Helper(format!(
+                    "helper exited with {}",
+                    output.status
+                )));
+            };
             return Err(PoTokenError::Helper(message));
         }
         let response: Response = serde_json::from_slice(&output.stdout)
