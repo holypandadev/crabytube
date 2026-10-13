@@ -710,6 +710,10 @@ async fn resolve_challenge_data(
             let url = Url::parse(&format!("https:{url}"))
                 .or_else(|_| Url::parse(&url))
                 .map_err(|e| Error::InvalidChallenge(format!("{e}: {url}").into()))?;
+            // The interpreter is code that runs here: only over HTTPS.
+            if url.scheme() != "https" {
+                return Err(Error::InvalidChallenge("interpreter not served over HTTPS".into()));
+            }
             let domain = url
                 .domain()
                 .ok_or(Error::InvalidChallenge("no domain".into()))?;

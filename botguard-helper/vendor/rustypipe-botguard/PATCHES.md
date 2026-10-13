@@ -36,6 +36,7 @@ crate's `CHANGELOG.md` is not included.
 - V8 flags set once per process, before the first isolate whether or not it starts from a
   snapshot, to keep the single short-lived isolate small (`--initial-old-space-size=8
   --max-old-space-size=96 --max-semi-space-size=1 --optimize-for-size --single-threaded`).
+- The BotGuard interpreter is fetched over HTTPS only.
 - The snapshot file is read with bounds (64 KiB of header, 64 MiB of data, and no more data than
   the header announces), removed when it cannot be read, and written readable by the user alone.
 - Environment variables read when building the HTTP client:
