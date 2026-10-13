@@ -106,7 +106,9 @@ impl App {
         if let Some(wake) = self.arm_karaoke_wake() {
             tasks.push(wake);
         }
+        // Repeat goes back over the queue, so the radio only extends a queue that would end.
         if self.autoplay
+            && self.repeat == RepeatMode::Off
             && self
                 .queue
                 .len()
