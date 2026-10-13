@@ -647,7 +647,20 @@ where
         && let Some(parent) = path.parent()
     {
         let _ = crate::storage::create_private_dir_all(parent);
-        if tokio::fs::write(&path, data).await.is_ok() {
+        // Written beside its place and renamed over it, so two lookups of the same track never
+        // leave a mixed file and a reader never sees half of one.
+        static NEXT_TEMPORARY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let temporary = path.with_extension(format!(
+            "{}-{}.tmp",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let saved = tokio::fs::write(&temporary, data).await.is_ok()
+            && tokio::fs::rename(&temporary, &path).await.is_ok();
+        if !saved {
+            let _ = tokio::fs::remove_file(&temporary).await;
+        }
+        if saved {
             let parent = parent.to_path_buf();
             drop(tokio::task::spawn_blocking(move || {
                 trim_lyrics_cache(&parent)
