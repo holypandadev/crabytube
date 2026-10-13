@@ -304,21 +304,31 @@ impl App {
                 .into()
         };
 
-        let duration_w = 96.0;
-        let index_w = 48.0;
+        // A narrow window, and a page without lengths (an artist's songs), give the duration's room
+        // to the title, as Favorites does.
+        let show_duration = !narrow && data.tracks.iter().any(|entry| entry.duration.is_some());
+        let duration_w = if show_duration { 96.0 } else { 0.0 };
+        let index_w = if narrow { 28.0 } else { 48.0 };
+        let gap = if narrow { 10.0 } else { 16.0 };
+        let gaps = if show_duration { 4.0 } else { 3.0 };
         let cover = self.preferences.ui_density.collection_cover();
-        let title_w = width - index_w - cover - duration_w - ROW_MORE_W - 4.0 * 16.0 - 8.0;
-        let table_head = row![
+        let title_w = width - index_w - cover - duration_w - ROW_MORE_W - gaps * gap - 8.0;
+        let mut table_head = row![
             container(label(self.tr("#").into_owned(), TEXT_CAPTION).color(DIM)).width(index_w),
             container(label(self.tr("TITLE").into_owned(), TEXT_CAPTION).color(DIM))
                 .width(Length::Fill),
-            container(label(self.tr("DURATION").into_owned(), TEXT_CAPTION).color(DIM))
-                .width(duration_w)
-                .align_x(alignment::Horizontal::Right),
-            Space::new().width(ROW_MORE_W),
-        ]
-        .spacing(16)
-        .padding([0, 4]);
+        ];
+        if show_duration {
+            table_head = table_head.push(
+                container(label(self.tr("DURATION").into_owned(), TEXT_CAPTION).color(DIM))
+                    .width(duration_w)
+                    .align_x(alignment::Horizontal::Right),
+            );
+        }
+        let table_head = table_head
+            .push(Space::new().width(ROW_MORE_W))
+            .spacing(gap)
+            .padding([0, 4]);
         let mut page = column![
             Space::new().height(8),
             header,
@@ -384,7 +394,7 @@ impl App {
                 .padding(6)
                 .width(ROW_MORE_W)
                 .style(theme::row_icon_button(current, open));
-            let cells = row![
+            let mut cells = row![
                 container(
                     label(
                         if current {
@@ -413,13 +423,15 @@ impl App {
                 ]
                 .spacing(4)
                 .width(Length::Fill),
-                container(label(duration, TEXT_BODY).color(ink.secondary))
-                    .width(duration_w)
-                    .align_x(alignment::Horizontal::Right),
-                more,
-            ]
-            .spacing(16)
-            .align_y(Alignment::Center);
+            ];
+            if show_duration {
+                cells = cells.push(
+                    container(label(duration, TEXT_BODY).color(ink.secondary))
+                        .width(duration_w)
+                        .align_x(alignment::Horizontal::Right),
+                );
+            }
+            let cells = cells.push(more).spacing(gap).align_y(Alignment::Center);
             let line = button(cells)
                 .on_press(Message::PlayCollection(
                     Arc::clone(&queue_tracks),
