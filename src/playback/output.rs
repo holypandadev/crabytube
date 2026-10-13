@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -15,7 +15,7 @@ use cpal::{
     StreamConfig,
 };
 use rodio::mixer::Mixer;
-use tracing::warn;
+use tracing::{debug, warn};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputDeviceChoice {
@@ -101,6 +101,8 @@ pub struct OutputStream {
     _stream: cpal::Stream,
     mixer: Mixer,
     clock: Arc<PlaybackClock>,
+    /// Set by the stream when its device went away; the stream plays nothing after that.
+    lost: Arc<AtomicBool>,
 }
 
 impl OutputStream {
@@ -111,6 +113,27 @@ impl OutputStream {
     pub fn clock(&self) -> &PlaybackClock {
         &self.clock
     }
+
+    /// Whether the device went away (unplugged, or the remote session that carried it ended), so
+    /// the output has to be opened again.
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::Relaxed)
+    }
+
+    /// Diagnostics only: reports the device gone, as its stream does when it is unplugged.
+    #[cfg(feature = "diagnostics")]
+    pub fn mark_lost(&self) {
+        self.lost.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Whether a stream error leaves the stream dead: the device is gone, or the stream has to be
+/// built again. Underruns and backend hiccups do not stop it.
+fn ends_the_stream(error: &cpal::StreamError) -> bool {
+    matches!(
+        error,
+        cpal::StreamError::DeviceNotAvailable | cpal::StreamError::StreamInvalidated
+    )
 }
 
 /// When the device last finished playing a buffer, from cpal's timestamps.
@@ -221,6 +244,8 @@ where
     );
     let clock = Arc::new(PlaybackClock::default());
     let callback_clock = Arc::clone(&clock);
+    let lost = Arc::new(AtomicBool::new(false));
+    let error_lost = Arc::clone(&lost);
     let stream = device
         .build_output_stream::<T, _, _>(
             config,
@@ -232,7 +257,14 @@ where
                 let buffer = Duration::from_secs_f64(frames as f64 / f64::from(rate));
                 callback_clock.record_buffer_end(now + latency + buffer);
             },
-            |error| warn!(%error, "audio output failed"),
+            move |error| {
+                if ends_the_stream(&error) {
+                    warn!(%error, "audio output failed");
+                    error_lost.store(true, Ordering::Relaxed);
+                } else {
+                    debug!(%error, "audio output hiccup");
+                }
+            },
             None,
         )
         .map_err(|error| error.to_string())?;
@@ -241,6 +273,7 @@ where
         _stream: stream,
         mixer,
         clock,
+        lost,
     })
 }
 
@@ -248,6 +281,20 @@ where
 mod tests {
     use super::{OutputDeviceChoice, enumerate_output_devices, open_output_device};
     use std::time::Duration;
+
+    #[test]
+    fn only_a_device_that_went_away_ends_the_stream() {
+        use super::ends_the_stream;
+        use cpal::{BackendSpecificError, StreamError};
+        assert!(ends_the_stream(&StreamError::DeviceNotAvailable));
+        assert!(ends_the_stream(&StreamError::StreamInvalidated));
+        assert!(!ends_the_stream(&StreamError::BufferUnderrun));
+        assert!(!ends_the_stream(&StreamError::BackendSpecific {
+            err: BackendSpecificError {
+                description: String::from("poll failed"),
+            },
+        }));
+    }
 
     #[test]
     fn default_output_choice_has_a_stable_setting_label() {

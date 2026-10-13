@@ -742,6 +742,10 @@ async fn actor(
                 Some(Command::Resume) => {
                     if status.state == PlaybackState::Paused {
                         paused_by_user = false;
+                        // A device that went away during the pause is opened again like a released one.
+                        if output.as_ref().is_some_and(PlaybackOutput::is_lost) {
+                            output = None;
+                        }
                         if let Some(audio) = active.as_ref() {
                             // Released during a long pause: open the output again. The new source reads
                             // the chunks the decoder kept, so playback continues where it stopped.
@@ -920,6 +924,9 @@ async fn actor(
                 Some(Event::Prepared { generation: event_generation, selected_at, track, duration, source }) if generation_matches(generation, event_generation) => match source {
                     Ok(active_audio) => {
                         // A paused track does not open the device: resume opens it and queues the source.
+                        if output.as_ref().is_some_and(PlaybackOutput::is_lost) {
+                            output = None;
+                        }
                         if output.is_none() && !paused_by_user {
                             let opened = open_selected_output(status.volume, output_device_id.as_deref());
                             match opened {
@@ -1105,6 +1112,36 @@ async fn actor(
             },
             _ = ticker.tick(), if active.is_some() && !paused_by_user => {
                 if let Some(audio) = active.as_ref() {
+                    #[cfg(feature = "diagnostics")]
+                    if let Some(output) = output.as_ref()
+                        && crate::playback::take_injected_output_loss(played_seconds(&audio.cursor, audio.rate, audio.channels))
+                    {
+                        output._device.mark_lost();
+                    }
+                    if output.as_ref().is_some_and(PlaybackOutput::is_lost) {
+                        // The device went away (unplugged, or the remote session that carried it ended) and the
+                        // stream plays nothing more. The output is opened again, on the system default if the
+                        // chosen device is gone. With no device at all, playback pauses and Play opens it later.
+                        output = None;
+                        match reopen_output(audio, status.volume, output_device_id.as_deref()) {
+                            Ok(opened) => {
+                                // Buffering and seeking start the player themselves when they are done.
+                                if status.state != PlaybackState::Playing {
+                                    opened.player.pause();
+                                }
+                                status.output_device = Some(opened.device_name.clone());
+                                output = Some(opened);
+                                info!("audio output reopened after its device went away");
+                            }
+                            Err(error) => {
+                                warn!(?error, "audio device went away and none can be opened; pausing");
+                                paused_by_user = true;
+                                transition(&mut status, PlaybackState::Paused);
+                                status.output_device = None;
+                            }
+                        }
+                        let _ = status_tx.send(status.clone());
+                    }
                     status.position = audible_position(output.as_ref(), audio, Instant::now());
                     let underruns = audio.underruns.load(Ordering::Relaxed);
                     status.underruns = underruns;
@@ -1381,6 +1418,10 @@ impl PlaybackOutput {
 
     fn clock(&self) -> &crate::playback::output::PlaybackClock {
         self._device.clock()
+    }
+
+    fn is_lost(&self) -> bool {
+        self._device.is_lost()
     }
 }
 

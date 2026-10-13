@@ -42,6 +42,21 @@ pub(crate) fn take_injected_range_failure() -> bool {
     !RANGE_FAILURE_INJECTED.swap(true, std::sync::atomic::Ordering::SeqCst)
 }
 
+#[cfg(feature = "diagnostics")]
+static OUTPUT_LOSS_INJECTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// `CRABYTUBE_LOSE_OUTPUT_AT=<seconds>` (diagnostics only): once the output has played that many
+/// seconds, its device is reported gone, once, as when it is unplugged, to exercise opening the
+/// output again.
+#[cfg(feature = "diagnostics")]
+pub(crate) fn take_injected_output_loss(played_seconds: f64) -> bool {
+    std::env::var("CRABYTUBE_LOSE_OUTPUT_AT")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .is_some_and(|at| played_seconds >= at)
+        && !OUTPUT_LOSS_INJECTED.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
+
 /// `CRABYTUBE_FAIL_SEEK=1` (diagnostics only): every seek reports a failure after it has run, so the
 /// notice for a failed seek can be checked on screen. Playback goes on from where it was.
 #[cfg(feature = "diagnostics")]
