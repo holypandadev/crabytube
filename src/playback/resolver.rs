@@ -1982,7 +1982,7 @@ async fn run_js_challenge_helper(
     .await
     {
         Err(error)
-            if !matches!(error, StreamError::Cancelled)
+            if !matches!(error, StreamError::Cancelled | StreamError::Installation(_))
                 && input.preprocessed_cache_path.is_some()
                 && input.player_js_path.is_some() =>
         {
