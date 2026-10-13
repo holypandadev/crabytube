@@ -1046,6 +1046,9 @@ impl YouTubeStreamResolver {
                     self.token_provider.forget_visitor(&visitor_data).await;
                     crate::runtime_cache::forget_visitor();
                     crate::runtime_cache::forget_web();
+                    // The saved player configuration carries the same visitor in its context, and
+                    // the retry would read it back from disk.
+                    self.forget_player_config().await;
                     max_validation_attempts = max_validation_attempts.max(validation_attempt + 1);
                 }
                 let delay = if validation_attempt == 1 { 175 } else { 375 };
