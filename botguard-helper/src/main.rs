@@ -145,11 +145,7 @@ async fn run() -> Result<(), String> {
             && let Ok(address) = response.text().await
             && let Ok(parsed) = address.parse::<std::net::IpAddr>()
         {
-            let digest = Sha256::digest(parsed.to_string().as_bytes());
-            let fingerprint = digest[..4]
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
+            // Only the kind of address is printed: a short hash of an IPv4 address is reversed in seconds.
             let proxy = [
                 "HTTPS_PROXY",
                 "https_proxy",
@@ -161,7 +157,7 @@ async fn run() -> Result<(), String> {
             .iter()
             .any(|name| std::env::var_os(name).is_some());
             eprintln!(
-                "network_identity_helper address_family={} proxy={} egress_fp={fingerprint}",
+                "network_identity_helper address_family={} proxy={}",
                 if parsed.is_ipv4() { "ipv4" } else { "ipv6" },
                 if proxy { "yes" } else { "no" }
             );

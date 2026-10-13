@@ -790,7 +790,8 @@ fn validate_potoken(po_token: &str) -> Result<(), Error> {
         .map_err(|e| Error::InvalidPoToken(format!("invalid b64: {e}").into()))?;
 
     protobuf::bytes_from_pb(token_bts, 6).ok_or_else(|| {
-        Error::InvalidPoToken(format!("could not parse protobuf: {po_token}").into())
+        // The token itself stays out of the message, which can reach a log.
+        Error::InvalidPoToken(format!("could not parse protobuf ({} bytes)", po_token.len()).into())
     })?;
 
     Ok(())

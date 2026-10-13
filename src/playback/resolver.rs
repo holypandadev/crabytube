@@ -786,7 +786,7 @@ impl YouTubeStreamResolver {
                         Ok(resolution) => Ok(resolution),
                         Err(StreamError::Cancelled) => Err(StreamError::Cancelled),
                         Err(error) => {
-                            warn!(?error, "live fallback could not resolve the broadcast");
+                            warn!(error = %crate::playback::redact_urls(&format!("{error:?}")), "live fallback could not resolve the broadcast");
                             Err(StreamError::LiveUnsupported)
                         }
                     };
