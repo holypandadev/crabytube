@@ -92,11 +92,23 @@ pub(super) fn boxed(_: &Theme) -> container::Style {
     }
 }
 
+/// The corner radius of the window frame of macOS, in points.
+#[cfg(target_os = "macos")]
+const WINDOW_CORNER_RADIUS: f32 = 18.0;
+
 pub(super) fn frame(_: &Theme) -> container::Style {
+    #[allow(unused_mut)]
+    let mut border = outline(hairline());
+    // The window of macOS has rounded corners, and the outline follows them. `hairline` is the
+    // size of a point in layout units, so the radius keeps its size under the interface zoom.
+    #[cfg(target_os = "macos")]
+    {
+        border.radius = (WINDOW_CORNER_RADIUS * hairline()).into();
+    }
     container::Style {
         background: Some(Background::Color(BLACK)),
         text_color: Some(INK),
-        border: outline(hairline()),
+        border,
         ..Default::default()
     }
 }
