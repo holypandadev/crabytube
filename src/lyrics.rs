@@ -17,6 +17,8 @@ pub const LYRICS_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 pub const LYRICS_DEADLINE: Duration = Duration::from_secs(10);
 /// Time-to-live for "no lyrics found", so a missing track is not searched again every time.
 const NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
+/// Age past which a temporary file in the lyrics cache is a leftover, not a write in progress.
+const STALE_TEMPORARY: Duration = Duration::from_secs(3600);
 /// After a line-timed result, word-timed sources get this long to answer.
 const LINE_GRACE: Duration = Duration::from_millis(1500);
 /// A result from a source that does not name its track waits this long for LRCLIB, which wins if it answers.
@@ -125,8 +127,20 @@ fn trim_lyrics_cache(dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+    let entries: Vec<_> = entries.flatten().collect();
+    // A temporary file left by a write that never finished, from a crash for example.
+    for entry in &entries {
+        let stale = entry.path().extension().is_some_and(|ext| ext == "tmp")
+            && entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| modified.elapsed().unwrap_or_default() > STALE_TEMPORARY);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
     let mut files: Vec<_> = entries
-        .flatten()
+        .into_iter()
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .filter_map(|e| {
             let meta = e.metadata().ok()?;
