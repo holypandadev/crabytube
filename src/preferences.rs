@@ -778,14 +778,14 @@ impl Persistence {
                     tracing::warn!(%error,"Could not save local settings");
                     // A full disk or a folder without permission may clear up: the snapshot is kept
                     // for another attempt, unless a newer one came in or the app is closing.
-                    if !closing {
-                        if let Ok(mut state) = lock.lock()
-                            && state.latest.is_none()
-                            && !state.closed
-                        {
+                    if !closing && let Ok(mut state) = lock.lock() {
+                        if state.latest.is_none() && !state.closed {
                             state.latest = Some(snapshot);
                         }
-                        std::thread::sleep(RETRY_FAILED_SAVE_AFTER);
+                        // The wait ends early when the app closes, so closing never waits for it.
+                        let _ = wake.wait_timeout_while(state, RETRY_FAILED_SAVE_AFTER, |state| {
+                            !state.closed
+                        });
                     }
                 }
             }
@@ -1490,6 +1490,24 @@ mod tests {
         drop(persistence);
         assert_eq!(*load(&path).unwrap().history, vec!["latest"]);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_save_that_keeps_failing_neither_spins_nor_holds_up_closing() {
+        // The state file's folder is a plain file, so every write fails.
+        let blocker = std::env::temp_dir().join(format!(
+            "crabytube-persistence-blocked-{}",
+            std::process::id()
+        ));
+        std::fs::write(&blocker, b"not a folder").unwrap();
+        let persistence = Persistence::start(blocker.join("state.json"));
+        persistence.save(Snapshot::default());
+        // Past the debounce, the first write has failed and the writer waits to try again.
+        std::thread::sleep(Duration::from_millis(500));
+        let closing = std::time::Instant::now();
+        drop(persistence);
+        assert!(closing.elapsed() < Duration::from_secs(1), "{:?}", closing.elapsed());
+        let _ = std::fs::remove_file(blocker);
     }
 
     #[test]
