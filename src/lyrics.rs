@@ -552,12 +552,19 @@ fn negative_is_fresh(path: &std::path::Path) -> bool {
 }
 
 /// What a lookup leaves on disk: complete lyrics and a verified "not found". Plain text salvaged at the
-/// deadline is shown but never stored, because a later lookup may still find timed lyrics.
-fn stored_form(result: &Result<Lyrics, String>, salvaged: bool) -> Option<Vec<u8>> {
+/// deadline is shown but never stored, because a later lookup may still find timed lyrics. Nor is a
+/// "not found" while a provider could not be reached (`some_unreachable`): it may have had them.
+fn stored_form(
+    result: &Result<Lyrics, String>,
+    salvaged: bool,
+    some_unreachable: bool,
+) -> Option<Vec<u8>> {
     match result {
         Ok(lyrics) if !salvaged => serde_json::to_vec(lyrics).ok(),
         Ok(_) => None,
-        Err(error) if error == NOT_FOUND => serde_json::to_vec(&NotFound { not_found: true }).ok(),
+        Err(error) if error == NOT_FOUND && !some_unreachable => {
+            serde_json::to_vec(&NotFound { not_found: true }).ok()
+        }
         Err(_) => None,
     }
 }
@@ -613,9 +620,14 @@ where
     // Global deadline for the whole chain; providers share one client.
     // Plain text kept when the deadline passed is shown, but it is not stored as a positive result.
     let mut salvaged = false;
-    let result = match tokio::time::timeout(LYRICS_DEADLINE, load_inner(track, duration, progress))
-        .await
-    {
+    let some_unreachable = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lookup = load_inner(
+        track,
+        duration,
+        progress,
+        std::sync::Arc::clone(&some_unreachable),
+    );
+    let result = match tokio::time::timeout(LYRICS_DEADLINE, lookup).await {
         Ok(result) => result,
         Err(_) => match latest_plain.lock().ok().and_then(|slot| slot.clone()) {
             Some(plain) => {
@@ -642,7 +654,11 @@ where
             info!(elapsed_ms = started.elapsed().as_millis(), %error, "lyrics not loaded")
         }
     }
-    let to_store = stored_form(&result, salvaged);
+    let to_store = stored_form(
+        &result,
+        salvaged,
+        some_unreachable.load(std::sync::atomic::Ordering::Relaxed),
+    );
     if let Some(data) = to_store
         && let Some(parent) = path.parent()
     {
@@ -1010,6 +1026,7 @@ async fn load_inner<F>(
     track: Track,
     duration: Duration,
     mut on_progress: F,
+    some_unreachable: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<Lyrics, String>
 where
     F: FnMut(Lyrics),
@@ -1032,6 +1049,7 @@ where
         running.push(better_lyrics_qq_provider(client, params).boxed());
         running.push(better_lyrics_kugou_provider(client, params).boxed());
     }
+    let providers = running.len();
     let mut best_line: Option<Lyrics> = None;
     let mut best_plain: Option<Lyrics> = None;
     // The first result that does not name its track, and when it arrived.
@@ -1091,12 +1109,14 @@ where
     if let Some((lyrics, _)) = unverified {
         return Ok(lyrics);
     }
-    // With any provider unreachable, "no lyrics" is not known yet: the answer asks for another try and
-    // is not kept, where a plain "not found" would be kept for a day.
-    if unreachable > 0 {
+    if unreachable == providers {
         return Err(
             "Lyrics providers are unreachable. Check your connection and try again.".into(),
         );
+    }
+    // A provider that could not be reached may have had them: the miss is shown but not kept.
+    if unreachable > 0 {
+        some_unreachable.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     Err(NOT_FOUND.into())
 }
@@ -1330,12 +1350,14 @@ mod tests {
             length_mismatch: false,
             plain: Some("words".into()),
         });
-        assert!(super::stored_form(&salvaged, true).is_none());
-        assert!(super::stored_form(&salvaged, false).is_some());
+        assert!(super::stored_form(&salvaged, true, false).is_none());
+        assert!(super::stored_form(&salvaged, false, false).is_some());
         let not_found: Result<Lyrics, String> = Err(super::NOT_FOUND.into());
-        assert!(super::stored_form(&not_found, false).is_some());
+        assert!(super::stored_form(&not_found, false, false).is_some());
+        // A miss while a provider could not be reached is not kept.
+        assert!(super::stored_form(&not_found, false, true).is_none());
         let timed_out: Result<Lyrics, String> = Err("timed out".into());
-        assert!(super::stored_form(&timed_out, false).is_none());
+        assert!(super::stored_form(&timed_out, false, false).is_none());
     }
 
     #[test]
