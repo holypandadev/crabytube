@@ -48,6 +48,8 @@ const PLAYER_RUNTIME_TTL: std::time::Duration = std::time::Duration::from_secs(6
 /// How long a play waits for a prewarm that still fetches the player data. Past this the play fetches the data
 /// itself.
 const PREWARM_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+/// Time allowed for one download of a page or of the player script, which is large.
+const PAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Whether a cached player runtime, fetched at `fetched_at`, may still be used at `now`.
 fn runtime_is_fresh(fetched_at: std::time::Instant, now: std::time::Instant) -> bool {
@@ -1281,7 +1283,9 @@ impl YouTubeStreamResolver {
             if cancellation.is_cancelled() {
                 return Err(StreamError::Cancelled);
             }
-            let mut request = Self::client()?.get(url);
+            // The player script is about 3 MB and comes uncompressed: the 20 s of the shared client
+            // would cut it off on a link slower than about 150 KB/s.
+            let mut request = Self::client()?.get(url).timeout(PAGE_TIMEOUT);
             if let Some(user_agent) = user_agent {
                 request = request.header(reqwest::header::USER_AGENT, user_agent);
             }
@@ -1823,6 +1827,8 @@ impl YouTubeStreamResolver {
                 result = run_js_challenge_helper(input, signature.clone(), n_value.clone(), cancellation.child_token()) => match result {
                     Ok(result) => result,
                     Err(StreamError::Cancelled) => return Err(StreamError::Cancelled),
+                    // A helper missing from the installation is not the fault of this player.
+                    Err(error @ StreamError::Installation(_)) => return Err(error),
                     Err(other) => {
                         // The challenge no longer solves against this player: it is fetched again.
                         *self.runtime.lock().await = None;
