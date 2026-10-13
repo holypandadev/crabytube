@@ -127,13 +127,11 @@ fn search_field_escape(
         (
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                // A held key repeats: only the first press counts, or the repeat that follows the
-                // closing of the suggestions would also clear the text.
-                repeat: false,
+                repeat,
                 ..
             }),
             iced::event::Status::Captured,
-        ) => Some(Message::SearchFieldEscape),
+        ) => Some(Message::SearchFieldEscape { repeat }),
         _ => None,
     }
 }
@@ -178,7 +176,7 @@ mod tests {
         let captured = iced::event::Status::Captured;
         assert!(matches!(
             search_field_escape(press(key::Named::Escape), captured, window),
-            Some(Message::SearchFieldEscape)
+            Some(Message::SearchFieldEscape { repeat: false })
         ));
         // Elsewhere Escape is not taken, and `keyboard::listen` handles it.
         assert!(
@@ -190,8 +188,11 @@ mod tests {
             .is_none()
         );
         assert!(search_field_escape(press(key::Named::Enter), captured, window).is_none());
-        // A held Escape acts once.
-        assert!(search_field_escape(event(key::Named::Escape, true), captured, window).is_none());
+        // A held Escape is passed on as such, and acts only once.
+        assert!(matches!(
+            search_field_escape(event(key::Named::Escape, true), captured, window),
+            Some(Message::SearchFieldEscape { repeat: true })
+        ));
     }
 
     #[test]

@@ -1578,7 +1578,11 @@ impl App {
                     }
                 }
             },
-            Message::SearchFieldEscape => {
+            Message::SearchFieldEscape { repeat: true } => {
+                // A held Escape acts once; the field it unfocused again takes the focus back.
+                return operation::focus("search-field");
+            }
+            Message::SearchFieldEscape { repeat: false } => {
                 // The field has already given up its focus. Escape still closes the suggestions, or
                 // clears the text, and the field keeps the focus for typing again.
                 if self.show_suggestions {
@@ -5131,13 +5135,13 @@ mod tests {
             ..App::default()
         };
         // Browsing the suggestions had put one in the field: Escape gives back what was typed.
-        let _ = app.update(Message::SearchFieldEscape);
+        let _ = app.update(Message::SearchFieldEscape { repeat: false });
         assert!(!app.show_suggestions);
         assert_eq!(app.search_query, "daft");
-        let _ = app.update(Message::SearchFieldEscape);
+        let _ = app.update(Message::SearchFieldEscape { repeat: false });
         assert!(app.search_query.is_empty());
         // An empty field has nothing more to undo.
-        let _ = app.update(Message::SearchFieldEscape);
+        let _ = app.update(Message::SearchFieldEscape { repeat: false });
         assert!(app.search_query.is_empty());
     }
 
