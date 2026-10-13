@@ -522,9 +522,15 @@ impl App {
             .duration
             .or_else(|| self.shown_track().and_then(|track| self.duration_of(track)))
             .unwrap_or_default();
+        // Before the length is known the rail cannot place the position, but the time still runs.
+        let elapsed = if max_position > 0.0 {
+            shown
+        } else {
+            self.playback_status.position.as_secs_f32()
+        };
         row![
             label(
-                format_duration(std::time::Duration::from_secs_f32(shown)),
+                format_duration(std::time::Duration::from_secs_f32(elapsed)),
                 time_size
             )
             .color(DIM),
@@ -550,8 +556,6 @@ impl App {
             .into()
     }
 
-    /// Phone-width player: a full-width seek rail on top, then the cover,
-    /// title and the three main transport buttons.
     /// The mini player's second line: the artist, or the seek notice for a moment, as in the bar.
     fn mini_subtitle(&self, artist: &str, width: f32) -> Element<'_, Message> {
         if self.seek_notice.is_some() {
@@ -565,6 +569,8 @@ impl App {
         self.artist_link(artist, width, 12.0, DIM)
     }
 
+    /// Phone-width player: a full-width seek rail on top, then the cover,
+    /// title and the three main transport buttons.
     fn mini_player(&self, width: f32) -> Element<'_, Message> {
         let track = self.shown_track();
         let max_position = self

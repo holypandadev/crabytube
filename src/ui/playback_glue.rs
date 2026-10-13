@@ -696,7 +696,10 @@ impl App {
                 if tracks.is_empty() {
                     return Task::none();
                 }
+                // Shuffle stays on, as the button shows, and is kept for the next start.
                 self.shuffle = true;
+                self.preferences.shuffle = true;
+                self.persist();
                 let mut shuffled: Vec<Track> = tracks.to_vec();
                 shuffled.shuffle(&mut rand::thread_rng());
                 if shuffled.len() > 1
@@ -882,9 +885,11 @@ impl App {
             Message::SetVolume(volume) => {
                 self.volume_rail.touch(std::time::Instant::now());
                 self.preferences.volume = volume;
-                if !self.preferences.muted {
-                    self.playback.set_volume(volume);
+                // Moving the volume ends the mute, with the slider as with the wheel and the keys.
+                if self.preferences.muted {
+                    return self.update(Message::Preference(Preference::Muted(false)));
                 }
+                self.playback.set_volume(volume);
             }
             Message::SeekChanged(position) => self.seek_preview = Some(position),
             Message::SeekReleased => {

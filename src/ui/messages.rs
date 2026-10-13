@@ -144,8 +144,7 @@ pub(super) enum Message {
     ImportLocalData,
     LyricsScrolled(AbsoluteOffset),
     ResumeLyricsFollow,
-    /// Steps the current song's lyrics offset. No control in the interface sends it at the moment.
-    #[allow(dead_code)]
+    /// Steps the current song's lyrics offset: the Earlier and Later buttons over the lyrics.
     AdjustLyricsOffset(i64),
     RetryCollection,
     RetryCollectionMore,

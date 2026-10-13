@@ -184,8 +184,6 @@ impl App {
         }
     }
 
-    /// One setting: label (and optional hint) on the left, control on the right. Narrow windows
-    /// put the control under the label.
     /// Cancel and confirm for an inline confirmation. Cancel leaves the setting as it was.
     fn confirm_buttons(&self, confirm: &'static str, message: Message) -> Element<'_, Message> {
         row![
@@ -283,6 +281,8 @@ impl App {
         }
     }
 
+    /// One setting: label (and optional hint) on the left, control on the right. Narrow windows
+    /// put the control under the label.
     fn setting<'a>(
         &self,
         title: &'static str,

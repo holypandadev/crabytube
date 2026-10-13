@@ -1153,10 +1153,12 @@ impl App {
                     Arc::make_mut(&mut self.favorites).retain(|t| t.video_id != video_id);
                     self.favorites_context = Arc::from(self.favorites.as_slice());
                 } else {
+                    // The playing track counts too: after an import it may be in neither list.
                     let track = self
                         .queue
                         .iter()
                         .chain(self.search_results.iter())
+                        .chain(self.playback_status.track.iter())
                         .find(|t| t.video_id == video_id)
                         .cloned();
                     if let Some(track) = track {
