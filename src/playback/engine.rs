@@ -435,6 +435,17 @@ struct AudioSource {
     in_underrun: bool,
 }
 
+/// A source taken off the output in the middle of a chunk never plays the rest of it. That rest
+/// counts as played, so the samples still buffered come to nothing at the end of the track.
+impl Drop for AudioSource {
+    fn drop(&mut self) {
+        let rest = self.current.len().saturating_sub(self.index);
+        if rest > 0 {
+            self.cursor.fetch_add(rest as u64, Ordering::Relaxed);
+        }
+    }
+}
+
 impl Iterator for AudioSource {
     type Item = f32;
 
@@ -856,9 +867,9 @@ async fn actor(
                         let _ = events_tx.send(Event::TrackEnded { generation });
                     // A live broadcast has no position to go back to.
                     } else if let Some(audio) = active.as_ref().filter(|_| !status.live) {
-                        // The output lets go of the playing source before the decoder moves. A source still
-                        // playing could take chunks of the new position and drop the rest of one when it is
-                        // cleared; the count of buffered samples would then wait for them at the end of the track.
+                        // The output takes the playing source off before the decoder moves. It may still take a
+                        // few milliseconds of the new position before it stops; what it drops of a chunk counts
+                        // as played (see `AudioSource`'s `Drop`), so the end of the track is still found.
                         clear_output(&mut output);
                         seek_generation = seek_generation.wrapping_add(1);
                         let current_seek_generation = seek_generation;
@@ -1472,6 +1483,17 @@ impl PlaybackOutput {
     fn is_lost(&self) -> bool {
         self._device.is_lost()
     }
+
+    /// Takes every source off the output, paused, without waiting for the audio thread: a new
+    /// player takes the place of the old one, which stops at its next turn. rodio's own `clear`
+    /// waits until the audio thread lets go of the source, a whole device buffer, and for ever
+    /// when the device has gone away.
+    fn clear(&mut self) {
+        let player = Player::connect_new(self._device.mixer());
+        player.set_volume(self.player.volume());
+        player.pause();
+        self.player = player;
+    }
 }
 
 /// The position the listener hears: the pulled position, less what the device still has to play.
@@ -1492,15 +1514,14 @@ fn audible_position(
     }
 }
 
-/// Takes every source off the output. Clearing waits until the audio thread lets go of the source, which
-/// the stream of a device that went away never does, so such an output is dropped instead and opened
-/// again when audio needs it.
+/// Takes every source off the output. The stream of a device that went away plays nothing more, so
+/// such an output is dropped instead and opened again when audio needs it.
 fn clear_output(output: &mut Option<PlaybackOutput>) {
     if output.as_ref().is_some_and(PlaybackOutput::is_lost) {
         *output = None;
     }
-    if let Some(output) = output.as_ref() {
-        output.player.clear();
+    if let Some(output) = output.as_mut() {
+        output.clear();
     }
 }
 
@@ -2237,6 +2258,34 @@ mod tests {
         assert_eq!(underruns.load(Ordering::Relaxed), 2);
         assert_eq!(cursor.load(Ordering::Relaxed), 2);
         assert!(first_sample_output.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_source_dropped_in_the_middle_of_a_chunk_counts_its_rest_as_played() {
+        let (chunk_tx, samples) = bounded(4);
+        let cursor = Arc::new(AtomicU64::new(0));
+        chunk_tx.send(vec![0.1, 0.2, 0.3, 0.4, 0.5]).unwrap();
+        let mut source = AudioSource {
+            samples,
+            current: Vec::new(),
+            index: 0,
+            cursor: Arc::clone(&cursor),
+            rate: NonZeroU32::new(48_000).unwrap(),
+            channels: NonZeroU16::new(1).unwrap(),
+            duration: None,
+            first_sample_output: Arc::new(AtomicBool::new(false)),
+            underruns: Arc::new(AtomicU64::new(0)),
+            drained: bounded::<()>(1).0,
+            recycled: bounded::<Vec<f32>>(1).0,
+            in_underrun: false,
+        };
+        assert_eq!(source.next(), Some(0.1));
+        assert_eq!(source.next(), Some(0.2));
+        assert_eq!(cursor.load(Ordering::Relaxed), 2);
+        // Released during a pause or taken off for a seek: the three samples it held are gone, and
+        // the count of what the decoder handed over and what was played agrees again.
+        drop(source);
+        assert_eq!(cursor.load(Ordering::Relaxed), 5);
     }
 
     #[test]
