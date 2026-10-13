@@ -625,6 +625,8 @@ async fn actor(
     let mut active: Option<ActiveAudio> = None;
     let mut output: Option<PlaybackOutput> = None;
     let mut output_device_id: Option<String> = None;
+    // When the output was last opened again after its device went away.
+    let mut reopened_after_loss: Option<Instant> = None;
     let mut paused_by_user = false;
     // Counts pauses, so a release timer from an earlier pause is ignored.
     let mut pause_serial = 0_u64;
@@ -1099,7 +1101,8 @@ async fn actor(
                             info!(position_ms = requested.as_millis(), "seek");
                         }
                         (Ok(()), Some(audio), None) => {
-                            // Only a paused track loses its output; the new position waits for the resume.
+                            // The output was released in a long pause, or dropped because its device went
+                            // away. A paused track waits for the resume; otherwise the next tick opens it.
                             audio.first_sample_output.store(false, Ordering::Relaxed);
                             observed_underruns = audio.underruns.load(Ordering::Relaxed);
                             status.position = position(&audio.cursor, audio.rate, audio.channels);
@@ -1196,8 +1199,17 @@ async fn actor(
                         // output is opened again, on the system default if the chosen device is gone. With no
                         // device at all, playback pauses and Play opens it later. A seek opens it once it lands.
                         output = None;
-                        match reopen_output(audio, status.volume, output_device_id.as_deref()) {
+                        // A device that goes away again right after it was opened, as when a remote
+                        // session is closing, is not chased tick after tick: playback pauses instead.
+                        let lost_again = reopened_after_loss.is_some_and(|at| at.elapsed() < REOPEN_SETTLE);
+                        let reopened = if lost_again {
+                            Err(StreamError::AudioDevice("the audio device keeps going away".into()))
+                        } else {
+                            reopen_output(audio, status.volume, output_device_id.as_deref())
+                        };
+                        match reopened {
                             Ok(opened) => {
+                                reopened_after_loss = Some(Instant::now());
                                 // Buffering and seeking start the player themselves when they are done.
                                 if status.state != PlaybackState::Playing {
                                     opened.player.pause();
@@ -1535,6 +1547,10 @@ fn audible_position(
         None => position(&audio.cursor, audio.rate, audio.channels),
     }
 }
+
+/// Time an output opened again after its device went away must last before another loss is met by
+/// opening it again rather than by a pause.
+const REOPEN_SETTLE: Duration = Duration::from_secs(2);
 
 /// Takes every source off the output. The stream of a device that went away plays nothing more, so
 /// such an output is dropped instead and opened again when audio needs it.
