@@ -1019,7 +1019,6 @@ where
         running.push(better_lyrics_qq_provider(client, params).boxed());
         running.push(better_lyrics_kugou_provider(client, params).boxed());
     }
-    let started = 4_usize;
     let mut best_line: Option<Lyrics> = None;
     let mut best_plain: Option<Lyrics> = None;
     // The first result that does not name its track, and when it arrived.
@@ -1079,7 +1078,9 @@ where
     if let Some((lyrics, _)) = unverified {
         return Ok(lyrics);
     }
-    if unreachable == started {
+    // With any provider unreachable, "no lyrics" is not known yet: the answer asks for another try and
+    // is not kept, where a plain "not found" would be kept for a day.
+    if unreachable > 0 {
         return Err(
             "Lyrics providers are unreachable. Check your connection and try again.".into(),
         );
