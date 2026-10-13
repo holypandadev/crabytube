@@ -859,7 +859,7 @@ fn parse_catalog_results(payload: &Value) -> Vec<HomeItem> {
         match v {
             Value::Object(map) => {
                 for (key, child) in map {
-                    // A card whose subtitle reads "Artist" heads that artist's shelf of songs.
+                    // A card whose title opens an artist heads that artist's shelf of songs.
                     let shelf_artist = if key == "musicCardShelfRenderer" {
                         artist_card_name(child)
                     } else {
@@ -896,14 +896,25 @@ fn parse_catalog_results(payload: &Value) -> Vec<HomeItem> {
     });
     out
 }
-/// The artist a "Artist" card names. The songs in its shelf are that artist's,
-/// and their rows leave the artist out of the byline.
+/// The artist an artist card names. The songs in its shelf are that artist's, and their rows
+/// leave the artist out of the byline. The card is known by the page its title opens, since the
+/// word "Artist" in its subtitle comes in the language of the interface.
 fn artist_card_name(card: &Value) -> Option<String> {
-    let subtitle = text_value(card.get("subtitle")?)?;
-    if !subtitle.trim_start().starts_with("Artist") {
+    let title = card.get("title")?;
+    let opens_artist = title
+        .get("runs")
+        .and_then(Value::as_array)
+        .is_some_and(|runs| {
+            runs.iter().any(|run| {
+                run.pointer("/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType")
+                    .and_then(Value::as_str)
+                    == Some("MUSIC_PAGE_TYPE_ARTIST")
+            })
+        });
+    if !opens_artist {
         return None;
     }
-    text_value(card.get("title")?).filter(|name| !name.trim().is_empty())
+    text_value(title).filter(|name| !name.trim().is_empty())
 }
 
 /// Fills in the artist of a song row that has none, from the card it sits in.
@@ -1400,9 +1411,10 @@ mod tests {
     }
     #[test]
     fn song_rows_in_an_artist_card_take_the_artist_from_the_card() {
+        // The subtitle comes in the language of the interface, here German.
         let payload = json!({"contents":[{"musicCardShelfRenderer":{
-          "title":{"runs":[{"text":"Artist Name"}]},
-          "subtitle":{"runs":[{"text":"Artist"},{"text":" • "},{"text":"1M monthly audience"}]},
+          "title":{"runs":[{"text":"Artist Name","navigationEndpoint":{"browseEndpoint":{"browseId":"UCartist","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}}]},
+          "subtitle":{"runs":[{"text":"Künstler"},{"text":" • "},{"text":"1M monthly audience"}]},
           "contents":[
             {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"card1"},"flexColumns":[
               {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"First"}]}}},

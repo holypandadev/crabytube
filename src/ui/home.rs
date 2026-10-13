@@ -44,7 +44,8 @@ const SEARCH_HEADER: f32 = SEARCH_TOP + SEARCH_H + SEARCH_MARGIN;
 /// Heading row, its gap, and the two caption lines under each cover.
 const CAROUSEL_CHROME_H: f32 = 24.0 + 18.0 + 10.0 + 20.0 + 18.0;
 const CAROUSEL_DURATION_MS: f32 = 320.0;
-/// YouTube Music's "All-time essentials" shelf in each catalog language the app requests.
+/// YouTube Music's "All-time essentials" shelf, by its title in English and Spanish. In the other
+/// languages Home takes the first shelf of collections instead (see `HomePicks::rebuild`).
 const ESSENTIALS_TITLES: &[&str] = &["all-time essentials", "esenciales de todos los tiempos"];
 const MAX_ITEMS: usize = 30;
 
