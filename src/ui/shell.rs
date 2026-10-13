@@ -863,6 +863,7 @@ fn resize_grips<'a>() -> Element<'a, Message> {
             ),
         ]
         .height(Length::Fill),
+        // The corners are taller than the edge strip, so the strip is held to the bottom edge.
         row![
             corner(Direction::SouthWest, Interaction::ResizingDiagonallyUp),
             grip(
@@ -872,7 +873,8 @@ fn resize_grips<'a>() -> Element<'a, Message> {
                 Length::Fixed(GRIP)
             ),
             corner(Direction::SouthEast, Interaction::ResizingDiagonallyDown),
-        ],
+        ]
+        .align_y(Alignment::End),
     ]
     .into()
 }
