@@ -36,6 +36,18 @@ impl fmt::Display for OutputDeviceChoice {
 }
 
 pub fn enumerate_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
+    without_panics(list_output_devices)
+}
+
+/// Runs a device query of cpal, which on Windows panics when the audio service cannot create its
+/// device enumerator, as when the remote desktop session that carried the audio has just ended.
+/// That is reported as an error like any other missing device.
+fn without_panics<T>(query: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(query))
+        .unwrap_or_else(|_| Err(String::from("The audio system is not available")))
+}
+
+fn list_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
     let host = cpal::default_host();
     let default_id = host
         .default_output_device()
@@ -73,6 +85,10 @@ pub fn enumerate_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
 }
 
 pub fn open_output_device(selected_id: Option<&str>) -> Result<(OutputStream, String), String> {
+    without_panics(|| open_device(selected_id))
+}
+
+fn open_device(selected_id: Option<&str>) -> Result<(OutputStream, String), String> {
     let host = cpal::default_host();
     let device = match selected_id {
         Some(id) => {
@@ -281,6 +297,16 @@ where
 mod tests {
     use super::{OutputDeviceChoice, enumerate_output_devices, open_output_device};
     use std::time::Duration;
+
+    #[test]
+    fn a_panic_in_a_device_query_is_reported_as_an_error() {
+        let answer: Result<(), String> = super::without_panics(|| panic!("Class not registered"));
+        assert_eq!(
+            answer,
+            Err(String::from("The audio system is not available"))
+        );
+        assert_eq!(super::without_panics(|| Ok(7)), Ok(7));
+    }
 
     #[test]
     fn only_a_device_that_went_away_ends_the_stream() {
