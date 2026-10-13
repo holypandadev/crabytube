@@ -472,31 +472,61 @@ pub fn qrc(input: &str) -> Option<Lyrics> {
 
 async fn json(client: &reqwest::Client, url: &str, params: &[(&str, String)]) -> Option<Value> {
     let mut url = reqwest::Url::parse(url).ok()?;
+    // Only the host is logged: the query names the track, and the log never holds addresses.
+    let host = url.host_str().unwrap_or_default().to_owned();
+    let failed = |reason: &str| {
+        info!(host, reason, "lyrics provider gave no answer");
+        None
+    };
     url.query_pairs_mut()
         .extend_pairs(params.iter().map(|(key, value)| (*key, value.as_str())));
-    let r = client
+    let response = match client
         .get(url)
         .timeout(Duration::from_secs(6))
         .header(reqwest::header::USER_AGENT, "CrabyTube/0.1")
         .send()
         .await
-        .ok()?
-        .error_for_status()
-        .ok()?;
-    if r.content_length().is_some_and(|n| n > 2 * 1024 * 1024) {
-        return None;
+    {
+        Ok(response) => response,
+        Err(error) => return failed(request_failure(&error)),
+    };
+    let status = response.status();
+    if !status.is_success() {
+        return failed(&format!("HTTP {}", status.as_u16()));
+    }
+    if response
+        .content_length()
+        .is_some_and(|n| n > 2 * 1024 * 1024)
+    {
+        return failed("answer too large");
     }
     use futures_util::StreamExt;
-    let mut stream = r.bytes_stream();
+    let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.ok()?;
+        let Ok(chunk) = chunk else {
+            return failed("answer cut off");
+        };
         if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
-            return None;
+            return failed("answer too large");
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes).ok()
+    match serde_json::from_slice(&bytes) {
+        Ok(value) => Some(value),
+        Err(_) => failed("answer is not JSON"),
+    }
+}
+
+/// Why a request got no response, without the request's address, which the error text carries.
+fn request_failure(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timed out"
+    } else if error.is_connect() {
+        "could not connect"
+    } else {
+        "request failed"
+    }
 }
 fn shared_client() -> Result<reqwest::Client, String> {
     crate::network::shared()
