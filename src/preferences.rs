@@ -527,7 +527,7 @@ impl Snapshot {
             .window_height
             .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
         self.preferences.lyrics_offset_ms = self.preferences.lyrics_offset_ms.clamp(-5000, 5000);
-        self.preferences.lyrics_font_size = self.preferences.lyrics_font_size.clamp(12.0, 22.0);
+        self.preferences.lyrics_font_size = self.preferences.lyrics_font_size.clamp(12.0, 26.0);
         if self
             .preferences
             .audio_output_device_id
