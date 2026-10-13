@@ -52,6 +52,9 @@ flatpak install --user CrabyTube.flatpak
 If Flatpak asks for a runtime, allow it; it comes from Flathub. Then start CrabyTube from your
 application menu.
 
+The Flatpak has no access to your Documents folder, so Settings → Export and Import use
+`~/.var/app/dev.holypanda.CrabyTube/data/crabytube-backup.json` instead.
+
 ### Windows
 
 1. Download the `.zip` file and extract it to a folder of your choice. Keep all the files together.

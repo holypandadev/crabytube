@@ -20,12 +20,14 @@ pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir()
 }
 
-/// The folder that exports and backups are written to.
+/// The folder that exports and backups are written to. A Flatpak sandbox has no Documents folder,
+/// so there they go to the app's data folder, which the user can open as
+/// ~/.var/app/dev.holypanda.CrabyTube/data; the notice of an export names the full path.
 pub fn document_dir() -> Option<PathBuf> {
     if cfg!(test) {
         return Some(test_root().join("documents"));
     }
-    dirs::document_dir()
+    dirs::document_dir().or_else(|| crate::flatpak::in_flatpak().then(dirs::data_dir).flatten())
 }
 
 /// The folder for per-machine data, such as the log file on Windows and macOS.
