@@ -196,6 +196,9 @@ pub(super) enum Message {
     SeekNoticeExpired(u64),
     /// Fires once a resize settles; see the `Resized` handler.
     ResizeWorkDue(u64),
+    /// Sent after the sizes of a burst of resize events were read; the zoom they ended with is the
+    /// one Iced reads the next ones with.
+    ZoomSettled,
     /// Diagnostics-only: one step of the `--scroll-test` sweep.
     #[cfg(feature = "diagnostics")]
     DiagnosticScrollStep,

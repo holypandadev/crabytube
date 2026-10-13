@@ -219,6 +219,11 @@ struct App {
     area: iced::Size,
     /// Interface zoom that keeps proportions when the window grows (see `ui_zoom_for`).
     ui_zoom: f32,
+    /// The zoom Iced divides the window sizes it reports by: the one it was last given, not
+    /// `ui_zoom`, which a burst of resize events changes with each of them.
+    zoom_applied: f32,
+    /// A `ZoomSettled` message is on its way, to be handled once the burst of events is.
+    zoom_settle_pending: bool,
     /// Window size in unzoomed logical pixels.
     os_window: (f32, f32),
     /// Until when newly arrived covers are still fading in.
@@ -273,6 +278,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::MonitorMeasured(_)
         | Message::SavedWindowMeasured { .. }
         | Message::ResizeWorkDue(_)
+        | Message::ZoomSettled
         | Message::DisplayScaleChanged(_)
         | Message::WindowFocusChanged(_)
         | Message::WindowMinimizedChecked(_)
@@ -782,14 +788,22 @@ impl App {
                 });
             }
             Message::Resized { width, height } => {
-                // Sizes arrive divided by the zoom in effect; undo it first.
-                self.os_window = (width * self.ui_zoom, height * self.ui_zoom);
+                // Sizes arrive divided by the zoom Iced had when it read them. A burst of these
+                // events, as a resize by hand or the animation of the zoom button makes, is read
+                // with one zoom, so each is undone with it: `ui_zoom` changes with every event,
+                // and using it made the sizes, and the zoom, run away.
+                self.os_window = (width * self.zoom_applied, height * self.zoom_applied);
                 self.apply_ui_zoom();
+                let settle = if std::mem::replace(&mut self.zoom_settle_pending, true) {
+                    Task::none()
+                } else {
+                    Task::done(Message::ZoomSettled)
+                };
                 // On macOS the question is asked once the resizing settles: for a window without a
                 // border, winit answers it by changing the window style for a moment, and doing
                 // that on every event of a resize by hand ends the resize.
                 #[cfg(target_os = "macos")]
-                return self.schedule_resize_work();
+                return Task::batch([settle, self.schedule_resize_work()]);
                 // Whether the window is maximized decides if this size is kept.
                 #[cfg(not(target_os = "macos"))]
                 return {
@@ -797,7 +811,7 @@ impl App {
                     let geometry = iced::window::latest()
                         .and_then(iced::window::is_maximized)
                         .map(move |maximized| Message::WindowGeometry { size, maximized });
-                    Task::batch([geometry, self.schedule_resize_work()])
+                    Task::batch([settle, geometry, self.schedule_resize_work()])
                 };
             }
             Message::WindowGeometry { size, maximized } => {
@@ -823,6 +837,7 @@ impl App {
                 // The window and the monitor were measured together, so the same zoom divides
                 // both; it is the zoom in effect now, because the layout has settled.
                 let zoom = self.ui_zoom;
+                self.zoom_applied = zoom;
                 let current = (size.width * zoom, size.height * zoom);
                 // The sizes reported while the window opened mix zooms, so this reading, taken
                 // once the layout is steady, is the one that is kept.
@@ -849,6 +864,10 @@ impl App {
                     })
                 });
                 return Task::batch([reading, fit]);
+            }
+            Message::ZoomSettled => {
+                self.zoom_applied = self.ui_zoom;
+                self.zoom_settle_pending = false;
             }
             Message::ResizeWorkDue(generation) => {
                 if generation == self.resize_work_generation {
@@ -1007,6 +1026,7 @@ impl App {
                     Preference::ScaleWithWindow(v) => {
                         self.preferences.scale_with_window = v;
                         self.apply_ui_zoom();
+                        self.zoom_applied = self.ui_zoom;
                     }
                     Preference::SearchSuggestions(v) => {
                         self.preferences.search_suggestions = v;
@@ -2175,6 +2195,8 @@ impl App {
             volume_rail: now_playing::VolumeRail::default(),
             area: estimated_area(1024.0, 768.0),
             ui_zoom: 1.0,
+            zoom_applied: 1.0,
+            zoom_settle_pending: false,
             os_window: (1024.0, 768.0),
             fade_until: None,
             row_menu: None,
@@ -2237,6 +2259,7 @@ impl App {
             diagnostic_window_size().unwrap_or((window_width, window_height));
         app.os_window = (window_width, window_height);
         app.apply_ui_zoom();
+        app.zoom_applied = app.ui_zoom;
         app.area = estimated_area(app.window_width, app.window_height);
         // The window opens at the saved size (see `run`); read back what the
         // compositor actually gave it.
@@ -5276,11 +5299,55 @@ mod tests {
             width: 900.0,
             height: 700.0,
         });
-        assert_eq!(task.units(), 1);
+        // The work for when it settles, and the message that follows the zoom.
+        assert_eq!(task.units(), 2);
+        // The next event of the burst needs no second one.
+        let next = app.update(Message::Resized {
+            width: 905.0,
+            height: 700.0,
+        });
+        assert_eq!(next.units(), 1);
         let generation = app.resize_work_generation;
         // When the resizing settles, the geometry is asked for.
         let settled = app.update(Message::ResizeWorkDue(generation));
         assert!(settled.units() >= 1);
+    }
+
+    // A burst of resize events is read by Iced with one zoom, and each is undone with it. The
+    // zoom used to change with each event, which sent the sizes and the zoom to their limits.
+    #[test]
+    fn a_burst_of_resize_events_does_not_run_away_with_the_zoom() {
+        let start = ui_zoom_for(1440.0, 900.0, true);
+        let mut app = App {
+            ui_zoom: start,
+            zoom_applied: start,
+            ..App::default()
+        };
+        // The window grows from 1440x900 to 2560x1333, as seen by Iced with the starting zoom.
+        for step in 0..=24 {
+            let t = step as f32 / 24.0;
+            let (width, height) = (1440.0 + 1120.0 * t, 900.0 + 433.0 * t);
+            drop(app.update(Message::Resized {
+                width: width / start,
+                height: height / start,
+            }));
+            assert!(
+                (app.os_window.0 - width).abs() < 0.5,
+                "{step}: {:?}",
+                app.os_window
+            );
+            assert!((app.os_window.1 - height).abs() < 0.5);
+        }
+        assert_eq!(app.ui_zoom, ui_zoom_for(2560.0, 1333.0, true));
+        // Once the burst is over, the zoom it ended with is the one the next sizes are read with.
+        drop(app.update(Message::ZoomSettled));
+        let zoom = app.ui_zoom;
+        drop(app.update(Message::Resized {
+            width: 2560.0 / zoom,
+            height: 1333.0 / zoom,
+        }));
+        assert!((app.os_window.0 - 2560.0).abs() < 0.5);
+        assert_eq!(app.ui_zoom, zoom);
     }
 
     #[test]
