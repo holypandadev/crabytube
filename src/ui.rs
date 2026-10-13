@@ -1624,7 +1624,12 @@ impl App {
                 self.push_history(self.search_query.clone());
                 let navigation = self.navigate(Page::Search);
                 let search = self.start_search(self.search_query.clone(), false);
-                return Task::batch([navigation, search]);
+                // The field lets go of the focus, so ↑ and ↓ move through the results at once, and
+                // Ctrl+K (⌘K) or a click takes it back for a new search.
+                let release = iced::advanced::widget::operate(
+                    iced::advanced::widget::operation::focusable::unfocus(),
+                );
+                return Task::batch([navigation, search, release]);
             }
             Message::CopyToClipboard(text) => {
                 self.copy_notice_count = self.copy_notice_count.wrapping_add(1);
