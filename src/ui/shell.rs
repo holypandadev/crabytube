@@ -194,6 +194,10 @@ impl App {
             .height(Length::Fill)
             .padding(theme::hairline())
             .style(theme::frame);
+        // The system frame of macOS has its own border to resize by.
+        #[cfg(target_os = "macos")]
+        return framed.into();
+        #[cfg(not(target_os = "macos"))]
         iced::widget::stack![framed, resize_grips()].into()
     }
 
@@ -228,7 +232,8 @@ impl App {
         let mut left = row![].height(HEADER_H).align_y(Alignment::Center);
         let mut right = row![].height(HEADER_H).align_y(Alignment::Center);
         if cfg!(target_os = "macos") {
-            left = left.push(window_buttons(true)).push(drag());
+            // The buttons are the ones of the system frame, drawn over the left of the bar.
+            left = left.push(Space::new().width(NATIVE_BUTTONS_W)).push(drag());
             right = right
                 .push(drag())
                 .push(brand)
@@ -256,7 +261,11 @@ impl App {
         if self.window_width < super::home::NARROW_W {
             return false;
         }
-        let buttons = 3.0 * (HEADER_H + 1.0);
+        let buttons = if cfg!(target_os = "macos") {
+            NATIVE_BUTTONS_W
+        } else {
+            3.0 * (HEADER_H + 1.0)
+        };
         let brand = BRAND_INSET + LOGO_W + 10.0 + WORDMARK_H * WORDMARK_ASPECT;
         let (left, right) = if cfg!(target_os = "macos") {
             (buttons, brand)
@@ -743,6 +752,9 @@ fn tab_width(title: &str) -> f32 {
     (title.width() as f32 * TEXT_BODY * 0.6 + 2.0 * TAB_PADDING).ceil()
 }
 
+/// The room the three buttons of the system frame take at the left of the bar on macOS.
+const NATIVE_BUTTONS_W: f32 = 80.0;
+
 /// Minimize, maximize and close as square buttons the height of the bar, each with a rule on
 /// the side that faces the page. macOS puts close first.
 fn window_buttons<'a>(macos: bool) -> Element<'a, Message> {
@@ -801,11 +813,13 @@ fn wordmark_handle() -> svg::Handle {
 }
 
 /// Thickness of the invisible strips along the window edges that resize it.
+#[cfg(not(target_os = "macos"))]
 const GRIP: f32 = 6.0;
 
 /// Edge and corner strips that start an interactive resize. The window draws
 /// its own frame, so the compositor offers no resize border of its own. The
 /// middle stays empty, so everything else receives the pointer as usual.
+#[cfg(not(target_os = "macos"))]
 fn resize_grips<'a>() -> Element<'a, Message> {
     use iced::mouse::Interaction;
     use iced::window::Direction;

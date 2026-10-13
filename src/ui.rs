@@ -3424,6 +3424,15 @@ pub fn run() -> iced::Result {
             },
             min_size: Some(iced::Size::new(layout::MIN_WIDTH, layout::MIN_HEIGHT)),
             icon: window_icon(),
+            // The system frame is kept, with its bar transparent and the title hidden, so that the
+            // window has the borders, corners, shadow and buttons of macOS and the bar of the app
+            // fills the top.
+            #[cfg(target_os = "macos")]
+            platform_specific: iced::window::settings::PlatformSpecific {
+                title_hidden: true,
+                titlebar_transparent: true,
+                fullsize_content_view: true,
+            },
             #[cfg(target_os = "linux")]
             platform_specific: iced::window::settings::PlatformSpecific {
                 // Matches the desktop entry of the same name, so docks and task
@@ -3434,7 +3443,7 @@ pub fn run() -> iced::Result {
             ..Default::default()
         })
         .exit_on_close_request(false)
-        .decorations(false)
+        .decorations(cfg!(target_os = "macos"))
         .run()
 }
 

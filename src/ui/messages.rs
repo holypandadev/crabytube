@@ -49,7 +49,9 @@ pub(super) enum Preference {
 #[derive(Clone, Debug)]
 pub(super) enum Message {
     StartDrag,
-    /// Resize from a window edge (the window has no system decorations).
+    /// Resize from a window edge (the window has no system decorations). On macOS the system
+    /// frame does it.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     StartResize(iced::window::Direction),
     MinimizeWindow,
     ToggleMaximize,
