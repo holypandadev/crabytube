@@ -981,31 +981,62 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
     let Value::Array(entries) = value else {
         return Found::Missing;
     };
-    let best = entries
+    if let Some(entry) = lrclib_best(&entries, track, duration, true) {
+        return lrclib_found(entry);
+    }
+    // In Japanese, Chinese or Russian the catalog writes a Western artist's name in that script
+    // ("ダフト・パンク"), which LRCLIB does not know. The title alone, with a record of the same
+    // length, still finds the track.
+    if track
+        .artist
+        .chars()
+        .any(|c| c.is_alphabetic() && !c.is_ascii())
+    {
+        let by_title = vec![("track_name", track.title.clone())];
+        if let Ok(Value::Array(found)) =
+            json(client, "https://lrclib.net/api/search", &by_title).await
+            && let Some(entry) = lrclib_best(&found, track, duration, false)
+        {
+            return lrclib_found(entry);
+        }
+    }
+    // No record of this length has timed lines or text. Text from a record of another length is shown
+    // unsynced and marked, so the timing of that other version is never applied.
+    match fallback_plain(&entries, &track.title, &track.artist) {
+        Some(text) => Found::Plain(Lyrics {
+            source: "LRCLIB".into(),
+            lines: Vec::new(),
+            plain: Some(text),
+            length_mismatch: true,
+        }),
+        None => Found::Missing,
+    }
+}
+
+/// The LRCLIB record for the track: its title, its artist when `check_artist`, and its length, with
+/// timed lines preferred.
+fn lrclib_best<'a>(
+    entries: &'a [Value],
+    track: &Track,
+    duration: Duration,
+    check_artist: bool,
+) -> Option<&'a Value> {
+    entries
         .iter()
         .filter(|v| {
             v.get("trackName")
                 .and_then(Value::as_str)
                 .is_some_and(|s| titles_match(&track.title, s))
-                && v.get("artistName")
-                    .and_then(Value::as_str)
-                    .is_some_and(|s| artists_match(&track.artist, s))
+                && (!check_artist
+                    || v.get("artistName")
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| artists_match(&track.artist, s)))
         })
         .filter(|v| record_matches_duration(v, duration))
-        .min_by_key(|v| v.get("syncedLyrics").and_then(Value::as_str).is_none());
-    let Some(entry) = best else {
-        // No record of this length has timed lines or text. Text from a record of another length is shown
-        // unsynced and marked, so the timing of that other version is never applied.
-        return match fallback_plain(&entries, &track.title, &track.artist) {
-            Some(text) => Found::Plain(Lyrics {
-                source: "LRCLIB".into(),
-                lines: Vec::new(),
-                plain: Some(text),
-                length_mismatch: true,
-            }),
-            None => Found::Missing,
-        };
-    };
+        .min_by_key(|v| v.get("syncedLyrics").and_then(Value::as_str).is_none())
+}
+
+fn lrclib_found(entry: &Value) -> Found {
     if let Some(s) = entry.get("syncedLyrics").and_then(Value::as_str) {
         return Found::Line(lrc(s, "LRCLIB"));
     }
