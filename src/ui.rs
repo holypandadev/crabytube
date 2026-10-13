@@ -3426,12 +3426,12 @@ impl iced::Executor for AppExecutor {
 }
 
 /// Selects the renderer before any thread starts. Iced reads `ICED_BACKEND` at startup:
-/// the CPU renderer is forced unless the saved GPU preference is on, in which case wgpu is
-/// tried first and tiny-skia remains the fallback.
+/// the CPU renderer is forced unless the GPU preference is on (saved, or the default of the
+/// system), in which case wgpu is tried first and tiny-skia remains the fallback.
 pub fn configure_renderer_from_preferences() {
     let gpu = crate::preferences::load(&crate::preferences::state_path())
         .map(|snapshot| snapshot.preferences.gpu_rendering)
-        .unwrap_or(false);
+        .unwrap_or(crate::preferences::GPU_RENDERING_DEFAULT);
     let backend = if gpu { "wgpu,tiny-skia" } else { "tiny-skia" };
     if std::env::var_os("ICED_BACKEND").is_none() {
         // SAFETY: called from main before any other thread is started, so no other thread

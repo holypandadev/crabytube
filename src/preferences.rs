@@ -361,6 +361,10 @@ pub struct Preferences {
     #[serde(default)]
     pub lyrics_offset_order: Vec<String>,
 }
+/// Whether the GPU renders by default. On macOS the CPU renderer stalls a wide window for up to
+/// most of a second while it is resized, and the GPU one costs little more memory there.
+pub const GPU_RENDERING_DEFAULT: bool = cfg!(target_os = "macos");
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -394,7 +398,7 @@ impl Default for Preferences {
             muted: false,
             shuffle: false,
             repeat: RepeatMode::Off,
-            gpu_rendering: false,
+            gpu_rendering: GPU_RENDERING_DEFAULT,
             show_lyrics_default: false,
             search_suggestions: true,
             track_notifications: false,
