@@ -11,7 +11,7 @@
 use std::{
     ptr::NonNull,
     sync::Mutex,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use block2::RcBlock;
@@ -30,8 +30,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 pub use crate::media_session::{CommandReceiver, PlayerState, RemoteCommand, command_stream};
 use crate::media_session::{
-    MediaEvent, NowPlaying, Playback, PlaybackKind, Previous, changes, command_channel,
-    command_for, drain, now_playing, playback,
+    MediaEvent, NowPlaying, Playback, PlaybackKind, Previous, SEEK_TOLERANCE, changes,
+    command_channel, command_for, drain, now_playing, playback,
 };
 
 /// A cover file larger than this is ignored.
@@ -66,8 +66,9 @@ enum Cover {
 }
 
 struct Session {
-    /// The last report the system was given, and when.
-    published: Option<(PlayerState, Instant)>,
+    /// The last report the system was given, and when: by the monotonic clock, which stops while
+    /// the Mac sleeps, and by the wall clock, which does not.
+    published: Option<(PlayerState, Instant, SystemTime)>,
     /// The cover URL of the track that is playing.
     cover_url: Option<String>,
     cover: Cover,
@@ -108,19 +109,28 @@ impl MprisRemote {
             return;
         };
         let now = Instant::now();
+        let wall = SystemTime::now();
         let cover_changed = session.follow_cover(&state, now);
         let previous = session
             .published
             .as_ref()
-            .map(|(state, at)| Previous { state, at: *at });
-        let changes = changes(previous, &state, now);
+            .map(|(state, at, _)| Previous { state, at: *at });
+        let mut changes = changes(previous, &state, now);
+        // The system extrapolates the position by the wall clock. A sleep that the monotonic
+        // clock did not see leaves it ahead of the playback, so the report is sent again.
+        if let Some((published, at, published_wall)) = &session.published
+            && playback(published).kind == PlaybackKind::Playing
+            && slept_since(*at, *published_wall, now, wall)
+        {
+            changes.playback = true;
+        }
         if !changes.any() && !cover_changed {
             return;
         }
         if changes.controls {
             session.set_controls(&state);
         }
-        session.publish(state, now);
+        session.publish(state, now, wall);
     }
 
     pub fn command_receiver(&self) -> CommandReceiver {
@@ -260,7 +270,7 @@ impl Session {
         }
     }
 
-    fn publish(&mut self, state: PlayerState, now: Instant) {
+    fn publish(&mut self, state: PlayerState, now: Instant, wall: SystemTime) {
         let track = now_playing(&state);
         let playback = playback(&state);
         let cover = match &self.cover {
@@ -281,8 +291,18 @@ impl Session {
                 }
             }
         }
-        self.published = Some((state, now));
+        self.published = Some((state, now, wall));
     }
+}
+
+/// Whether the Mac slept, or the process stood still, between the last report and now: the wall
+/// clock moved further than the monotonic one by more than the tolerance for the progress tick.
+/// A wall clock that went back counts as no sleep.
+fn slept_since(at: Instant, wall_at: SystemTime, now: Instant, wall_now: SystemTime) -> bool {
+    let monotonic = now.saturating_duration_since(at);
+    wall_now
+        .duration_since(wall_at)
+        .is_ok_and(|wall| wall.saturating_sub(monotonic) > SEEK_TOLERANCE)
 }
 
 fn playback_state(kind: PlaybackKind) -> MPNowPlayingPlaybackState {
@@ -389,6 +409,36 @@ mod tests {
             can_go_next: true,
             ..PlayerState::default()
         }
+    }
+
+    #[test]
+    fn a_sleep_the_monotonic_clock_did_not_see_is_noticed() {
+        let at = Instant::now();
+        let wall_at = SystemTime::now();
+        let second = Duration::from_secs(1);
+        // Playback that went on: both clocks moved the same.
+        assert!(!slept_since(
+            at,
+            wall_at,
+            at + 30 * second,
+            wall_at + 30 * second
+        ));
+        // The progress tick is a little late on one clock or the other.
+        assert!(!slept_since(
+            at,
+            wall_at,
+            at + 5 * second,
+            wall_at + 5 * second + Duration::from_millis(900)
+        ));
+        // A minute of sleep: the wall clock moved, the monotonic one hardly did.
+        assert!(slept_since(at, wall_at, at + second, wall_at + 61 * second));
+        // A wall clock set back is not a sleep.
+        assert!(!slept_since(
+            at,
+            wall_at + 100 * second,
+            at + second,
+            wall_at
+        ));
     }
 
     fn png_file(name: &str) -> std::path::PathBuf {
