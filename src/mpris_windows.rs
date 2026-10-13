@@ -110,6 +110,18 @@ pub struct MprisRemote {
 impl MprisRemote {
     pub fn start() -> Self {
         let (sender, commands) = command_channel();
+        // The tests build an app many times, and creating and dropping the media player of
+        // Windows for each one now and then crashed the test process on a machine without
+        // audio. Only the test of the media session starts it.
+        #[cfg(test)]
+        if !tests::MEDIA_SESSION_UNDER_TEST.load(std::sync::atomic::Ordering::Relaxed) {
+            return Self {
+                commands,
+                worker: None,
+                reported: Mutex::new(None),
+                failure: Some("The system media controls are not started in tests".into()),
+            };
+        }
         let (jobs, inbox) = mpsc::channel();
         let (started, outcome) = mpsc::sync_channel(1);
         let cover_pending = Arc::new(AtomicBool::new(false));
@@ -499,6 +511,9 @@ fn thumbnail(bytes: &[u8]) -> windows::core::Result<RandomAccessStreamReference>
 mod tests {
     use super::*;
 
+    /// Set by the test that needs the real media session; see `MprisRemote::start`.
+    pub(super) static MEDIA_SESSION_UNDER_TEST: AtomicBool = AtomicBool::new(false);
+
     #[test]
     fn the_buttons_of_the_system_become_the_commands_the_app_handles() {
         let command = command_for_button;
@@ -612,6 +627,7 @@ mod tests {
         };
         // SAFETY: plain initialization of the Windows Runtime on the test thread.
         let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+        MEDIA_SESSION_UNDER_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
         let remote = MprisRemote::start();
         assert!(remote.failure.is_none(), "{}", remote.status());
         let manager = Manager::RequestAsync().unwrap().join().unwrap();
