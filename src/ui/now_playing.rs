@@ -235,17 +235,24 @@ impl App {
             meta.push(source.title.clone());
             meta.push(self.tr_string(format!("{} songs", source.track_count)));
         }
+        // A failed track says why here too: this page has no player bar to show it.
+        let details = match self.playback_failure() {
+            Some(failure) => {
+                label(fit(&failure, text_width, TEXT_CAPTION), TEXT_CAPTION).color(theme::ALERT)
+            }
+            None => label(
+                fit(&meta.join(" · "), text_width, TEXT_CAPTION),
+                TEXT_CAPTION,
+            )
+            .color(DIM),
+        };
         column![
             column![
                 text(fit(display_title(&track.title), text_width, TEXT_TITLE))
                     .size(TEXT_TITLE)
                     .font(MONO),
                 self.artist_link(&track.artist, text_width, TEXT_SECTION, INK),
-                label(
-                    fit(&meta.join(" · "), text_width, TEXT_CAPTION),
-                    TEXT_CAPTION
-                )
-                .color(DIM),
+                details,
             ]
             .spacing(4)
             .width(Length::Fill),

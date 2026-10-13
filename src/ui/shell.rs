@@ -558,6 +558,13 @@ impl App {
 
     /// The mini player's second line: the artist, or the seek notice for a moment, as in the bar.
     fn mini_subtitle(&self, artist: &str, width: f32) -> Element<'_, Message> {
+        if let Some(failure) = self.playback_failure() {
+            return text(fit(&failure, width, TEXT_CAPTION))
+                .size(TEXT_CAPTION)
+                .font(MONO)
+                .color(theme::ALERT)
+                .into();
+        }
         if self.seek_notice.is_some() {
             let notice = self.tr("Couldn't seek there");
             return text(fit(&notice, width, TEXT_CAPTION))
@@ -567,6 +574,18 @@ impl App {
                 .into();
         }
         self.artist_link(artist, width, 12.0, DIM)
+    }
+
+    /// Why the track stopped, in the interface language, while playback is in its error state.
+    pub(super) fn playback_failure(&self) -> Option<String> {
+        (self.playback_status.state == PlaybackState::Error).then(|| {
+            self.tr(self
+                .playback_status
+                .error
+                .as_deref()
+                .unwrap_or("Playback failed"))
+                .into_owned()
+        })
     }
 
     /// Phone-width player: a full-width seek rail on top, then the cover,
@@ -661,14 +680,7 @@ impl App {
             match self.playback_status.state {
                 PlaybackState::Resolving => Some(self.tr("Loading…").into_owned()),
                 PlaybackState::Buffering => Some(self.tr("Buffering…").into_owned()),
-                PlaybackState::Error => Some(
-                    self.tr(self
-                        .playback_status
-                        .error
-                        .as_deref()
-                        .unwrap_or("Playback failed"))
-                        .into_owned(),
-                ),
+                PlaybackState::Error => self.playback_failure(),
                 _ => None,
             }
         };
