@@ -306,7 +306,7 @@ fn multi_try(solvers: &[String], kind: &str) -> String {
     try {{ _results.add(_generator(_input)); }} catch (e) {{ errors.push(e); }}
   }}
   if (!_results.size) throw "no solutions: " + errors.join(", ");
-  if (_results.size !== 1) throw "invalid solutions: " + [..._results].join(", ");
+  if (_results.size !== 1) throw "invalid solutions: " + _results.size + " different results";
   return _results.values().next().value;
 }}"#,
             wrappers.join(", ")
