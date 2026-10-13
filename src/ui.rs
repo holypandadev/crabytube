@@ -489,7 +489,10 @@ impl App {
                             .map(|d| d.as_nanos())
                             .unwrap_or(0)
                     ));
-                    std::fs::write(&tmp, &bytes).map_err(|error| error.to_string())?;
+                    // The backup holds the history, the queue and the favorites: readable by the
+                    // user alone, like the state it comes from.
+                    crate::playback::pot::write_private_file(&tmp, &bytes)
+                        .map_err(|error| error.to_string())?;
                     std::fs::rename(&tmp, &path).map_err(|error| error.to_string())?;
                     Ok::<_, String>(path.display().to_string())
                 })
