@@ -626,9 +626,15 @@ async fn actor(
                         });
                         tokio::spawn(async move {
                             let mut track = track;
-                            let Ok(stream) = resolver.resolve(&TrackId(track.video_id.clone()), AudioQuality::Auto, token.clone()).await else {
-                                let _ = events_tx.send(Event::PrefetchFailed { generation: prefetch_generation });
-                                return;
+                            let stream = match resolver.resolve(&TrackId(track.video_id.clone()), AudioQuality::Auto, token.clone()).await {
+                                Ok(stream) => stream,
+                                Err(error) => {
+                                    if !matches!(error, StreamError::Cancelled) {
+                                        info!(error = %redact_urls(&format!("{error:?}")), "next track could not be resolved ahead");
+                                    }
+                                    let _ = events_tx.send(Event::PrefetchFailed { generation: prefetch_generation });
+                                    return;
+                                }
                             };
                             stream.fill_track(&mut track);
                             if let Some((duration, source)) = prepare_stream(stream, token.clone(), prefetch_generation, events_tx.clone(), false).await {
@@ -863,7 +869,7 @@ async fn actor(
                                     stale.discard();
                                 }
                             }
-                            Err(error) => debug!(error = %redact_urls(&format!("{error:?}")), "next track could not be prepared ahead"),
+                            Err(error) => info!(error = %redact_urls(&format!("{error:?}")), "next track could not be prepared ahead"),
                         }
                     } else {
                         // Its prefetch was superseded or stopped, so no Play wants this stream.
