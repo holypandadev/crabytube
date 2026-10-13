@@ -813,9 +813,16 @@ async fn actor(
                                         true
                                     }
                                     Err(error) => {
+                                        // No device to play on: the track stops with the reason shown. The
+                                        // tick stays off, or it would try again and replace that reason.
                                         transition(&mut status, PlaybackState::Error);
                                         status.error = Some(error.user_message());
                                         status.output_device = None;
+                                        paused_by_user = true;
+                                        let _ = audio.worker.send(WorkerCommand::Stop);
+                                        if let Some(token) = cancellation.take() {
+                                            token.cancel();
+                                        }
                                         false
                                     }
                                 }
