@@ -95,7 +95,19 @@ pub struct MprisRemote {
     commands: CommandReceiver,
     wake: SyncSender<()>,
     status: Arc<Mutex<String>>,
+    /// The saved cover file of the last cover URL; see `local_art`.
+    art: Mutex<Option<ArtFile>>,
 }
+
+/// A cover URL and the file the app saved for it, as a `file://` URL once it exists.
+struct ArtFile {
+    url: String,
+    file: Option<String>,
+    checked: Instant,
+}
+
+/// How often a cover that is not saved yet is looked for again.
+const ART_RECHECK: Duration = Duration::from_secs(1);
 
 impl MprisRemote {
     pub fn start() -> Self {
@@ -126,6 +138,7 @@ impl MprisRemote {
                 commands,
                 wake,
                 status,
+                art: Mutex::new(None),
             };
         }
         let worker_state = Arc::clone(&state);
@@ -211,10 +224,14 @@ impl MprisRemote {
             commands,
             wake,
             status,
+            art: Mutex::new(None),
         }
     }
 
-    pub fn update(&self, state: PlayerState) {
+    pub fn update(&self, mut state: PlayerState) {
+        // The shell is given the cover the app saved, not the address on Google's servers, so it
+        // does not download it again by itself, outside the app's sandbox and proxy.
+        state.art_url = self.local_art(state.art_url.as_deref());
         if let Ok(mut current) = self.state.lock() {
             if *current == state {
                 return;
@@ -222,6 +239,28 @@ impl MprisRemote {
             *current = state;
         }
         let _ = self.wake.try_send(());
+    }
+
+    /// The `file://` URL of the cover saved for `url`, or none until it is saved. The disk is
+    /// looked at again at most once a second while the cover is missing.
+    fn local_art(&self, url: Option<&str>) -> Option<String> {
+        let url = url?;
+        let mut art = self.art.lock().ok()?;
+        if let Some(known) = art.as_ref()
+            && known.url == url
+            && (known.file.is_some() || known.checked.elapsed() < ART_RECHECK)
+        {
+            return known.file.clone();
+        }
+        let file = crate::artwork::saved_cover_path(url)
+            .and_then(|path| reqwest::Url::from_file_path(path).ok())
+            .map(String::from);
+        *art = Some(ArtFile {
+            url: url.to_owned(),
+            file: file.clone(),
+            checked: Instant::now(),
+        });
+        file
     }
 
     pub fn command_receiver(&self) -> CommandReceiver {
@@ -508,6 +547,7 @@ fn state_properties_changed(old: &PlayerState, new: &PlayerState) -> bool {
     old.title != new.title
         || old.artist != new.artist
         || old.album != new.album
+        || old.art_url != new.art_url
         || old.playback_status != new.playback_status
         || old.duration != new.duration
         || old.volume != new.volume
@@ -539,6 +579,7 @@ fn emit_changed(connection: &zbus::blocking::Connection, old: &PlayerState, new:
     if old.title != new.title
         || old.artist != new.artist
         || old.album != new.album
+        || old.art_url != new.art_url
         || old.duration != new.duration
     {
         changed.insert("Metadata".into(), variant(metadata(new)));
