@@ -2831,7 +2831,9 @@ impl App {
     }
 
     fn load_more_catalog_task(&mut self) -> Task<Message> {
-        if self.search_loading || self.catalog_more_loading {
+        // The page lists a few of each kind; once they are full, more results would be downloaded
+        // and never shown.
+        if self.search_loading || self.catalog_more_loading || !self.search_wants_more() {
             return Task::none();
         }
         let Some(continuation) = self.catalog_continuation.clone() else {

@@ -48,6 +48,9 @@ const CAROUSEL_DURATION_MS: f32 = 320.0;
 /// languages Home takes the first shelf of collections instead (see `HomePicks::rebuild`).
 const ESSENTIALS_TITLES: &[&str] = &["all-time essentials", "esenciales de todos los tiempos"];
 const MAX_ITEMS: usize = 30;
+/// Songs, and collections of each kind, the results page lists.
+const SEARCH_SONGS_SHOWN: usize = 8;
+const SEARCH_COLLECTIONS_SHOWN: usize = 6;
 
 /// The one Home shelf: "All-time essentials", or the first shelf of
 /// collections when the feed does not include it.
@@ -864,12 +867,22 @@ impl App {
         order
     }
 
+    /// Whether more results could still show on the page: until the songs, albums and playlists are
+    /// full, a further page of results may add to them. Artists rarely fill their row and do not
+    /// count.
+    pub(super) fn search_wants_more(&self) -> bool {
+        self.search_songs().len() < SEARCH_SONGS_SHOWN
+            || [HomeItemKind::Album, HomeItemKind::Playlist]
+                .into_iter()
+                .any(|kind| self.search_collections(kind).len() < SEARCH_COLLECTIONS_SHOWN)
+    }
+
     /// Song results the results page lists under "Songs".
     pub(super) fn search_songs(&self) -> Vec<&HomeItem> {
         self.catalog_results
             .iter()
             .filter(|item| item.kind == HomeItemKind::Song && item.track.is_some())
-            .take(8)
+            .take(SEARCH_SONGS_SHOWN)
             .collect()
     }
 
@@ -885,7 +898,7 @@ impl App {
                         .as_ref()
                         .is_some_and(|target| target.is_public_collection())
             })
-            .take(6)
+            .take(SEARCH_COLLECTIONS_SHOWN)
             .collect()
     }
 
