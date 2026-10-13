@@ -316,10 +316,12 @@ pub fn saved_sized(url: &str, max_dim: u32) -> Option<image::Handle> {
     .find_map(|candidate| cached_or_remove_sized(candidate, max_dim))
 }
 
-/// The large cover already saved on disk for this URL. Nothing is downloaded to find it.
+/// The large cover already saved on disk for this URL, or the single file earlier versions kept
+/// for it. Nothing is downloaded to find it.
 pub fn saved_cover_path(url: &str) -> Option<std::path::PathBuf> {
-    let path = variant_cache_path(url, LARGE_MAX);
-    path.is_file().then_some(path)
+    [variant_cache_path(url, LARGE_MAX), legacy_cache_path(url)]
+        .into_iter()
+        .find(|path| path.is_file())
 }
 
 fn legacy_cache_path(url: &str) -> std::path::PathBuf {
