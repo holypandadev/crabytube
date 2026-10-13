@@ -2839,7 +2839,12 @@ impl App {
     fn load_more_catalog_task(&mut self) -> Task<Message> {
         // The page lists a few of each kind; once they are full, more results would be downloaded
         // and never shown.
-        if self.search_loading || self.catalog_more_loading || !self.search_wants_more() {
+        // After a failed page, scrolling does not ask again and again; a new search starts over.
+        if self.search_loading
+            || self.catalog_more_loading
+            || self.catalog_more_error.is_some()
+            || !self.search_wants_more()
+        {
             return Task::none();
         }
         let Some(continuation) = self.catalog_continuation.clone() else {
