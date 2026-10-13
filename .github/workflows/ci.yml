@@ -45,6 +45,9 @@ jobs:
             dbus
 
       - run: cargo fmt --check
+      # The license texts the packages ship must cover the crates of Cargo.lock.
+      - name: Third-party licenses are up to date
+        run: python3 scripts/third-party-licenses.py | diff -q - packaging/THIRD-PARTY-LICENSES.txt
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # The MPRIS and tray integration tests need a session bus, so the tests run under a private one.
       - run: dbus-run-session -- env CRABYTUBE_TEST_MPRIS_BUS=1 CRABYTUBE_TEST_TRAY_BUS=1 cargo test --workspace --locked
