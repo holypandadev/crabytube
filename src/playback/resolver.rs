@@ -63,8 +63,9 @@ async fn read_page_body(mut response: reqwest::Response) -> Result<Option<String
     Ok(Some(String::from_utf8_lossy(&body).into_owned()))
 }
 
-/// Time allowed for one download of a page or of the player script, which is large.
-const PAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Time allowed for one download of a page, as for other requests, and of the player script.
+const PAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const PLAYER_SCRIPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Whether a cached player runtime, fetched at `fetched_at`, may still be used at `now`.
 fn runtime_is_fresh(fetched_at: std::time::Instant, now: std::time::Instant) -> bool {
@@ -1296,14 +1297,31 @@ impl YouTubeStreamResolver {
         user_agent: Option<&str>,
         cancellation: &CancellationToken,
     ) -> Result<String, StreamError> {
+        Self::fetch_page_within(url, user_agent, PAGE_TIMEOUT, cancellation).await
+    }
+
+    /// The player script, about 3 MB and uncompressed: the time of an ordinary page would cut it
+    /// off on a link slower than about 150 KB/s.
+    async fn fetch_player_script(
+        url: &str,
+        user_agent: Option<&str>,
+        cancellation: &CancellationToken,
+    ) -> Result<String, StreamError> {
+        Self::fetch_page_within(url, user_agent, PLAYER_SCRIPT_TIMEOUT, cancellation).await
+    }
+
+    async fn fetch_page_within(
+        url: &str,
+        user_agent: Option<&str>,
+        timeout: Duration,
+        cancellation: &CancellationToken,
+    ) -> Result<String, StreamError> {
         const MAX_ATTEMPTS: u8 = 3;
         for attempt in 1..=MAX_ATTEMPTS {
             if cancellation.is_cancelled() {
                 return Err(StreamError::Cancelled);
             }
-            // The player script is about 3 MB and comes uncompressed: the 20 s of the shared client
-            // would cut it off on a link slower than about 150 KB/s.
-            let mut request = Self::client()?.get(url).timeout(PAGE_TIMEOUT);
+            let mut request = Self::client()?.get(url).timeout(timeout);
             if let Some(user_agent) = user_agent {
                 request = request.header(reqwest::header::USER_AGENT, user_agent);
             }
@@ -1494,7 +1512,7 @@ impl YouTubeStreamResolver {
                 saved
             }
             None => {
-                let player_js = Self::fetch_page(
+                let player_js = Self::fetch_player_script(
                     player_url.as_str(),
                     runtime.user_agent.as_deref(),
                     cancellation,
@@ -1783,7 +1801,7 @@ impl YouTubeStreamResolver {
             let entry = match cached {
                 Some(entry) => entry,
                 None => {
-                    let source = Self::fetch_page(
+                    let source = Self::fetch_player_script(
                         player_url.as_str(),
                         runtime.user_agent.as_deref(),
                         cancellation,
