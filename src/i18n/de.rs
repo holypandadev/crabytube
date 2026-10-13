@@ -24,7 +24,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Settings", "Einstellungen"),
         ("CrabyTube", "CrabyTube"),
         ("Home", "Start"),
-        ("Ctrl+K", "Ctrl+K"),
+        ("Ctrl+K", "Strg+K"),
         ("Back", "Zurück"),
         ("1 song", "1 Titel"),
         ("GOOD MORNING.", "GUTEN MORGEN."),
@@ -389,7 +389,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Shuffle whole queue", "Ganze Warteschlange mischen"),
         (
             "Space play/pause · ←/→ seek · Ctrl+K search · Esc back",
-            "Leertaste Wiedergabe/Pause · ←/→ spulen · Ctrl+K suchen · Esc zurück",
+            "Leertaste Wiedergabe/Pause · ←/→ spulen · Strg+K suchen · Esc zurück",
         ),
         (
             "Space play/pause · ←/→ seek · ⌘K search · Esc back",

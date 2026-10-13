@@ -424,9 +424,10 @@ impl App {
                     Element::from(
                         label(
                             if hint {
-                                crate::i18n::SEARCH_SHORTCUT
+                                // German keyboards label the key Strg.
+                                self.tr(crate::i18n::SEARCH_SHORTCUT)
                             } else {
-                                ""
+                                "".into()
                             },
                             TEXT_CAPTION,
                         )

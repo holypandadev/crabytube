@@ -67,7 +67,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Copy title", "Копировать название"),
         ("Copy artist", "Копировать исполнителя"),
         ("Copied", "Скопировано"),
-        ("Live", "Концертные"),
+        ("Live", "Прямые эфиры"),
         ("Searching…", "Поиск…"),
         ("Retry loading more", "Повторить загрузку"),
         ("Clear", "Очистить"),

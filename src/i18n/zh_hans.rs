@@ -67,7 +67,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Copy title", "复制标题"),
         ("Copy artist", "复制艺人"),
         ("Copied", "已复制"),
-        ("Live", "现场"),
+        ("Live", "直播"),
         ("Searching…", "正在搜索…"),
         ("Retry loading more", "重新加载更多"),
         ("Clear", "清除"),

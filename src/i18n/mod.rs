@@ -302,8 +302,10 @@ mod tests {
                 translated, KEYS_HELP,
                 "{language:?} must translate the key help"
             );
+            // The shortcut as the language writes it: German keyboards label the key Strg.
+            let shortcut = translate(language, SEARCH_SHORTCUT);
             assert!(
-                translated.contains(SEARCH_SHORTCUT),
+                translated.contains(shortcut.as_ref()),
                 "{language:?}: {translated}"
             );
             for variant in [

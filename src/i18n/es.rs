@@ -340,7 +340,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         (
             "Brings {} favorites and {} queued songs, plus its settings.",
-            "Trae {} favoritos y {} canciones en la cola, además de sus ajustes.",
+            "Trae {} favoritas y {} canciones en la cola, además de sus ajustes.",
         ),
         (
             "Clear history and Jump back in?",
@@ -543,7 +543,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         (
             "Local favorites are limited to {} tracks.",
-            "Los favoritos locales están limitados a {0} canciones.",
+            "Las favoritas locales están limitadas a {0} canciones.",
         ),
     ],
     date: "{weekday} {day} {month}",
