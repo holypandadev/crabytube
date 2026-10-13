@@ -126,7 +126,9 @@ impl SnapshotInfo {
 /// Version of the RustyPipe Botguard crate
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// First bytes of a Botguard snapshot file
-const SNAPSHOT_MAGIC: u32 = 0x18cba459;
+/// Changed from upstream's 0x18cba459 when the V8 flags gained `--jitless`: a snapshot taken with
+/// other flags is not read back.
+const SNAPSHOT_MAGIC: u32 = 0x18cba45a;
 
 fn json_type(value: &serde_json::Value) -> &'static str {
     match value {
@@ -580,11 +582,14 @@ fn rt_extensions(from_snapshot: bool) -> Vec<deno_core::Extension> {
 /// ```
 /// Sets the V8 flags once per process, before the first isolate, whether it starts from a snapshot
 /// or not. This helper owns one isolate per request; V8 background workers only add RSS here.
+/// `--jitless` runs the downloaded BotGuard program in the interpreter: no machine code is
+/// generated at run time, which removes the part of V8 most security fixes concern, at no cost
+/// that shows for a program this short.
 fn apply_v8_memory_flags() {
     static BOTGUARD_V8_MEMORY_FLAGS: Once = Once::new();
     BOTGUARD_V8_MEMORY_FLAGS.call_once(|| {
         v8::V8::set_flags_from_string(
-            "--initial-old-space-size=8 --max-old-space-size=96 --max-semi-space-size=1 --optimize-for-size --single-threaded",
+            "--initial-old-space-size=8 --max-old-space-size=96 --max-semi-space-size=1 --optimize-for-size --single-threaded --jitless",
         );
     });
 }
