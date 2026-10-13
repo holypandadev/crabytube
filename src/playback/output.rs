@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -143,6 +143,9 @@ impl OutputStream {
     }
 }
 
+/// Backend errors in a row, with no request for audio between them, that mean the device is gone.
+const FAILURES_FOR_A_LOST_DEVICE: u32 = 50;
+
 /// Whether a stream error leaves the stream dead: the device is gone, or the stream has to be
 /// built again. Underruns and backend hiccups do not stop it.
 fn ends_the_stream(error: &cpal::StreamError) -> bool {
@@ -262,11 +265,16 @@ where
     let callback_clock = Arc::clone(&clock);
     let lost = Arc::new(AtomicBool::new(false));
     let error_lost = Arc::clone(&lost);
+    // Backend errors since the device last asked for audio. ALSA reports an unplugged device only
+    // as such errors, again and again, never as a device that went away.
+    let failures = Arc::new(AtomicU32::new(0));
+    let data_failures = Arc::clone(&failures);
     let stream = device
         .build_output_stream::<T, _, _>(
             config,
             move |data: &mut [T], info: &OutputCallbackInfo| {
                 let now = Instant::now();
+                data_failures.store(0, Ordering::Relaxed);
                 let latency = device_latency(&info.timestamp());
                 fill(&mut source, data);
                 let frames = data.len() / usize::from(channels.max(1));
@@ -274,10 +282,15 @@ where
                 callback_clock.record_buffer_end(now + latency + buffer);
             },
             move |error| {
-                if ends_the_stream(&error) {
+                let in_a_row = if matches!(error, cpal::StreamError::BackendSpecific { .. }) {
+                    failures.fetch_add(1, Ordering::Relaxed) + 1
+                } else {
+                    0
+                };
+                if ends_the_stream(&error) || in_a_row == FAILURES_FOR_A_LOST_DEVICE {
                     warn!(%error, "audio output failed");
                     error_lost.store(true, Ordering::Relaxed);
-                } else {
+                } else if in_a_row < FAILURES_FOR_A_LOST_DEVICE {
                     debug!(%error, "audio output hiccup");
                 }
             },
