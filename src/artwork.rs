@@ -448,13 +448,31 @@ fn video_still_candidates(url: &str) -> Option<Vec<String>> {
     )
 }
 
+/// Whether a cover address is one YouTube serves covers from, over HTTPS. Addresses come from the
+/// catalog, but also from an imported backup, which must not make the app contact any other host.
+fn is_cover_host(url: &str) -> bool {
+    // The tests serve covers from a local server.
+    #[cfg(test)]
+    if reqwest::Url::parse(url).is_ok_and(|url| url.host_str() == Some("127.0.0.1")) {
+        return true;
+    }
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some_and(|host| {
+                ["ytimg.com", "googleusercontent.com", "ggpht.com"]
+                    .iter()
+                    .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+            })
+    })
+}
+
 /// The response of the first candidate that answers with success.
 async fn first_available(
     http: &reqwest::Client,
     token: &CancellationToken,
     candidates: &[String],
 ) -> Option<reqwest::Response> {
-    for candidate in candidates {
+    for candidate in candidates.iter().filter(|url| is_cover_host(url)) {
         let response = tokio::select! {
             _ = token.cancelled() => return None,
             result = http.get(candidate).timeout(Duration::from_secs(12)).send() => result,
@@ -1059,6 +1077,19 @@ mod tests {
             artwork_request_url_for("https://lh3.googleusercontent.com/abc=w1280-h720", 320),
             "https://lh3.googleusercontent.com/abc=w320-h180"
         );
+    }
+
+    #[test]
+    fn only_youtube_cover_hosts_over_https_are_asked() {
+        assert!(is_cover_host("https://i.ytimg.com/vi/abc/hqdefault.jpg"));
+        assert!(is_cover_host(
+            "https://lh3.googleusercontent.com/abc=w544-h544"
+        ));
+        assert!(is_cover_host("https://yt3.ggpht.com/abc"));
+        assert!(!is_cover_host("http://i.ytimg.com/vi/abc/hqdefault.jpg"));
+        assert!(!is_cover_host("https://tracker.example/x.jpg"));
+        assert!(!is_cover_host("https://ytimg.com.example/x.jpg"));
+        assert!(!is_cover_host("not a url"));
     }
 
     #[test]
