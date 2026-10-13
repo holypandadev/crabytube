@@ -1506,7 +1506,11 @@ mod tests {
         std::thread::sleep(Duration::from_millis(500));
         let closing = std::time::Instant::now();
         drop(persistence);
-        assert!(closing.elapsed() < Duration::from_secs(1), "{:?}", closing.elapsed());
+        assert!(
+            closing.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            closing.elapsed()
+        );
         let _ = std::fs::remove_file(blocker);
     }
 

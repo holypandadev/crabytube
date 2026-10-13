@@ -128,6 +128,9 @@ fn search_field_escape(
         (
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                // A held key repeats: only the first press counts, or the repeat that follows the
+                // closing of the suggestions would also clear the text.
+                repeat: false,
                 ..
             }),
             iced::event::Status::Captured,
@@ -160,7 +163,7 @@ mod tests {
     fn only_an_escape_the_search_field_took_is_passed_on() {
         use iced::keyboard::{Event, Key, Location, Modifiers, key};
         let window = iced::window::Id::unique();
-        let press = |named| {
+        let event = |named, repeat| {
             iced::Event::Keyboard(Event::KeyPressed {
                 key: Key::Named(named),
                 modified_key: Key::Named(named),
@@ -168,9 +171,10 @@ mod tests {
                 location: Location::Standard,
                 modifiers: Modifiers::default(),
                 text: None,
-                repeat: false,
+                repeat,
             })
         };
+        let press = |named| event(named, false);
         let captured = iced::event::Status::Captured;
         assert!(matches!(
             search_field_escape(press(key::Named::Escape), captured, window),
@@ -186,6 +190,8 @@ mod tests {
             .is_none()
         );
         assert!(search_field_escape(press(key::Named::Enter), captured, window).is_none());
+        // A held Escape acts once.
+        assert!(search_field_escape(event(key::Named::Escape, true), captured, window).is_none());
     }
 
     #[test]

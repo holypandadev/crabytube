@@ -1593,18 +1593,6 @@ impl App {
                     return Task::batch([cleared, operation::focus("search-field")]);
                 }
             }
-            Message::SearchEscape(focused) => {
-                if !focused {
-                    return self.escape_outside_search();
-                }
-                if self.search_query.is_empty() {
-                    // An empty field gives up the focus; the field itself stays.
-                    return iced::advanced::widget::operate(
-                        iced::advanced::widget::operation::focusable::unfocus(),
-                    );
-                }
-                return self.update(Message::SearchChanged(String::new()));
-            }
             Message::SearchChanged(query) => {
                 // Typing again leaves suggestion browsing.
                 self.typed_query = None;
@@ -1706,11 +1694,8 @@ impl App {
                             self.invalidate_suggestions();
                             return Task::none();
                         }
-                        if matches!(self.page, Page::Home | Page::Search) {
-                            // Only the focus of the field tells whether Escape is meant for it.
-                            return operation::is_focused("search-field")
-                                .map(Message::SearchEscape);
-                        }
+                        // The search field takes its own Escape (see `SearchFieldEscape`), so one that
+                        // arrives here was pressed outside it.
                         return self.escape_outside_search();
                     }
                     if self.show_suggestions && !self.suggestions.is_empty() {
@@ -5112,26 +5097,34 @@ mod tests {
     }
 
     #[test]
-    fn escape_clears_a_focused_search_field_and_otherwise_leaves_the_query() {
+    fn escape_in_the_search_field_closes_the_suggestions_then_clears_the_text() {
         let mut app = App {
-            search_query: "daft punk".into(),
+            search_query: "daft p".into(),
+            typed_query: Some("daft".into()),
+            show_suggestions: true,
             ..App::default()
         };
-        let _ = app.update(Message::SearchEscape(true));
+        // Browsing the suggestions had put one in the field: Escape gives back what was typed.
+        let _ = app.update(Message::SearchFieldEscape);
+        assert!(!app.show_suggestions);
+        assert_eq!(app.search_query, "daft");
+        let _ = app.update(Message::SearchFieldEscape);
         assert!(app.search_query.is_empty());
-        app.search_query = "kept".into();
-        let _ = app.update(Message::SearchEscape(false));
-        assert_eq!(app.search_query, "kept");
+        // An empty field has nothing more to undo.
+        let _ = app.update(Message::SearchFieldEscape);
+        assert!(app.search_query.is_empty());
     }
 
     #[test]
-    fn escape_outside_the_search_field_still_leaves_now_playing() {
+    fn escape_outside_the_search_field_leaves_the_query_and_now_playing() {
         let mut app = App {
             page: Page::NowPlaying,
+            search_query: "kept".into(),
             ..App::default()
         };
-        let _ = app.update(Message::SearchEscape(false));
+        drop(app.escape_outside_search());
         assert_ne!(app.page, Page::NowPlaying);
+        assert_eq!(app.search_query, "kept");
     }
 
     #[test]
