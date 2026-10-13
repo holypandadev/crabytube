@@ -683,9 +683,7 @@ async fn actor(
                 Some(Command::Play(track)) => {
                     if let Some(token) = cancellation.take() { token.cancel(); }
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
-                    if let Some(output) = output.as_ref() {
-                        output.player.clear();
-                    }
+                    clear_output(&mut output);
                     awaiting = None;
                     // The output stays open between tracks: reopening the device costs time at every change.
                     let prepared = prepared_ahead.take();
@@ -835,9 +833,6 @@ async fn actor(
                     if let Some(prefetch) = prefetching.take() { prefetch.cancellation.cancel(); }
                     awaiting = None;
                     generation = next_generation();
-                    if let Some(output) = output.as_ref() {
-                        output.player.clear();
-                    }
                     output = None;
                     status.output_device = None;
                     transition(&mut status, PlaybackState::Stopped);
@@ -861,14 +856,22 @@ async fn actor(
                         let _ = events_tx.send(Event::TrackEnded { generation });
                     // A live broadcast has no position to go back to.
                     } else if let Some(audio) = active.as_ref().filter(|_| !status.live) {
+                        // The output lets go of the playing source before the decoder moves. A source still
+                        // playing could take chunks of the new position and drop the rest of one when it is
+                        // cleared; the count of buffered samples would then wait for them at the end of the track.
+                        clear_output(&mut output);
                         seek_generation = seek_generation.wrapping_add(1);
                         let current_seek_generation = seek_generation;
                         let (reply, response) = tokio::sync::oneshot::channel();
-                        if audio.worker.send(WorkerCommand::Seek(position, reply)).is_ok() {
+                        if audio.worker.send(WorkerCommand::Seek(position, reply)).is_err() {
+                            // The decoder is gone, so nothing moves: the unchanged source is queued again.
                             if let Some(output) = output.as_ref() {
-                                output.player.pause();
-                                output.player.clear();
+                                output.player.append(audio.source());
+                                if !paused_by_user {
+                                    output.player.play();
+                                }
                             }
+                        } else {
                             let events_tx = events_tx.clone();
                             let current_generation = generation;
                             tokio::spawn(async move {
@@ -1110,9 +1113,7 @@ async fn actor(
                     resume_at = (!status.live).then_some(status.position);
                     warn!(failure = %redact_urls(&format!("{failure:?}")), position_ms = status.position.as_millis(), "stream URL refused mid-track; resolving again from this position");
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
-                    if let Some(output) = output.as_ref() {
-                        output.player.clear();
-                    }
+                    clear_output(&mut output);
                     let Some(track) = status.track.clone() else { continue };
                     let token = CancellationToken::new();
                     cancellation = Some(token.clone());
@@ -1136,9 +1137,6 @@ async fn actor(
                     transition(&mut status, PlaybackState::Error);
                     status.error = Some(engine_error_message(&failure).into());
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
-                    if let Some(output) = output.as_ref() {
-                        output.player.clear();
-                    }
                     output = None;
                     status.output_device = None;
                     let _ = status_tx.send(status.clone());
@@ -1161,10 +1159,11 @@ async fn actor(
                     {
                         output._device.mark_lost();
                     }
-                    if output.as_ref().is_some_and(PlaybackOutput::is_lost) {
+                    if status.state != PlaybackState::Seeking && output.as_ref().is_none_or(PlaybackOutput::is_lost) {
                         // The device went away (unplugged, or the remote session that carried it ended) and the
-                        // stream plays nothing more. The output is opened again, on the system default if the
-                        // chosen device is gone. With no device at all, playback pauses and Play opens it later.
+                        // stream plays nothing more, or an output dropped for that reason is still missing. The
+                        // output is opened again, on the system default if the chosen device is gone. With no
+                        // device at all, playback pauses and Play opens it later. A seek opens it once it lands.
                         output = None;
                         match reopen_output(audio, status.volume, output_device_id.as_deref()) {
                             Ok(opened) => {
@@ -1225,7 +1224,10 @@ async fn actor(
                         }
                         None => {}
                     }
-                    let finished = decoder_finished && buffered == 0;
+                    // A source that returned its last sample leaves the player empty, which ends the track even if
+                    // the count of buffered samples is off.
+                    let finished = decoder_finished
+                        && (buffered == 0 || output.as_ref().is_some_and(|output| output.player.empty()));
                     if finished {
                         transition(&mut status, PlaybackState::Finished);
                         status.position = status.duration.unwrap_or(status.position);
@@ -1235,9 +1237,7 @@ async fn actor(
                         if let Some(audio) = active.as_ref() {
                             let _ = audio.worker.send(WorkerCommand::Stop);
                         }
-                        if let Some(output) = output.as_ref() {
-                            output.player.clear();
-                        }
+                        clear_output(&mut output);
                         active = None;
                         info!("track finished");
                     }
@@ -1489,6 +1489,18 @@ fn audible_position(
             audio.channels,
         ),
         None => position(&audio.cursor, audio.rate, audio.channels),
+    }
+}
+
+/// Takes every source off the output. Clearing waits until the audio thread lets go of the source, which
+/// the stream of a device that went away never does, so such an output is dropped instead and opened
+/// again when audio needs it.
+fn clear_output(output: &mut Option<PlaybackOutput>) {
+    if output.as_ref().is_some_and(PlaybackOutput::is_lost) {
+        *output = None;
+    }
+    if let Some(output) = output.as_ref() {
+        output.player.clear();
     }
 }
 
