@@ -7,6 +7,9 @@ use super::*;
 const NOW_PLAYING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The interval of the progress tick on `page`.
+/// How often a window off screen reads the playback position on macOS, for the media session.
+const MEDIA_SESSION_TICK: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub(super) fn progress_tick(page: &Page) -> std::time::Duration {
     if *page == Page::NowPlaying {
         NOW_PLAYING_TICK
@@ -25,14 +28,17 @@ impl App {
         // Progress is only drawn on screen. State changes, including the end of a track, still
         // arrive through `playback_status`, so the tick can stop while the window is in the tray.
         // Synced lyrics schedule their own wake-ups at each word (see `karaoke_wait`).
-        let playback = if !self.window_hidden_to_tray
-            && !self.window_minimized
-            && !self.karaoke_active()
-            && matches!(
-                self.playback_status.state,
-                PlaybackState::Buffering | PlaybackState::Seeking | PlaybackState::Playing
-            ) {
+        let playing = matches!(
+            self.playback_status.state,
+            PlaybackState::Buffering | PlaybackState::Seeking | PlaybackState::Playing
+        );
+        let on_screen = !self.window_hidden_to_tray && !self.window_minimized;
+        let playback = if on_screen && !self.karaoke_active() && playing {
             iced::time::every(progress_tick(&self.page)).map(|_| Message::PlaybackTick)
+        } else if cfg!(target_os = "macos") && !on_screen && playing {
+            // macOS moves the Now Playing position on by the wall clock, which a sleep advances while
+            // playback stands still. A slow tick lets the media session notice it and report again.
+            iced::time::every(MEDIA_SESSION_TICK).map(|_| Message::PlaybackTick)
         } else {
             Subscription::none()
         };

@@ -122,6 +122,7 @@ impl MprisRemote {
             && playback(published).kind == PlaybackKind::Playing
             && slept_since(*at, *published_wall, now, wall)
         {
+            tracing::info!("the Mac slept since the last report; reporting the position again");
             changes.playback = true;
         }
         if !changes.any() && !cover_changed {
