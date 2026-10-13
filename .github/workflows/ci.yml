@@ -46,8 +46,8 @@ jobs:
 
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      # The MPRIS integration test needs a session bus, so the tests run under a private one.
-      - run: dbus-run-session -- env CRABYTUBE_TEST_MPRIS_BUS=1 cargo test --workspace --locked
+      # The MPRIS and tray integration tests need a session bus, so the tests run under a private one.
+      - run: dbus-run-session -- env CRABYTUBE_TEST_MPRIS_BUS=1 CRABYTUBE_TEST_TRAY_BUS=1 cargo test --workspace --locked
 
   # Cross-platform checks and release build on pull requests, the default branch and by hand.
   platform-matrix:
