@@ -69,6 +69,8 @@ struct Session {
     /// The last report the system was given, and when: by the monotonic clock, which stops while
     /// the Mac sleeps, and by the wall clock, which does not.
     published: Option<(PlayerState, Instant, SystemTime)>,
+    /// A sleep was reported, and a report with the position moved on is still owed.
+    owes_report_after_sleep: bool,
     /// The cover URL of the track that is playing.
     cover_url: Option<String>,
     cover: Cover,
@@ -94,6 +96,7 @@ impl MprisRemote {
             commands,
             session: Mutex::new(Session {
                 published: None,
+                owes_report_after_sleep: false,
                 cover_url: None,
                 cover: Cover::Missing,
                 registrations,
@@ -118,12 +121,26 @@ impl MprisRemote {
         let mut changes = changes(previous, &state, now);
         // The system extrapolates the position by the wall clock. A sleep that the monotonic
         // clock did not see leaves it ahead of the playback, so the report is sent again.
-        if let Some((published, at, published_wall)) = &session.published
-            && playback(published).kind == PlaybackKind::Playing
-            && slept_since(*at, *published_wall, now, wall)
-        {
+        let slept = session
+            .published
+            .as_ref()
+            .is_some_and(|(published, at, published_wall)| {
+                playback(published).kind == PlaybackKind::Playing
+                    && slept_since(*at, *published_wall, now, wall)
+            });
+        // The system ignores a report that repeats the last position, as the one sent at the
+        // moment of waking usually does, so the first one with the position moved on follows it.
+        let moved_on = session.published.as_ref().is_some_and(|(published, _, _)| {
+            playback(published).position_secs != playback(&state).position_secs
+        });
+        if slept {
             tracing::info!("the Mac slept since the last report; reporting the position again");
             changes.playback = true;
+            session.owes_report_after_sleep = true;
+        } else if session.owes_report_after_sleep && moved_on {
+            tracing::info!("reporting the position again with playback moving after the sleep");
+            changes.playback = true;
+            session.owes_report_after_sleep = false;
         }
         if !changes.any() && !cover_changed {
             return;
