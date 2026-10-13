@@ -320,9 +320,23 @@ mod tests {
         assert_eq!(
             translate(
                 UiLanguage::Spanish,
-                "Local data exported to /home/user/Documents/crabytube-backup.json."
+                "Local data exported to /home/user/Documents/crabytube-backup.json"
             ),
-            "Datos locales exportados a /home/user/Documents/crabytube-backup.json."
+            "Datos locales exportados a /home/user/Documents/crabytube-backup.json"
+        );
+        // The reason a step failed is translated too when the app wrote it.
+        assert_eq!(
+            translate(
+                UiLanguage::Spanish,
+                &format!(
+                    "Local-data export failed: {}",
+                    translate(UiLanguage::Spanish, "Documents folder is unavailable")
+                )
+            ),
+            format!(
+                "Falló la exportación de datos locales: {}",
+                translate(UiLanguage::Spanish, "Documents folder is unavailable")
+            )
         );
     }
 

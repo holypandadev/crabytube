@@ -1285,14 +1285,16 @@ impl App {
                 self.storage_cache_usage = usage;
                 self.storage_notice = Some(match result {
                     Ok(path) => format!("Diagnostics exported to {path}"),
-                    Err(error) => format!("Diagnostics export failed: {error}"),
+                    Err(error) => format!("Diagnostics export failed: {}", self.tr_string(error)),
                 });
             }
             Message::LocalDataExported { result } => {
                 self.storage_loading = false;
                 self.storage_notice = Some(match result {
-                    Ok(path) => format!("Local data exported to {path}."),
-                    Err(error) => format!("Local-data export failed: {error}"),
+                    // The path ends the message: a full stop after it would sit inside the path in
+                    // the languages whose sentences end elsewhere.
+                    Ok(path) => format!("Local data exported to {path}"),
+                    Err(error) => format!("Local-data export failed: {}", self.tr_string(error)),
                 });
             }
             Message::LocalDataImported { result } => match result {
@@ -1303,7 +1305,10 @@ impl App {
                 }
                 Err(error) => {
                     self.storage_loading = false;
-                    self.storage_notice = Some(format!("Local-data import failed: {error}"));
+                    self.storage_notice = Some(format!(
+                        "Local-data import failed: {}",
+                        self.tr_string(error)
+                    ));
                 }
             },
             Message::RefreshOutputDevices => return self.refresh_output_devices_task(),
