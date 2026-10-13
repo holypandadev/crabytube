@@ -21,7 +21,7 @@
 | :--- | :--- | :--- |
 | Under 100 MB of RAM while playing and a few dozen at rest. Idle CPU stays near zero. | Pure Rust and Iced. No browser, no Electron. Opens fast, and the next track is ready before the current one ends. | Plays YouTube Music anonymously. No sign-in, no cookies, no telemetry. Your data stays on your device. |
 | `04` **SYNCED LYRICS** | `05` **BRUTALIST DESIGN** | `06` **FITS YOUR DESKTOP** |
-| Line-by-line and word-by-word karaoke, with translations, from several sources at once. | Pure black, monospaced type and one-pixel outlines. The layout scales from a phone-sized window to 4K. | Media keys and MPRIS, tray icon, track notifications and Discord Rich Presence. Nine languages: English, Spanish, Portuguese, French, German, Italian, Russian, Japanese and Chinese. |
+| Line-by-line and word-by-word karaoke, with translations, from several sources at once. | Pure black, monospaced type and one-pixel outlines. The layout scales from a phone-sized window to 4K. | Media keys and the system media controls on all three systems; on Linux also a tray icon and track notifications. Discord Rich Presence. Nine languages: English, Spanish, Portuguese, French, German, Italian, Russian, Japanese and Chinese. |
 
 ## Screenshots
 

@@ -20,7 +20,6 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `ui.rs`, `ui/` | Iced application (`App`): state, `update`, `view`, subscriptions. |
 | `music.rs`, `music/browse.rs` | `MusicService` trait and its YouTube Music implementation: Home feed, search and suggestions, radio, album/artist/playlist pages and continuations. |
 | `playback/` | `resolver.rs` (stream resolution), `pot.rs` (PO tokens via the BotGuard helper), `engine.rs` (playback actor, HTTP streaming, decoding, output), `output.rs` (audio device enumeration and opening). |
-| `playback_policy.rs` | Maps user preferences (audio quality) onto resolver requests. |
 | `network.rs` | Shared HTTP client and optional network diagnostics. |
 | `runtime_cache.rs` | Web client values (`ytcfg`) persisted for six hours to avoid fetching the Music page on every launch. |
 | `home_cache.rs` | Size-capped snapshot of the public Home feed, painted on the next launch while it refreshes. |
@@ -31,7 +30,8 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
 | `i18n/` | Interface translations: English, Spanish, Brazilian Portuguese, French, German, Italian, Russian, Japanese and Simplified Chinese. English is the key; each language has a file of exact entries and templates for text with numbers or names. |
 | `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). Other platforms use `tray_stub.rs`. |
-| `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what is not specific to macOS: the player state, the commands, and the rules for what to tell the system and when. Windows still uses `mpris_stub.rs`. |
+| `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what is not specific to one system: the player state, the commands, and the rules for what to tell the system and when. |
+| `mpris_windows.rs` | The Windows media keys and media panel through the System Media Transport Controls (`windows`). Other platforms use `mpris_stub.rs`. |
 | `discord.rs` | Optional Discord Rich Presence over the local Discord IPC socket. |
 
 Catalog and playback code does not depend on Iced; the UI talks to them through `MusicService`,
@@ -67,7 +67,8 @@ Track (video ID)
   be created after googlevideo accepted a small range request. It records the URL's `expire` time so
   stale URLs are rejected before decoding starts. Media URLs are never persisted. Idempotent
   configuration requests (Music page, watch page, player script) are retried a bounded number of
-  times on transient failures; player requests and media requests are not.
+  times on transient failures. Player and media requests are not retried on their own; a
+  resolution whose stream googlevideo refuses is attempted again a bounded number of times.
 - **Tokens.** Session and content PO tokens are cached in memory and in `pot.json` (owner-only
   permissions) until shortly before they expire. When the helper runs, it also mints content
   tokens for the next tracks in the queue, so later tracks usually need no helper run.
@@ -77,7 +78,8 @@ Track (video ID)
   events from a superseded or cancelled track are ignored. The next track in the queue is resolved,
   opened and decoded ahead of time. Seeking reopens the range reader at the new position. A 403
   from googlevideo during playback (an expired URL) triggers a fresh resolution. After a few
-  seconds of pause the output device is released and reopened on resume.
+  seconds of pause the output device is released and reopened on resume. When the device goes
+  away, the output is opened again on the system default, or playback pauses if there is none.
 - **Errors** are typed (`StreamError`: network, unavailable or login required, PO token, cipher,
   media rejected, unsupported format, decoder, device, cancelled). The UI shows a short message;
   logs keep the details with URLs, tokens and identifiers replaced by short fingerprints.
@@ -160,11 +162,12 @@ individually.
 
 ## Platform integration
 
-- **Linux:** MPRIS (`org.mpris.MediaPlayer2.crabytube`) with metadata, artwork and controls; a
+- **Linux:** MPRIS (`org.mpris.MediaPlayer2.crabytube`) with metadata, the saved cover file and controls; a
   StatusNotifier tray icon with optional close-to-tray; desktop notifications; launch on startup
   through `~/.config/autostart`. The window's application ID is `dev.holypanda.CrabyTube`, matching
   `packaging/linux/dev.holypanda.CrabyTube.desktop`.
-- **Windows:** the icon is embedded by `build.rs` (`winresource`).
+- **Windows:** media keys and the system media panel (title, artist, cover, position) through the
+  System Media Transport Controls. The icon is embedded by `build.rs` (`winresource`).
 - **macOS:** media keys, headphone buttons and Control Center through `MPRemoteCommandCenter`, and Now Playing (title, artist, album, cover, position and a progress bar that advances by itself) through `MPNowPlayingInfoCenter`. The cover is read from the file the app already saved, never from a URL the system downloads. `packaging/macos/build-app.sh` builds the signed universal app bundle.
 - **All platforms:** optional Discord Rich Presence.
 
@@ -172,5 +175,7 @@ individually.
 
 The `diagnostics` feature adds command-line test modes (`--scroll-test`, `--soak`, `--autoplay`,
 `--screenshots`, `--exit-after`), environment overrides for the helper paths, a lyric fixture for
-the screenshots, fault injection, and Iced's debug overlay. Release builds contain none of these. `scripts/peak-rss.sh` and
+the screenshots, fault injection, and Iced's debug overlay. Release builds contain none of these,
+apart from a few environment switches for network troubleshooting (`CRABYTUBE_FORCE_IPV4`,
+`CRABYTUBE_HTTP1_ONLY`, `CRABYTUBE_UA_PROFILE`). `scripts/peak-rss.sh` and
 `scripts/soak-memory-cpu.sh` measure memory and CPU on Linux.
