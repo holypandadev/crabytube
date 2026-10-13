@@ -1339,7 +1339,7 @@ mod tests {
             end: None,
             text: "A very long lyric line that wraps when the panel is narrow. ".repeat(8),
             words: Vec::new(),
-            translation: Some("Una traducción extensa para probar el ajuste de línea.".repeat(4)),
+            translation: Some("A long translation that checks how the line wraps.".repeat(4)),
             romanization: None,
             background: None,
         };
