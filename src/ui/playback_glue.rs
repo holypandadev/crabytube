@@ -398,27 +398,6 @@ impl App {
         Task::batch([artwork, lyrics])
     }
 
-    pub(super) fn move_queue(&mut self, from: usize, to: usize) {
-        if from >= self.queue.len() || to >= self.queue.len() || from == to {
-            return;
-        }
-        let item = Arc::make_mut(&mut self.queue).remove(from);
-        Arc::make_mut(&mut self.queue).insert(to, item);
-        self.queue_generation = self.queue_generation.wrapping_add(1);
-        self.queue_index = self.queue_index.map(|i| {
-            if i == from {
-                to
-            } else if from < i && i <= to {
-                i - 1
-            } else if to <= i && i < from {
-                i + 1
-            } else {
-                i
-            }
-        });
-        self.persist();
-    }
-
     /// Drops one upcoming or earlier track. The playing track stays in place.
     pub(super) fn remove_from_queue(&mut self, index: usize) {
         if index >= self.queue.len() || self.queue_index == Some(index) {
@@ -786,7 +765,6 @@ impl App {
                     Err(error) => self.radio_error = Some(error),
                 }
             }
-            Message::MoveQueue(from, to) => self.move_queue(from, to),
             Message::RemoveFromQueue(index) => self.remove_from_queue(index),
             Message::ClearUpcomingQueue => self.clear_upcoming_queue(),
 

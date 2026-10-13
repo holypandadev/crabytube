@@ -640,7 +640,6 @@ impl App {
             Message::ShuffleContext(..)
             | Message::RetryRadio
             | Message::RadioLoaded { .. }
-            | Message::MoveQueue(..)
             | Message::RemoveFromQueue(..)
             | Message::ClearUpcomingQueue
             | Message::SeekTo(..)
@@ -5795,23 +5794,14 @@ mod tests {
     }
 
     #[test]
-    fn reorder_queue_preserves_current_track_and_repeat_one_does_not_block_manual_next() {
+    fn repeat_one_does_not_block_manual_next() {
         let mut app = App {
-            queue: vec![fixture_track("a"), fixture_track("b"), fixture_track("c")].into(),
-            queue_index: Some(1),
+            queue: vec![fixture_track("b"), fixture_track("c"), fixture_track("a")].into(),
+            queue_index: Some(0),
             repeat: super::RepeatMode::One,
             autoplay: false,
             ..App::default()
         };
-        let _ = app.update(Message::MoveQueue(0, 2));
-        assert_eq!(
-            app.queue
-                .iter()
-                .map(|t| t.video_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["b", "c", "a"]
-        );
-        assert_eq!(app.queue_index, Some(0));
         let _ = app.update(Message::NextTrack);
         assert_eq!(app.queue_index, Some(1));
         assert_eq!(app.playback_status.track.as_ref().unwrap().video_id, "c");
@@ -6036,7 +6026,7 @@ mod tests {
     }
 
     #[test]
-    fn play_context_selects_correct_track_after_reorder_and_pagination() {
+    fn play_context_selects_the_track_by_index_in_each_list_it_is_given() {
         let mut app = App::default();
         let tracks: Arc<[crate::music::Track]> = vec![
             fixture_track("a"),
@@ -6048,11 +6038,8 @@ mod tests {
         // Simulate paginated second batch appended after first play.
         let _ = app.update(Message::PlayContext(Arc::clone(&tracks), 1));
         assert_eq!(app.playback_status.track.as_ref().unwrap().video_id, "b");
-        // Reorder queue (move 0 -> 2) must keep current track identity.
-        let _ = app.update(Message::MoveQueue(0, 2));
-        assert!(app.queue.iter().any(|t| t.video_id == "b"));
-        // A click on the reordered Arc snapshot still resolves by index.
-        let reordered: Arc<[crate::music::Track]> = Arc::from(app.queue.as_slice());
+        // A click on another list, in another order, still resolves by index.
+        let reordered: Arc<[crate::music::Track]> = tracks.iter().rev().cloned().collect();
         let pos = reordered.iter().position(|t| t.video_id == "c").unwrap();
         let _ = app.update(Message::PlayContext(reordered, pos));
         assert_eq!(app.playback_status.track.as_ref().unwrap().video_id, "c");
@@ -6177,8 +6164,11 @@ mod tests {
                 index: 1
             })
         );
-        let _ = app.update(Message::MoveQueue(0, 2));
-        assert!(app.row_menu.is_none(), "a move renumbers the rows");
+        let _ = app.update(Message::RemoveFromQueue(2));
+        assert!(
+            app.row_menu.is_none(),
+            "a change to the queue renumbers the rows"
+        );
         let _ = app.update(Message::ToggleRowMenu(first));
         let _ = app.update(Message::Navigate(Page::Library));
         assert!(app.row_menu.is_none(), "leaving the page closes the menu");

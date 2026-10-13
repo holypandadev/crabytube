@@ -58,9 +58,6 @@ pub(super) enum Message {
     CloseWindow,
     CloseRequested,
     QuitApp,
-    /// Moves a queue entry. No control in the interface sends it at the moment.
-    #[allow(dead_code)]
-    MoveQueue(usize, usize),
     RemoveFromQueue(usize),
     ClearUpcomingQueue,
     Resized {
