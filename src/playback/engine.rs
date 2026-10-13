@@ -598,7 +598,7 @@ fn is_valid_transition(from: PlaybackState, to: PlaybackState) -> bool {
                 )
                 | (
                     Seeking,
-                    Buffering | Paused | Playing | Stopped | Error | Resolving
+                    Buffering | Paused | Playing | Stopped | Finished | Error | Resolving
                 )
                 | (
                     Paused,
@@ -863,8 +863,21 @@ async fn actor(
                 }
                 Some(Command::Seek(position)) => {
                     if !status.live && active.is_some() && seek_ends_track(position, status.duration) {
-                        // Past the end there is nothing left to play: the track finishes as it does at its last sample.
-                        let _ = events_tx.send(Event::TrackEnded { generation });
+                        // Past the end there is nothing left to play: the track finishes now, as at its last
+                        // sample. Only marking the decoder finished left it decoding and the track playing.
+                        transition(&mut status, PlaybackState::Finished);
+                        status.position = status.duration.unwrap_or(status.position);
+                        if let Some(token) = cancellation.take() {
+                            token.cancel();
+                        }
+                        if let Some(audio) = active.take() {
+                            let _ = audio.worker.send(WorkerCommand::Stop);
+                        }
+                        clear_output(&mut output);
+                        // A seek still on its way belongs to the finished track.
+                        seek_generation = seek_generation.wrapping_add(1);
+                        info!("seek past the end; track finished");
+                        let _ = status_tx.send(status.clone());
                     // A live broadcast has no position to go back to.
                     } else if let Some(audio) = active.as_ref().filter(|_| !status.live) {
                         // The output takes the playing source off before the decoder moves. It may still take a
@@ -1237,7 +1250,9 @@ async fn actor(
                     }
                     // A source that returned its last sample leaves the player empty, which ends the track even if
                     // the count of buffered samples is off.
+                    // While a seek lands the player is empty on purpose, which is not the end of the track.
                     let finished = decoder_finished
+                        && status.state != PlaybackState::Seeking
                         && (buffered == 0 || output.as_ref().is_some_and(|output| output.player.empty()));
                     if finished {
                         transition(&mut status, PlaybackState::Finished);
