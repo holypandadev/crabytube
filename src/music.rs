@@ -725,7 +725,8 @@ fn home_feed_continuation(payload: &Value) -> Option<String> {
     ]
     .iter()
     .find_map(|pointer| payload.pointer(pointer).and_then(Value::as_str))
-    .filter(|token| !token.is_empty() && token.len() <= 4_096)
+    // The same bound as the continuations of other pages.
+    .filter(|token| !token.is_empty() && token.len() <= 32 * 1024)
     .map(str::to_owned)
 }
 
