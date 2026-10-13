@@ -43,6 +43,16 @@ fn test_root() -> PathBuf {
         .clone()
 }
 
+/// The folder of the running executable, where the helpers are installed beside it. On macOS a
+/// launch through a symbolic link names the link, so the path is resolved first; elsewhere the
+/// system already gives the real file.
+pub fn executable_dir() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    #[cfg(target_os = "macos")]
+    let executable = std::fs::canonicalize(&executable).unwrap_or(executable);
+    executable.parent().map(std::path::Path::to_path_buf)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

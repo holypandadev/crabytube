@@ -614,11 +614,9 @@ fn helper_command() -> Result<Command, PoTokenError> {
     } else {
         "botguard-helper"
     };
-    if let Ok(current) = std::env::current_exe()
-        && let Some(path) = current
-            .parent()
-            .map(|parent| parent.join(name))
-            .filter(|path| path.is_file())
+    if let Some(path) = crate::app_dirs::executable_dir()
+        .map(|folder| folder.join(name))
+        .filter(|path| path.is_file())
     {
         return Ok(Command::new(path));
     }

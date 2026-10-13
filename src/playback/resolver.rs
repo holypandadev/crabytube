@@ -2017,11 +2017,9 @@ async fn run_js_helper_once(
     let override_path: Option<std::ffi::OsString> = None;
     let mut command = if let Some(path) = override_path {
         Command::new(path)
-    } else if let Ok(current) = std::env::current_exe()
-        && let Some(path) = current
-            .parent()
-            .map(|parent| parent.join(name))
-            .filter(|path| path.is_file())
+    } else if let Some(path) = crate::app_dirs::executable_dir()
+        .map(|folder| folder.join(name))
+        .filter(|path| path.is_file())
     {
         Command::new(path)
     } else {
