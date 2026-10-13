@@ -134,6 +134,10 @@ impl MprisRemote {
             playback(published).position_secs != playback(&state).position_secs
         });
         let position = playback(&state).position_secs;
+        // A pause reports the position anyway, so nothing is owed from a sleep after it.
+        if playback(&state).kind != PlaybackKind::Playing {
+            session.owes_report_after_sleep = false;
+        }
         let after_sleep = if slept {
             tracing::info!(
                 position,

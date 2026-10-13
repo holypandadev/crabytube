@@ -242,13 +242,14 @@ impl MprisRemote {
     }
 
     /// The `file://` URL of the cover saved for `url`, or none until it is saved. The disk is
-    /// looked at again at most once a second while the cover is missing.
+    /// looked at again at most once a second, so a cover that appears, or goes when the cache is
+    /// trimmed, is followed.
     fn local_art(&self, url: Option<&str>) -> Option<String> {
         let url = url?;
         let mut art = self.art.lock().ok()?;
         if let Some(known) = art.as_ref()
             && known.url == url
-            && (known.file.is_some() || known.checked.elapsed() < ART_RECHECK)
+            && known.checked.elapsed() < ART_RECHECK
         {
             return known.file.clone();
         }
