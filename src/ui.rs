@@ -2419,19 +2419,26 @@ impl App {
             .set_volume(self.preferences.effective_volume());
         self.playback
             .set_output_device(self.preferences.audio_output_device_id.clone());
+        // "Scale with window" may have changed with the rest.
+        self.apply_ui_zoom();
+        self.zoom_applied = self.ui_zoom;
         self.rebuild_lyrics_heights();
     }
 
     /// The preferences Reset returns to: the defaults, except that the window geometry, the
-    /// language and the lyrics offsets stay.
+    /// language and the lyrics offsets stay, as its confirmation says, and so do the volume and
+    /// the mute, which belong to the player rather than to the settings.
     fn reset_preferences(current: &Preferences) -> Preferences {
         Preferences {
             window_width: current.window_width,
             window_height: current.window_height,
             window_maximized: current.window_maximized,
             ui_language: current.ui_language,
+            lyrics_offset_ms: current.lyrics_offset_ms,
             lyrics_offsets: current.lyrics_offsets.clone(),
             lyrics_offset_order: current.lyrics_offset_order.clone(),
+            volume: current.volume,
+            muted: current.muted,
             ..Preferences::default()
         }
     }
@@ -2439,9 +2446,17 @@ impl App {
     fn apply_snapshot(&mut self, mut snapshot: Snapshot) -> Task<Message> {
         snapshot.normalize();
         let window_maximized = self.preferences.window_maximized;
+        let language = self.preferences.ui_language;
+        let startup = self.preferences.startup;
+        let output_device = self.preferences.audio_output_device_id.clone();
         self.preferences = snapshot.preferences.clone();
-        // An imported file says nothing about how this window stands now.
+        // An imported file says nothing about how this window stands now, nor about this computer:
+        // its login items and its audio devices stay as they are.
         self.preferences.window_maximized = window_maximized;
+        self.preferences.startup = startup;
+        self.preferences.audio_output_device_id = output_device;
+        // A new language goes through its own setting, which also brings Home in that language.
+        let imported_language = std::mem::replace(&mut self.preferences.ui_language, language);
         let (window_width, window_height) = layout::clamped_window(
             self.preferences.window_width,
             self.preferences.window_height,
@@ -2465,8 +2480,14 @@ impl App {
         self.library_notice = None;
         self.liked = self.favorites.iter().map(|t| t.video_id.clone()).collect();
         self.persist();
+        let language = self.update(Message::Preference(Preference::UiLanguage(
+            imported_language,
+        )));
         let size = resize_request((window_width, window_height), self.ui_zoom);
-        iced::window::latest().and_then(move |id| iced::window::resize(id, size))
+        Task::batch([
+            language,
+            iced::window::latest().and_then(move |id| iced::window::resize(id, size)),
+        ])
     }
 
     fn current_lyrics_offset(&self) -> i64 {
@@ -5308,6 +5329,8 @@ mod tests {
         };
         let reset = App::reset_preferences(&current);
         assert_eq!(reset.ui_language, crate::preferences::UiLanguage::Spanish);
+        assert_eq!(reset.lyrics_offset_ms, current.lyrics_offset_ms);
+        assert_eq!(reset.volume, current.volume);
         assert_eq!(reset.window_width, current.window_width);
         assert!(reset.window_maximized);
         assert!(!reset.shuffle);
