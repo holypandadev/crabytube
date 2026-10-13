@@ -575,7 +575,10 @@ impl App {
             RemoteCommand::Play
                 if matches!(
                     self.playback_status.state,
-                    PlaybackState::Idle | PlaybackState::Stopped | PlaybackState::Finished
+                    PlaybackState::Idle
+                        | PlaybackState::Stopped
+                        | PlaybackState::Finished
+                        | PlaybackState::Error
                 ) =>
             {
                 if let Some(index) = self
@@ -804,14 +807,17 @@ impl App {
                 }
                 PlaybackState::Resolving => self.playback.pause(),
                 PlaybackState::Paused => self.playback.resume(),
-                PlaybackState::Finished | PlaybackState::Stopped | PlaybackState::Idle => {
+                // After an error, Play tries the track again, as its message asks.
+                PlaybackState::Finished
+                | PlaybackState::Stopped
+                | PlaybackState::Idle
+                | PlaybackState::Error => {
                     if let Some(index) = self.queue_index
                         && let Some(track) = self.queue.get(index).cloned()
                     {
                         return self.play_queued_track(track, index);
                     }
                 }
-                _ => {}
             },
             Message::NextTrack => {
                 if let Some(next) = self.next_queue_index() {
