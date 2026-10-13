@@ -302,14 +302,23 @@ impl BotguardHelper {
         let Ok(entries) = std::fs::read_dir(directory) else {
             return;
         };
+        let mut removed = 0;
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with("botguard-") && name.ends_with(".bin") {
-                let _ = std::fs::remove_file(entry.path());
+            if name.starts_with("botguard-")
+                && name.ends_with(".bin")
+                && std::fs::remove_file(entry.path()).is_ok()
+            {
+                removed += 1;
             }
         }
-        warn!("BotGuard helper exited without an answer; its snapshots were removed");
+        if removed > 0 {
+            warn!(
+                removed,
+                "BotGuard helper failed; its snapshots were removed"
+            );
+        }
     }
 
     /// Create a helper with an isolated snapshot path for diagnostics. Tokens persist beside it.
@@ -409,9 +418,14 @@ impl BotguardHelper {
         // A stuck helper is killed when the timed-out future drops the child (kill_on_drop).
         let output = tokio::select! {
             _ = cancel.cancelled() => return Err(PoTokenError::Cancelled),
-            result = tokio::time::timeout(BOTGUARD_HELPER_TIMEOUT, child.wait_with_output()) => result
-                .map_err(|_| PoTokenError::Helper("BotGuard helper timed out".into()))?
-                .map_err(|error| PoTokenError::Helper(error.to_string()))?,
+            result = tokio::time::timeout(BOTGUARD_HELPER_TIMEOUT, child.wait_with_output()) => match result {
+                Ok(output) => output.map_err(|error| PoTokenError::Helper(error.to_string()))?,
+                Err(_) => {
+                    // V8 can also hang on a damaged snapshot instead of dying; the next run starts cold.
+                    self.remove_snapshots();
+                    return Err(PoTokenError::Helper("BotGuard helper timed out".into()));
+                }
+            },
         };
         if !output.status.success() {
             #[derive(Deserialize)]
@@ -422,9 +436,11 @@ impl BotguardHelper {
                 .ok()
                 .and_then(|e| e.error)
             else {
-                // The helper died without an answer, as V8 does on a damaged snapshot. The snapshots
-                // are removed so the next request builds a fresh one instead of dying the same way.
-                self.remove_snapshots();
+                // The helper crashed, as V8 does on a damaged snapshot. The snapshots are removed so
+                // the next request builds a fresh one instead of dying the same way.
+                if crashed(&output.status) {
+                    self.remove_snapshots();
+                }
                 return Err(PoTokenError::Helper(format!(
                     "helper exited with {}",
                     output.status
@@ -624,6 +640,35 @@ fn helper_command() -> Result<Command, PoTokenError> {
     Err(PoTokenError::HelperMissing(format!(
         "{name} is not installed next to the application executable"
     )))
+}
+
+/// Whether the helper died the way a fatal V8 error ends a process: an abort or a fault, rather
+/// than an exit with a code or a kill from outside.
+fn crashed(status: &std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal().is_some_and(|signal| {
+            [
+                libc::SIGILL,
+                libc::SIGTRAP,
+                libc::SIGABRT,
+                libc::SIGBUS,
+                libc::SIGSEGV,
+            ]
+            .contains(&signal)
+        })
+    }
+    #[cfg(windows)]
+    {
+        // NTSTATUS error codes, such as an access violation or a fast-fail abort.
+        status.code().is_some_and(|code| code as u32 >= 0xC000_0000)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = status;
+        false
+    }
 }
 
 /// Upper bound for one BotGuard helper run before it is killed.
