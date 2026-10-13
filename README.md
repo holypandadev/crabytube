@@ -97,8 +97,8 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
   while they play. Files left behind by a crash are removed when CrabyTube starts, once they are old
   enough not to be in use.
 - The `CRABYTUBE_NETWORK_DIAGNOSTICS` environment variable, meant for troubleshooting, makes one
-  request to `api64.ipify.org` and logs only the address family and a truncated hash of the public
-  address. It is off unless you set it.
+  request to `api64.ipify.org` and logs only the address family, whether a proxy is set, and a
+  truncated hash of the public address. It is off unless you set it.
 
 ## Translations
 

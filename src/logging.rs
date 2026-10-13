@@ -1,4 +1,4 @@
-//! Where the app's log lines go. On Linux they go to stderr, as they always have. Windows and
+//! Where the app's log lines go. On Linux they go to stdout, as they always have. Windows and
 //! macOS windowed builds have no terminal to show them, so their lines go to `crabytube.log` in the
 //! local data folder, with URLs redacted. A log that has grown past `MAX_LOG_BYTES` is moved to
 //! `crabytube.log.1` when the app starts, which keeps one earlier copy.

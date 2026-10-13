@@ -35,38 +35,3 @@ pub fn configure_http(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder
         builder
     }
 }
-
-pub async fn observe_network_identity() -> Option<(String, bool, String)> {
-    std::env::var_os("CRABYTUBE_NETWORK_DIAGNOSTICS")?;
-    let client = configure_http(reqwest::Client::builder()).build().ok()?;
-    let address = client
-        .get("https://api64.ipify.org")
-        .send()
-        .await
-        .ok()?
-        .text()
-        .await
-        .ok()?;
-    let parsed = address.parse::<IpAddr>().ok()?;
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(parsed.to_string().as_bytes());
-    let fingerprint = digest[..4]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let proxy = [
-        "HTTPS_PROXY",
-        "https_proxy",
-        "HTTP_PROXY",
-        "http_proxy",
-        "ALL_PROXY",
-        "all_proxy",
-    ]
-    .iter()
-    .any(|name| std::env::var_os(name).is_some());
-    Some((
-        if parsed.is_ipv4() { "ipv4" } else { "ipv6" }.into(),
-        proxy,
-        fingerprint,
-    ))
-}

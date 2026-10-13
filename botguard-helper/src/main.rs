@@ -133,7 +133,7 @@ async fn run() -> Result<(), String> {
     drop(request.user_agent);
     drop(request.event_id);
     if std::env::var_os("CRABYTUBE_NETWORK_DIAGNOSTICS").is_some() {
-        let mut client = reqwest::Client::builder();
+        let mut client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
         if std::env::var_os("CRABYTUBE_FORCE_IPV4").is_some() {
             client = client.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
         }
