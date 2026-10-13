@@ -89,6 +89,20 @@ impl App {
         tasks.extend(seek_notice);
         tasks.append(&mut metadata_tasks);
 
+        // A track that failed, or a live broadcast, never reports a length: the lyrics stop waiting for one
+        // and say why, instead of loading for ever.
+        if self.lyrics_waiting_for_duration
+            && (self.playback_status.state == PlaybackState::Error || self.playback_status.live)
+        {
+            self.lyrics_waiting_for_duration = false;
+            self.lyrics_loading = false;
+            let reason = if self.playback_status.live {
+                "No matching lyrics available from the enabled sources. Try again later."
+            } else {
+                "Press play to load the lyrics."
+            };
+            self.lyrics_error = Some(self.tr(reason).into_owned());
+        }
         // Lyrics wait for the track length. The stream reports it once it resolves, so the search starts then.
         if self.lyrics_retry_due()
             && let Some(track) = self.playback_status.track.clone()
