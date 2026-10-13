@@ -70,7 +70,15 @@ impl App {
         };
         let header = row![
             column![
-                text(self.tr("Settings")).size(TEXT_DISPLAY).font(MONO),
+                // A narrow window takes the smaller title, as Favorites does, so a long word such as
+                // "Einstellungen" does not run under the Reset button.
+                text(self.tr("Settings"))
+                    .size(if width < 700.0 {
+                        theme::TEXT_TITLE
+                    } else {
+                        TEXT_DISPLAY
+                    })
+                    .font(MONO),
                 label(self.tr("Customize your experience").into_owned(), TEXT_BODY),
             ]
             .spacing(6)
