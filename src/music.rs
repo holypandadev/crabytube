@@ -907,9 +907,12 @@ fn artist_card_name(card: &Value) -> Option<String> {
         .and_then(Value::as_array)
         .is_some_and(|runs| {
             runs.iter().any(|run| {
-                run.pointer("/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType")
-                    .and_then(Value::as_str)
-                    == Some("MUSIC_PAGE_TYPE_ARTIST")
+                // A channel without an artist page heads its songs the same way.
+                matches!(
+                    run.pointer("/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType")
+                        .and_then(Value::as_str),
+                    Some("MUSIC_PAGE_TYPE_ARTIST" | "MUSIC_PAGE_TYPE_USER_CHANNEL")
+                )
             })
         });
     if !opens_artist {
