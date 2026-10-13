@@ -68,46 +68,55 @@ impl App {
         } else {
             width
         };
-        let header = row![
-            column![
-                // A narrow window takes the smaller title, as Favorites does, so a long word such as
-                // "Einstellungen" does not run under the Reset button.
-                text(self.tr("Settings"))
-                    .size(if width < 700.0 {
-                        theme::TEXT_TITLE
-                    } else {
-                        TEXT_DISPLAY
-                    })
-                    .font(MONO),
-                label(self.tr("Customize your experience").into_owned(), TEXT_BODY),
-            ]
-            .spacing(6)
-            .width(Length::Fill),
-            if width >= 760.0 {
-                Element::from(
-                    label(
-                        self.tr("Changes save automatically").into_owned(),
-                        TEXT_CAPTION,
-                    )
-                    .color(FADED),
-                )
-            } else {
-                Space::new().width(0).into()
-            },
-            button(
-                row![
-                    icon("repeat", 16.0, INK),
-                    label(self.tr("Reset").into_owned(), TEXT_BODY)
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center)
-            )
-            .on_press(Message::AskResetSettings)
-            .padding([12, 24])
-            .style(theme::outline_button),
+        let narrow = width < 700.0;
+        let title = column![
+            // A narrow window takes the smaller title, as Favorites does.
+            text(self.tr("Settings"))
+                .size(if narrow {
+                    theme::TEXT_TITLE
+                } else {
+                    TEXT_DISPLAY
+                })
+                .font(MONO),
+            label(self.tr("Customize your experience").into_owned(), TEXT_BODY),
         ]
-        .spacing(24)
-        .align_y(Alignment::Center);
+        .spacing(6)
+        .width(Length::Fill);
+        let reset = button(
+            row![
+                icon("repeat", 16.0, INK),
+                label(self.tr("Reset").into_owned(), TEXT_BODY)
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::AskResetSettings)
+        .padding([12, 24])
+        .style(theme::outline_button);
+        // On a narrow page the button goes under the title: beside it, a long word such as
+        // "Einstellungen" ran under "Zurücksetzen".
+        let header: Element<'_, Message> = if narrow {
+            column![title, reset].spacing(16).into()
+        } else {
+            row![
+                title,
+                if width >= 760.0 {
+                    Element::from(
+                        label(
+                            self.tr("Changes save automatically").into_owned(),
+                            TEXT_CAPTION,
+                        )
+                        .color(FADED),
+                    )
+                } else {
+                    Space::new().width(0).into()
+                },
+                reset,
+            ]
+            .spacing(24)
+            .align_y(Alignment::Center)
+            .into()
+        };
 
         let sections = [
             self.appearance_box(box_width),
