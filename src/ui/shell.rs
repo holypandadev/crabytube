@@ -468,11 +468,17 @@ impl App {
     /// Now Playing share it.
     pub(super) fn volume_control(&self, rail: Option<f32>) -> Element<'_, Message> {
         let muted = self.preferences.muted;
+        // At volume zero nothing is heard either, so the icon says so as for the mute.
+        let silent = muted || self.preferences.volume <= 0.0;
         let mut control = row![
-            button(icon(if muted { "volume-off" } else { "volume" }, 18.0, INK))
-                .on_press(Message::Preference(Preference::Muted(!muted)))
-                .padding(7)
-                .style(theme::icon_button),
+            button(icon(
+                if silent { "volume-off" } else { "volume" },
+                18.0,
+                INK
+            ))
+            .on_press(Message::Preference(Preference::Muted(!muted)))
+            .padding(7)
+            .style(theme::icon_button),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
