@@ -1455,12 +1455,8 @@ impl App {
                     } else {
                         more.continuation
                     };
-                    self.collection.tracks_context = data
-                        .tracks
-                        .iter()
-                        .map(|entry| entry.track.clone())
-                        .collect::<Vec<_>>()
-                        .into();
+                    self.collection.tracks_context =
+                        collection::queue_context(self.collection.target.as_ref(), data);
                     if let (Some(target), Some(shared)) =
                         (self.collection.target.clone(), self.collection.data.clone())
                     {

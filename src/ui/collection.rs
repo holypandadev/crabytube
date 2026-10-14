@@ -28,6 +28,32 @@ pub(super) struct CollectionState {
     pub tracks_context: Arc<[crate::music::Track]>,
 }
 
+/// The tracks a collection queues when played. An album's tracks come without covers of their own,
+/// so they carry the album's cover and the player, Now Playing and Up next show it.
+pub(super) fn queue_context(
+    target: Option<&BrowseTarget>,
+    data: &Collection,
+) -> Arc<[crate::music::Track]> {
+    let album = target
+        .is_some_and(|target| target.page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ALBUM"))
+        || data
+            .tracks
+            .iter()
+            .all(|entry| entry.track.thumbnail_url.is_none());
+    let cover = album.then(|| data.thumbnail_url.clone()).flatten();
+    data.tracks
+        .iter()
+        .map(|entry| {
+            let mut track = entry.track.clone();
+            if track.thumbnail_url.is_none() {
+                track.thumbnail_url.clone_from(&cover);
+            }
+            track
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
 impl CollectionState {
     pub fn cancel(&mut self) {
         if let Some(token) = self.cancellation.take() {
@@ -70,12 +96,7 @@ impl CollectionState {
 
     /// Shows `data` without copying it: the cache and the page share one allocation.
     fn show(&mut self, data: Arc<Collection>) {
-        self.tracks_context = data
-            .tracks
-            .iter()
-            .map(|entry| entry.track.clone())
-            .collect::<Vec<_>>()
-            .into();
+        self.tracks_context = queue_context(self.target.as_ref(), &data);
         self.data = Some(data);
     }
 
@@ -572,6 +593,31 @@ mod tests {
             unavailable_tracks: 0,
             related: Vec::new(),
         })
+    }
+
+    #[test]
+    fn album_tracks_are_queued_with_the_album_cover() {
+        let mut album = Arc::unwrap_or_clone(collection_with(vec![entry("a"), entry("b")], None));
+        album.thumbnail_url = Some("album-cover".into());
+        let queued = queue_context(None, &album);
+        assert!(
+            queued
+                .iter()
+                .all(|track| track.thumbnail_url.as_deref() == Some("album-cover"))
+        );
+
+        // A playlist keeps each track's own cover, and one without stays without.
+        let mut playlist = album.clone();
+        playlist.tracks[0].track.thumbnail_url = Some("own-cover".into());
+        let queued = queue_context(Some(&target("VLplaylist")), &playlist);
+        assert_eq!(queued[0].thumbnail_url.as_deref(), Some("own-cover"));
+        assert_eq!(queued[1].thumbnail_url, None);
+
+        let mut album_target = target("MPREb_album");
+        album_target.page_type = Some("MUSIC_PAGE_TYPE_ALBUM".into());
+        let queued = queue_context(Some(&album_target), &playlist);
+        assert_eq!(queued[0].thumbnail_url.as_deref(), Some("own-cover"));
+        assert_eq!(queued[1].thumbnail_url.as_deref(), Some("album-cover"));
     }
 
     #[test]
