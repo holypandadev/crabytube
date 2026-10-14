@@ -3792,6 +3792,42 @@ mod tests {
     }
 
     #[test]
+    fn a_playlist_that_starts_while_home_is_open_gets_its_cover_requested() {
+        let mut app = App {
+            page: Page::Home,
+            area: iced::Size::new(1214.0, 900.0),
+            queue_source: Some(super::QueueSource {
+                title: "Soundtrack".into(),
+                track_count: 64,
+                browse: Some(crate::music::BrowseTarget {
+                    browse_id: "VLPLsoundtrack".into(),
+                    params: None,
+                    page_type: None,
+                }),
+                thumbnail_url: Some("playlist-cover".into()),
+                album: false,
+            }),
+            ..App::default()
+        };
+        let mut track = song("First");
+        track.video_id = "abc".into();
+        drop(app.update_playback_status(PlaybackStatus {
+            track: Some(track),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        }));
+
+        assert_eq!(app.recent.len(), 1);
+        let variant =
+            crate::artwork::variant_for_pixels(super::home_panels::JUMP_THUMB * app.pixel_scale());
+        assert!(
+            app.artwork_requested
+                .contains(&("playlist-cover".into(), variant)),
+            "the new Jump back in entry asks for its cover"
+        );
+    }
+
+    #[test]
     fn scroll_preload_holds_one_timer_for_a_burst_of_scroll_events() {
         let mut app = App::default();
         let _ = app.scroll_preload_task();

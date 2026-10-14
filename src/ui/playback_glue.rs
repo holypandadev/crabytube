@@ -12,20 +12,21 @@ const SEEK_NOTICE_TIME: Duration = Duration::from_secs(3);
 
 impl App {
     /// Adds the track that just started playing to "Jump back in", once per start. A track that
-    /// plays from an album or playlist records that collection instead.
-    pub(super) fn record_playing_track(&mut self) {
+    /// plays from an album or playlist records that collection instead. Returns whether "Jump
+    /// back in" changed.
+    pub(super) fn record_playing_track(&mut self) -> bool {
         if self.playback_status.state != PlaybackState::Playing {
-            return;
+            return false;
         }
         let Some(track) = self.playback_status.track.clone() else {
-            return;
+            return false;
         };
         if self.recent_track_id.as_deref() == Some(track.video_id.as_str()) {
-            return;
+            return false;
         }
         self.recent_track_id = Some(track.video_id.clone());
         if !self.preferences.remember_history {
-            return;
+            return false;
         }
         let play = match &self.queue_source {
             Some(QueueSource {
@@ -48,6 +49,7 @@ impl App {
         Arc::make_mut(&mut self.recent).insert(0, play);
         Arc::make_mut(&mut self.recent).truncate(MAX_RECENT_PLAYS);
         self.persist();
+        true
     }
 
     pub(super) fn update_playback_status(&mut self, status: PlaybackStatus) -> Task<Message> {
@@ -58,7 +60,7 @@ impl App {
         self.playback_status = status;
         let seek_notice = self.note_seek_failures();
         self.playback_status_at = std::time::Instant::now();
-        self.record_playing_track();
+        let recent_changed = self.record_playing_track();
         // A position that moves back within the same track is a seek or a restart, whatever started it.
         let same_track = previous_track.as_ref().map(|track| &track.video_id)
             == self
@@ -88,6 +90,10 @@ impl App {
         let mut tasks = vec![self.follow_lyrics_task(old_active, resync)];
         tasks.extend(seek_notice);
         tasks.append(&mut metadata_tasks);
+        // A new entry in "Jump back in" brings a cover Home has not asked for yet.
+        if recent_changed && self.page == Page::Home {
+            tasks.push(self.preload_current_page_artwork());
+        }
 
         // A track that failed, or a live broadcast, never reports a length: the lyrics stop waiting for one
         // and say why, instead of loading for ever.
