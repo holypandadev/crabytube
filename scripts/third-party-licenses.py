@@ -61,11 +61,15 @@ def shipped_packages():
             packages[package["id"]] = package
         workspace.update(metadata["workspace_members"])
         nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+        # Each target is walked on its own: a crate seen for one target still leads to the
+        # dependencies it has only on the next.
+        seen = set()
         pending = list(metadata["workspace_members"])
         while pending:
             current = pending.pop()
-            if current in reached:
+            if current in seen:
                 continue
+            seen.add(current)
             reached.add(current)
             for dependency in nodes[current]["deps"]:
                 kinds = {kind["kind"] for kind in dependency["dep_kinds"]}
