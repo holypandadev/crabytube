@@ -308,16 +308,22 @@ impl App {
         // to the title, as Favorites does.
         let show_duration = !narrow && data.tracks.iter().any(|entry| entry.duration.is_some());
         let duration_w = if show_duration { 96.0 } else { 0.0 };
-        let index_w = if narrow { 28.0 } else { 48.0 };
-        let gap = if narrow { 10.0 } else { 16.0 };
         // An album's tracks have no covers of their own; its rows then leave the column out instead of
         // showing an empty frame on every line.
         let show_covers = data
             .tracks
             .iter()
             .any(|entry| entry.track.thumbnail_url.is_some());
-        // The spacer that stands in for the covers takes a gap too.
-        let gaps = 3.0 + f32::from(u8::from(show_duration));
+        // Without covers the title follows the number closely, so no gap reads as a missing cover.
+        let index_w = if narrow {
+            28.0
+        } else if show_covers {
+            48.0
+        } else {
+            32.0
+        };
+        let gap = if narrow { 10.0 } else { 16.0 };
+        let gaps = 2.0 + f32::from(u8::from(show_covers)) + f32::from(u8::from(show_duration));
         let cover = if show_covers {
             self.preferences.ui_density.collection_cover()
         } else {
@@ -417,7 +423,10 @@ impl App {
                     )
                     .color(ink.title)
                 )
-                .width(index_w),
+                .width(index_w)
+                // Without covers the row keeps their height: the list is laid out by a fixed pitch.
+                .height(self.preferences.ui_density.collection_cover())
+                .align_y(alignment::Vertical::Center),
             ];
             if show_covers {
                 cells = cells.push(self.cover(
@@ -425,13 +434,6 @@ impl App {
                     cover,
                     crate::artwork::THUMB_MAX,
                 ));
-            } else {
-                // Without covers the row keeps their height: the list is laid out by a fixed pitch.
-                cells = cells.push(
-                    Space::new()
-                        .width(0)
-                        .height(self.preferences.ui_density.collection_cover()),
-                );
             }
             let mut names = column![
                 label(
