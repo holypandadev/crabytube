@@ -284,6 +284,8 @@ pub struct BotguardHelper {
     inflight: Mutex<HashMap<VideoKey, Arc<Mutex<()>>>>,
     snapshot_path: PathBuf,
     pot_path: PathBuf,
+    /// Helper runs in a row that ran out of time.
+    timeouts_in_a_row: std::sync::atomic::AtomicU32,
 }
 
 impl BotguardHelper {
@@ -330,6 +332,7 @@ impl BotguardHelper {
             inflight: Mutex::new(HashMap::new()),
             snapshot_path,
             pot_path,
+            timeouts_in_a_row: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -421,12 +424,23 @@ impl BotguardHelper {
             result = tokio::time::timeout(BOTGUARD_HELPER_TIMEOUT, bounded_output(&mut child)) => match result {
                 Ok(output) => output.map_err(|error| PoTokenError::Helper(error.to_string()))?,
                 Err(_) => {
-                    // V8 can also hang on a damaged snapshot instead of dying; the next run starts cold.
-                    self.remove_snapshots();
+                    // V8 can also hang on a damaged snapshot instead of dying. A single timeout is as
+                    // likely a slow network, where a cold start would only be slower, so the snapshots go
+                    // after the second timeout in a row.
+                    let in_a_row = self
+                        .timeouts_in_a_row
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
+                    if in_a_row >= 2 {
+                        self.remove_snapshots();
+                    }
                     return Err(PoTokenError::Helper("BotGuard helper timed out".into()));
                 }
             },
         };
+        // The helper answered in time, whatever it answered.
+        self.timeouts_in_a_row
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         if !output.status.success() {
             #[derive(Deserialize)]
             struct ErrorResponse {
