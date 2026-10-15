@@ -59,7 +59,7 @@ impl App {
             _ => None,
         });
         let home_visible =
-            self.page == Page::Home && !self.window_minimized && !self.window_hidden_to_tray;
+            self.home_on_screen() && !self.window_minimized && !self.window_hidden_to_tray;
         let clock = if home_visible {
             Subscription::run(super::home_panels::clock_stream)
         } else {

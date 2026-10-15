@@ -1628,7 +1628,15 @@ impl App {
             }
             Message::SearchSubmitted => {
                 self.invalidate_suggestions();
-                self.search_committed = !self.search_query.trim().is_empty();
+                // An empty search has nothing to look for: it shows Home rather than an empty search page.
+                if self.search_query.trim().is_empty() {
+                    return if self.page == Page::Search {
+                        self.navigate(Page::Home)
+                    } else {
+                        Task::none()
+                    };
+                }
+                self.search_committed = true;
                 self.push_history(self.search_query.clone());
                 let navigation = self.navigate(Page::Search);
                 let search = self.start_search(self.search_query.clone(), false);
@@ -3890,6 +3898,27 @@ mod tests {
         let order: Vec<_> = app.queue.iter().map(|t| t.video_id.as_str()).collect();
         assert_eq!(order, ["a", "b", "c", "d", "e", "f", "g", "h", "added"]);
         assert_eq!(app.queue_index, Some(2), "the playing track keeps playing");
+    }
+
+    #[test]
+    fn an_empty_search_shows_home_with_its_covers() {
+        let mut app = with_picks(App {
+            page: Page::Home,
+            area: iced::Size::new(1214.0, 720.0),
+            home_shelves: vec![shelf_with_artwork(0)],
+            ..App::default()
+        });
+        drop(app.update(Message::SearchSubmitted));
+        assert_eq!(app.page, Page::Home, "nothing to look for");
+
+        // The search page before it has results draws Home, and asks for Home's covers.
+        app.page = Page::Search;
+        app.search_committed = false;
+        app.catalog_results.clear();
+        assert!(app.home_on_screen());
+        assert!(!app.current_page_artwork().is_empty());
+        drop(app.update(Message::SearchSubmitted));
+        assert_eq!(app.page, Page::Home);
     }
 
     #[test]

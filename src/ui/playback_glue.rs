@@ -91,7 +91,7 @@ impl App {
         tasks.extend(seek_notice);
         tasks.append(&mut metadata_tasks);
         // A new entry in "Jump back in" brings a cover Home has not asked for yet.
-        if recent_changed && self.page == Page::Home {
+        if recent_changed && self.home_on_screen() {
             tasks.push(self.preload_current_page_artwork());
         }
 

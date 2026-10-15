@@ -651,8 +651,18 @@ impl App {
     }
 
     /// The results scroll under the search field, which stays at the top of the page.
+    /// Whether Home is what the window shows: the Home page, or the search page before it has any
+    /// results to show, which draws Home. Home's covers, clock and status line follow this.
+    pub(super) fn home_on_screen(&self) -> bool {
+        match self.page {
+            super::Page::Home => true,
+            super::Page::Search => !self.search_committed && self.catalog_results.is_empty(),
+            _ => false,
+        }
+    }
+
     pub(super) fn search_page(&self, area: Size) -> Element<'_, Message> {
-        if !self.search_committed && self.catalog_results.is_empty() {
+        if self.home_on_screen() {
             return self.home_page(area);
         }
         let width = area.width.max(280.0);

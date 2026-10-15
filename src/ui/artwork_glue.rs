@@ -108,7 +108,7 @@ impl App {
     /// covers requested are the ones on screen.
     pub(super) fn current_page_artwork(&self) -> Vec<CoverRequest> {
         match &self.page {
-            Page::Home => {
+            _ if self.home_on_screen() => {
                 let layout = self.home_layout(self.area);
                 let variant = crate::artwork::variant_for_pixels(layout.card * self.pixel_scale());
                 let mut requests: Vec<CoverRequest> = self
