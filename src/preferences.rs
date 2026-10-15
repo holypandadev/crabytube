@@ -516,6 +516,10 @@ pub struct Snapshot {
     /// have not played out of the queue, after a restart too.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub autoplay_added: Vec<String>,
+    /// The queue's order before Shuffle mixed it, by video id, so that turning Shuffle off puts it
+    /// back, after a restart too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unshuffled_order: Vec<String>,
 }
 impl Snapshot {
     pub fn normalize(&mut self) {
@@ -560,6 +564,10 @@ impl Snapshot {
             .collect();
         self.autoplay_added
             .retain(|id| queued.contains(id.as_str()));
+        self.unshuffled_order.truncate(MAX_QUEUE_TRACKS);
+        if self.queue.is_empty() {
+            self.unshuffled_order.clear();
+        }
         if !self.preferences.remember_history {
             Arc::make_mut(&mut self.history).clear();
             Arc::make_mut(&mut self.recent).clear();

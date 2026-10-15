@@ -475,6 +475,11 @@ impl App {
     }
 
     pub(super) fn shuffle_queue(&mut self) {
+        self.unshuffled_order = self
+            .queue
+            .iter()
+            .map(|track| track.video_id.clone())
+            .collect();
         let current = self.queue_index.filter(|&index| index < self.queue.len());
         let start = match current {
             // The whole queue is shuffled around the track that plays, which goes first so that
@@ -494,6 +499,42 @@ impl App {
         }
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.persist();
+    }
+
+    /// Puts the queue back in the order it had before Shuffle mixed it. The playing track keeps
+    /// playing: the tracks before it in that order become the ones already played. Tracks added
+    /// since then, such as Autoplay's, follow in the order they have now.
+    pub(super) fn restore_unshuffled_order(&mut self) {
+        let order = std::mem::take(&mut self.unshuffled_order);
+        if order.is_empty() || self.queue.len() < 2 {
+            return;
+        }
+        let mut position = HashMap::with_capacity(order.len());
+        for (index, id) in order.iter().enumerate() {
+            position.entry(id.as_str()).or_insert(index);
+        }
+        let mut ranked: Vec<(usize, usize)> = self
+            .queue
+            .iter()
+            .enumerate()
+            .map(|(index, track)| {
+                let rank = position
+                    .get(track.video_id.as_str())
+                    .copied()
+                    .unwrap_or(order.len());
+                (rank, index)
+            })
+            .collect();
+        ranked.sort_unstable();
+        let current = self.queue_index;
+        self.queue_index =
+            current.and_then(|current| ranked.iter().position(|&(_, index)| index == current));
+        let reordered = ranked
+            .iter()
+            .map(|&(_, index)| self.queue[index].clone())
+            .collect();
+        self.queue = Arc::new(reordered);
+        self.queue_generation = self.queue_generation.wrapping_add(1);
     }
 
     pub(super) fn load_radio(&mut self) -> Task<Message> {
@@ -755,7 +796,15 @@ impl App {
                     let swap_with = rand::thread_rng().gen_range(1..shuffled.len());
                     shuffled.swap(0, swap_with);
                 }
-                return self.update(Message::PlayContext(Arc::from(shuffled), 0));
+                let play = self.update(Message::PlayContext(Arc::from(shuffled), 0));
+                // Turning Shuffle off then plays the collection in its own order.
+                self.unshuffled_order = tracks
+                    .iter()
+                    .take(crate::preferences::MAX_QUEUE_TRACKS)
+                    .map(|track| track.video_id.clone())
+                    .collect();
+                self.persist();
+                return play;
             }
             Message::RetryRadio => {
                 self.radio_attempted_for = None;
@@ -825,6 +874,8 @@ impl App {
                 self.shuffle = !self.shuffle;
                 if self.shuffle {
                     self.shuffle_queue();
+                } else {
+                    self.restore_unshuffled_order();
                 }
                 self.preferences.shuffle = self.shuffle;
                 self.persist();
@@ -898,8 +949,14 @@ impl App {
                     .then_some(super::now_playing::QueueNotice::Limited(
                         crate::preferences::MAX_QUEUE_TRACKS,
                     ));
+                self.unshuffled_order.clear();
                 // Shuffle mode: keep the selected track first and shuffle the rest.
                 if self.shuffle && tracks.len() > 2 {
+                    self.unshuffled_order = tracks
+                        .iter()
+                        .take(crate::preferences::MAX_QUEUE_TRACKS)
+                        .map(|track| track.video_id.clone())
+                        .collect();
                     let mut rest: Vec<Track> = tracks
                         .iter()
                         .enumerate()
@@ -974,6 +1031,7 @@ impl App {
                     return self.play_queued_track(track, index);
                 }
                 self.radio_track_ids.clear();
+                self.unshuffled_order.clear();
                 self.queue_scroll = AbsoluteOffset::default();
                 self.queue_notice = None;
                 self.queue_source = None;

@@ -109,6 +109,8 @@ struct App {
     queue_index: Option<usize>,
     queue_source: Option<QueueSource>,
     radio_track_ids: HashSet<String>,
+    /// The queue's order before Shuffle mixed it, by video id. Turning Shuffle off puts it back.
+    unshuffled_order: Vec<String>,
     queue_notice: Option<now_playing::QueueNotice>,
     queue_generation: u64,
     liked: HashSet<String>,
@@ -2127,6 +2129,7 @@ impl App {
             queue_index: None,
             queue_source: None,
             radio_track_ids: HashSet::new(),
+            unshuffled_order: Vec::new(),
             queue_notice: None,
             queue_scroll: AbsoluteOffset::default(),
             queue_generation: 0,
@@ -2239,6 +2242,7 @@ impl App {
                 app.queue = saved.queue.clone();
                 app.queue_index = saved.queue_index;
                 app.radio_track_ids = saved.autoplay_added.iter().cloned().collect();
+                app.unshuffled_order = saved.unshuffled_order.clone();
                 app.search_history = saved.history.clone();
                 app.recent = saved.recent.clone();
                 app.favorites = saved.favorites.clone();
@@ -2383,6 +2387,7 @@ impl App {
             favorites: Arc::clone(&self.favorites),
             recent: Arc::clone(&self.recent),
             autoplay_added: self.radio_track_ids.iter().cloned().collect(),
+            unshuffled_order: self.unshuffled_order.clone(),
         }
     }
 
@@ -2485,6 +2490,7 @@ impl App {
         self.apply_preferences();
         self.sync_discord_presence(true);
         self.queue = snapshot.queue;
+        self.unshuffled_order.clear();
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.queue_index = snapshot.queue_index;
         self.radio_track_ids.clear();
@@ -3859,6 +3865,31 @@ mod tests {
             app.snapshot().autoplay_added,
             vec!["radio-played".to_owned()]
         );
+    }
+
+    #[test]
+    fn turning_shuffle_off_puts_the_queue_back_in_its_order() {
+        let mut app = App::default();
+        let ids = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        app.queue = ids
+            .iter()
+            .map(|id| fixture_track(id))
+            .collect::<Vec<_>>()
+            .into();
+        app.queue_index = Some(2);
+
+        drop(app.update(Message::ToggleShuffle));
+        assert!(app.shuffle);
+        let playing = app.queue[app.queue_index.unwrap()].video_id.clone();
+        assert_eq!(playing, "c");
+        // A track added while shuffled stays, after the ones of the original order.
+        Arc::make_mut(&mut app.queue).push(fixture_track("added"));
+
+        drop(app.update(Message::ToggleShuffle));
+        assert!(!app.shuffle);
+        let order: Vec<_> = app.queue.iter().map(|t| t.video_id.as_str()).collect();
+        assert_eq!(order, ["a", "b", "c", "d", "e", "f", "g", "h", "added"]);
+        assert_eq!(app.queue_index, Some(2), "the playing track keeps playing");
     }
 
     #[test]
