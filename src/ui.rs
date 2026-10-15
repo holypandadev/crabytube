@@ -673,6 +673,9 @@ impl App {
                 return iced::exit();
             }
             Message::WindowOpened(id) => {
+                // A new window is neither minimized nor hidden.
+                self.window_minimized = false;
+                self.window_hidden_to_tray = false;
                 // Read back what the compositor gave the window, and on the first launch fit it to
                 // the monitor. A window opened again from the tray takes the focus.
                 let size = iced::window::size(id).map(|size| Message::Resized {
