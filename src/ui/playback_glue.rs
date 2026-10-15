@@ -298,6 +298,30 @@ impl App {
     }
 
     /// Starts the next queued track after a track finishes, if the repeat mode allows it.
+    /// Takes the tracks Autoplay added and that have not played yet out of the queue: with Autoplay
+    /// off, the queue ends where the user's own tracks end. Tracks already played stay, so going back
+    /// still works.
+    pub(super) fn drop_upcoming_autoplay_tracks(&mut self) {
+        let start = self.queue_index.map_or(0, |current| current + 1);
+        if !self.queue[start.min(self.queue.len())..]
+            .iter()
+            .any(|track| self.radio_track_ids.contains(&track.video_id))
+        {
+            return;
+        }
+        let radio = &self.radio_track_ids;
+        let mut index = 0;
+        Arc::make_mut(&mut self.queue).retain(|track| {
+            let keep = index < start || !radio.contains(&track.video_id);
+            index += 1;
+            keep
+        });
+        self.radio_track_ids
+            .retain(|id| self.queue.iter().any(|track| &track.video_id == id));
+        self.queue_generation = self.queue_generation.wrapping_add(1);
+        self.persist();
+    }
+
     pub(super) fn advance_after_finish(&mut self) -> Option<Task<Message>> {
         if self.repeat == RepeatMode::One
             && let Some(index) = self.queue_index
@@ -329,6 +353,8 @@ impl App {
             (true, Some(current)) => (current + 1).min(self.queue.len()),
             _ => self.queue.len(),
         };
+        // A track the user queues stays when Autoplay goes off, even one Autoplay had added before.
+        self.radio_track_ids.remove(&track.video_id);
         Arc::make_mut(&mut self.queue).insert(position, track);
         if let Some(current) = self.queue_index
             && position <= current

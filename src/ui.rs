@@ -986,6 +986,7 @@ impl App {
                             self.radio_generation = self.radio_generation.wrapping_add(1);
                             self.radio_loading = false;
                             self.radio_attempted_for = None;
+                            self.drop_upcoming_autoplay_tracks();
                         }
                     }
                     Preference::DiscordPresence(v) => {
@@ -2237,6 +2238,7 @@ impl App {
                 }
                 app.queue = saved.queue.clone();
                 app.queue_index = saved.queue_index;
+                app.radio_track_ids = saved.autoplay_added.iter().cloned().collect();
                 app.search_history = saved.history.clone();
                 app.recent = saved.recent.clone();
                 app.favorites = saved.favorites.clone();
@@ -2380,6 +2382,7 @@ impl App {
             history: Arc::clone(&self.search_history),
             favorites: Arc::clone(&self.favorites),
             recent: Arc::clone(&self.recent),
+            autoplay_added: self.radio_track_ids.iter().cloned().collect(),
         }
     }
 
@@ -3824,6 +3827,37 @@ mod tests {
             app.artwork_requested
                 .contains(&("playlist-cover".into(), variant)),
             "the new Jump back in entry asks for its cover"
+        );
+    }
+
+    #[test]
+    fn turning_autoplay_off_drops_the_tracks_it_added_that_have_not_played() {
+        let mut app = App {
+            autoplay: true,
+            ..App::default()
+        };
+        app.queue = vec![
+            fixture_track("mine"),
+            fixture_track("radio-played"),
+            fixture_track("radio-next"),
+            fixture_track("queued-by-hand"),
+            fixture_track("radio-later"),
+        ]
+        .into();
+        app.queue_index = Some(1);
+        app.radio_track_ids = ["radio-played", "radio-next", "radio-later"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        drop(app.update(Message::Preference(Preference::Autoplay(false))));
+
+        let left: Vec<_> = app.queue.iter().map(|t| t.video_id.as_str()).collect();
+        assert_eq!(left, ["mine", "radio-played", "queued-by-hand"]);
+        assert_eq!(app.queue_index, Some(1));
+        assert_eq!(
+            app.snapshot().autoplay_added,
+            vec!["radio-played".to_owned()]
         );
     }
 

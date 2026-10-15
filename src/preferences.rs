@@ -512,6 +512,10 @@ pub struct Snapshot {
     pub favorites: Arc<Vec<Track>>,
     /// Newest first, without repeats.
     pub recent: Arc<Vec<RecentPlay>>,
+    /// The queued tracks that Autoplay added, by video id. Turning Autoplay off takes the ones that
+    /// have not played out of the queue, after a restart too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub autoplay_added: Vec<String>,
 }
 impl Snapshot {
     pub fn normalize(&mut self) {
@@ -549,6 +553,13 @@ impl Snapshot {
             Arc::make_mut(&mut self.queue).clear();
             self.queue_index = None;
         }
+        let queued: HashSet<&str> = self
+            .queue
+            .iter()
+            .map(|track| track.video_id.as_str())
+            .collect();
+        self.autoplay_added
+            .retain(|id| queued.contains(id.as_str()));
         if !self.preferences.remember_history {
             Arc::make_mut(&mut self.history).clear();
             Arc::make_mut(&mut self.recent).clear();
