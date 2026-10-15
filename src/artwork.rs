@@ -331,6 +331,18 @@ fn legacy_cache_path(url: &str) -> std::path::PathBuf {
     ))
 }
 
+/// A temp file name no other save of this process uses. Covers are saved in parallel, and the clock
+/// alone does not tell two saves apart: on macOS it counts whole microseconds, and two saves that shared
+/// a file left one cover's picture under the other's name.
+fn temporary_name() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!(
+        ".tmp-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 /// Atomic write of a cache file: the bytes go to a unique temp file in the same directory, which is
 /// then renamed, so readers never see a partial file. The folder is trimmed once the file is in place.
 fn atomic_save_bytes(path: &std::path::Path, bytes: &[u8]) -> bool {
@@ -340,14 +352,7 @@ fn atomic_save_bytes(path: &std::path::Path, bytes: &[u8]) -> bool {
     if crate::storage::create_private_dir_all(parent).is_err() {
         return false;
     }
-    let tmp = parent.join(format!(
-        ".tmp-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
+    let tmp = parent.join(temporary_name());
     if std::fs::write(&tmp, bytes).is_err() {
         let _ = std::fs::remove_file(&tmp);
         return false;
@@ -1015,6 +1020,38 @@ mod tests {
             handle_bytes(cache.get_for("cover", 640).unwrap()),
             320 * 320 * 4
         );
+    }
+
+    #[test]
+    fn covers_saved_at_the_same_moment_each_keep_their_own_picture() {
+        let names: std::collections::HashSet<String> =
+            (0..1000).map(|_| super::temporary_name()).collect();
+        assert_eq!(names.len(), 1000);
+        let directory = std::env::temp_dir().join(format!(
+            "crabytube-artwork-parallel-save-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(16));
+        let saves: Vec<_> = (0..16u8)
+            .map(|index| {
+                let start = start.clone();
+                let path = directory.join(format!("cover-{index}.img"));
+                std::thread::spawn(move || {
+                    start.wait();
+                    assert!(super::atomic_save_bytes(&path, &[index; 4096]));
+                })
+            })
+            .collect();
+        for save in saves {
+            save.join().unwrap();
+        }
+        for index in 0..16u8 {
+            let saved = std::fs::read(directory.join(format!("cover-{index}.img"))).unwrap();
+            assert_eq!(saved, vec![index; 4096]);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
