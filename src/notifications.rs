@@ -25,9 +25,10 @@ const EXPIRE_MS: i32 = 5_000;
 #[cfg(target_os = "linux")]
 const PORTAL_NOTICE_ID: &str = "track";
 
-/// The portal returns no id. Any non-zero number tells the caller that the notice was sent.
+/// The portal returns no id. Any non-zero number tells the caller that the notice was sent; this
+/// one is never passed on to the service, where it could name another program's notification.
 #[cfg(target_os = "linux")]
-const PORTAL_SENT: u32 = 1;
+const PORTAL_SENT: u32 = u32::MAX;
 
 /// Sends the notice and returns the id the service assigned. Through the portal the id is a
 /// placeholder, since the portal assigns none. Zero means it was not sent, for example when no
@@ -47,6 +48,16 @@ pub async fn show(notice: TrackNotice) -> u32 {
             tracing::debug!(%error, "track notification was not shown");
             0
         }
+    }
+}
+
+/// The id the service replaces: the portal's placeholder names nothing the service sent.
+#[cfg(target_os = "linux")]
+fn service_replaces_id(replaces_id: u32) -> u32 {
+    if replaces_id == PORTAL_SENT {
+        0
+    } else {
+        replaces_id
     }
 }
 
@@ -105,7 +116,7 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
             "Notify",
             &(
                 "CrabyTube",
-                notice.replaces_id,
+                service_replaces_id(notice.replaces_id),
                 // The installed icon name (see `packaging/icons`).
                 crate::APP_ID,
                 summary.as_str(),
@@ -181,6 +192,14 @@ mod tests {
             "Tom &amp; Jerry &lt;live&gt;"
         );
         assert_eq!(escape_markup("Plain Song Title"), "Plain Song Title");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_portal_placeholder_replaces_nothing_at_the_service() {
+        assert_eq!(super::service_replaces_id(super::PORTAL_SENT), 0);
+        assert_eq!(super::service_replaces_id(7), 7);
+        assert_eq!(super::service_replaces_id(0), 0);
     }
 
     #[cfg(target_os = "linux")]

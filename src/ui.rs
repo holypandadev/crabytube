@@ -48,6 +48,15 @@ use messages::{
     Confirmation, Message, NowPlayingTab, Page, PendingConfirmation, Preference, RowMenu,
 };
 
+/// Where the scrolled lists stood.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ListScroll {
+    search: AbsoluteOffset,
+    library: AbsoluteOffset,
+    queue: AbsoluteOffset,
+    collection: f32,
+}
+
 struct App {
     lyrics: Option<crate::lyrics::Lyrics>,
     lyrics_error: Option<String>,
@@ -156,6 +165,8 @@ struct App {
     window_hidden_to_tray: bool,
     /// The window was closed for the tray (Linux) and opens again from there.
     window_closed_to_tray: bool,
+    /// Where the lists stood when the window was closed for the tray.
+    scroll_before_tray: Option<ListScroll>,
     /// The window has been opened once; later openings come from the tray.
     window_opened_before: bool,
     /// Set by our own minimize button, and by focus changes checked with the window.
@@ -576,6 +587,12 @@ impl App {
             // Wayland cannot hide a window, so on Linux it is closed and opened again from the
             // tray. That also frees what drawing it holds.
             self.window_closed_to_tray = true;
+            self.scroll_before_tray = Some(ListScroll {
+                search: self.search_scroll,
+                library: self.library_scroll,
+                queue: self.queue_scroll,
+                collection: self.collection_scroll,
+            });
             return iced::window::latest().and_then(iced::window::close);
         }
         iced::window::latest().and_then(|id| iced::window::set_mode(id, iced::window::Mode::Hidden))
@@ -588,6 +605,12 @@ impl App {
                 self.preferences.window_width,
                 self.preferences.window_height,
             );
+            // As at startup, the zoom is the one for the size asked for: Iced multiplies the size
+            // by it, and the zoom of a maximized window would make the window too large.
+            self.os_window = (width, height);
+            self.apply_ui_zoom();
+            self.zoom_applied = self.ui_zoom;
+            self.area = estimated_area(self.window_width, self.window_height);
             let size = requested_window_size((width, height), self.preferences.scale_with_window);
             let (_, open) = iced::window::open(main_window_settings(
                 size,
@@ -694,7 +717,18 @@ impl App {
                 } else {
                     iced::window::gain_focus(id)
                 };
-                return Task::batch([size, scale, fit, focus, self.preload_current_page_artwork()]);
+                let lists = self
+                    .scroll_before_tray
+                    .take()
+                    .map_or_else(Task::none, |scroll| self.restore_list_scroll(scroll));
+                return Task::batch([
+                    size,
+                    scale,
+                    fit,
+                    focus,
+                    lists,
+                    self.preload_current_page_artwork(),
+                ]);
             }
 
             Message::ShuffleContext(..)
@@ -1987,12 +2021,12 @@ impl App {
                     // Minimizing takes the focus away too, so ask the window what happened.
                     return iced::window::latest()
                         .and_then(iced::window::is_minimized)
-                        .map(|minimized| {
-                            Message::WindowMinimizedChecked(minimized.unwrap_or(false))
-                        });
+                        .map(Message::WindowMinimizedChecked);
                 }
             }
-            Message::WindowMinimizedChecked(minimized) => {
+            // Wayland does not tell: what the app knows, as a minimize from its own button, stays.
+            Message::WindowMinimizedChecked(None) => {}
+            Message::WindowMinimizedChecked(Some(minimized)) => {
                 let was_minimized = std::mem::replace(&mut self.window_minimized, minimized);
                 if minimized && !was_minimized {
                     self.release_artwork_off_screen();
@@ -2240,6 +2274,7 @@ impl App {
             tray_status: "System tray is starting.".into(),
             window_hidden_to_tray: false,
             window_closed_to_tray: false,
+            scroll_before_tray: None,
             window_opened_before: false,
             window_minimized: false,
             clock: crate::local_clock::LocalClock::now(),
@@ -2832,6 +2867,40 @@ impl App {
             .iter()
             .find(|(remembered, _)| remembered == target)
             .map_or(0.0, |(_, y)| *y)
+    }
+
+    /// Puts the lists of a window opened again from the tray where they stood. Its lists start at
+    /// the top, and their first report of that position overwrote the one kept.
+    fn restore_list_scroll(&mut self, scroll: ListScroll) -> Task<Message> {
+        self.search_scroll = scroll.search;
+        self.library_scroll = scroll.library;
+        self.queue_scroll = scroll.queue;
+        self.collection_scroll = scroll.collection;
+        if let Page::CollectionDetail(target) = self.page.clone() {
+            self.remember_collection_scroll(target, scroll.collection);
+        }
+        // The lyrics follow the line that is sung now, as when their page opens.
+        let lyrics =
+            if self.page == Page::NowPlaying && self.now_playing_tab == NowPlayingTab::Lyrics {
+                self.resync_lyrics();
+                let resync = self.take_lyrics_resync();
+                self.follow_lyrics_task(None, resync)
+            } else {
+                Task::none()
+            };
+        Task::batch([
+            operation::scroll_to("search-content", scroll.search),
+            operation::scroll_to("library-content", scroll.library),
+            operation::scroll_to("queue-content", scroll.queue),
+            operation::scroll_to(
+                "collection-content",
+                AbsoluteOffset {
+                    x: 0.0,
+                    y: scroll.collection,
+                },
+            ),
+            lyrics,
+        ])
     }
 
     fn remember_collection_scroll(&mut self, target: BrowseTarget, y: f32) {
@@ -3795,6 +3864,71 @@ mod tests {
         assert!(should_close_to_tray(true, true));
         assert!(!should_close_to_tray(false, true));
         assert!(!should_close_to_tray(true, false));
+    }
+
+    #[test]
+    fn a_minimize_from_the_app_stays_known_when_wayland_cannot_tell() {
+        let mut app = App::default();
+        drop(app.update(Message::MinimizeWindow));
+        assert!(app.window_minimized);
+        // The focus goes, and Wayland answers neither yes nor no: the covers stay released.
+        drop(app.update(Message::WindowFocusChanged(false)));
+        drop(app.update(Message::WindowMinimizedChecked(None)));
+        assert!(app.window_minimized);
+        // The window comes back with the focus.
+        drop(app.update(Message::WindowFocusChanged(true)));
+        assert!(!app.window_minimized);
+        // Where the system answers, its answer counts.
+        drop(app.update(Message::WindowMinimizedChecked(Some(true))));
+        assert!(app.window_minimized);
+        drop(app.update(Message::WindowMinimizedChecked(Some(false))));
+        assert!(!app.window_minimized);
+    }
+
+    #[test]
+    fn a_window_opened_again_from_the_tray_is_asked_for_at_the_zoom_of_its_saved_size() {
+        let mut app = App::default();
+        app.preferences.scale_with_window = true;
+        app.preferences.window_width = 1280.0;
+        app.preferences.window_height = 800.0;
+        app.preferences.window_maximized = true;
+        // It was maximized on a large monitor, which zooms the interface.
+        app.os_window = (2560.0, 1392.0);
+        app.apply_ui_zoom();
+        assert!(app.ui_zoom > 1.5);
+        app.window_closed_to_tray = true;
+        drop(app.show_window_from_tray_task());
+        assert_eq!(app.os_window, (1280.0, 800.0));
+        assert_eq!(app.ui_zoom, 1.0);
+        assert_eq!(app.zoom_applied, 1.0);
+        assert!(!app.window_closed_to_tray);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn lists_return_to_where_they_stood_when_the_window_comes_back_from_the_tray() {
+        use iced::widget::operation::AbsoluteOffset;
+        let at = |y| AbsoluteOffset { x: 0.0, y };
+        let mut app = App {
+            tray_available: true,
+            search_scroll: at(120.0),
+            library_scroll: at(640.0),
+            queue_scroll: at(900.0),
+            collection_scroll: 300.0,
+            ..App::default()
+        };
+        drop(app.hide_window_to_tray_task());
+        assert!(app.window_closed_to_tray);
+        // The new window's lists start at the top and say so first.
+        drop(app.update(Message::LibraryScrolled(at(0.0))));
+        drop(app.update(Message::QueueScrolled(at(0.0))));
+        drop(app.show_window_from_tray_task());
+        drop(app.update(Message::WindowOpened(iced::window::Id::unique())));
+        assert_eq!(app.search_scroll, at(120.0));
+        assert_eq!(app.library_scroll, at(640.0));
+        assert_eq!(app.queue_scroll, at(900.0));
+        assert_eq!(app.collection_scroll, 300.0);
+        assert!(app.scroll_before_tray.is_none());
     }
 
     #[test]
@@ -5388,7 +5522,7 @@ mod tests {
         };
         drop(app.update_playback_status(status));
         assert!(!app.karaoke_tick_pending, "no wake-up while minimized");
-        drop(app.update(Message::WindowMinimizedChecked(false)));
+        drop(app.update(Message::WindowMinimizedChecked(Some(false))));
         assert!(
             app.karaoke_tick_pending,
             "restoring the window schedules the wake-up again"
@@ -5570,10 +5704,14 @@ mod tests {
             queue_index: Some(1),
             ..App::default()
         };
+        // Its length is known, but nothing is loaded to seek in yet.
+        app.known_durations
+            .insert("b".into(), Duration::from_secs(200));
         let state = app.mpris_player_state();
         assert_eq!(state.title.as_deref(), Some("Title b"));
         assert_eq!(state.playback_status, "Paused");
         assert!(state.can_play);
+        assert!(state.duration.is_none());
         let _ = app.apply_mpris_command(crate::mpris::RemoteCommand::Play);
         assert_eq!(
             app.playback_status

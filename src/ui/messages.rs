@@ -286,7 +286,7 @@ pub(super) enum Message {
     /// The window gained or lost focus.
     WindowFocusChanged(bool),
     /// Whether the window is minimized, asked of the window after it lost focus.
-    WindowMinimizedChecked(bool),
+    WindowMinimizedChecked(Option<bool>),
     /// A minute passed while Home is visible, so the greeting may have changed.
     ClockTick,
     /// Memory and CPU for the Home status line, sent only when the figures shown change.

@@ -615,10 +615,14 @@ impl App {
             }
             .into(),
             position,
-            duration: self
-                .playback_status
-                .duration
-                .or_else(|| track.and_then(|track| self.track_duration(&track.video_id))),
+            // Nothing is loaded for a restored entry, so no length is offered to seek in.
+            duration: if restored {
+                None
+            } else {
+                self.playback_status
+                    .duration
+                    .or_else(|| track.and_then(|track| self.track_duration(&track.video_id)))
+            },
             volume: if self.preferences.muted {
                 0.0
             } else {
