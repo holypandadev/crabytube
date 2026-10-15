@@ -154,6 +154,10 @@ struct App {
     tray_available: bool,
     tray_status: String,
     window_hidden_to_tray: bool,
+    /// The window was closed for the tray (Linux) and opens again from there.
+    window_closed_to_tray: bool,
+    /// The window has been opened once; later openings come from the tray.
+    window_opened_before: bool,
     /// Set by our own minimize button, and by focus changes checked with the window.
     window_minimized: bool,
     /// The local time the Home greeting shows.
@@ -288,6 +292,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::DisplayScaleChanged(_)
         | Message::WindowFocusChanged(_)
         | Message::WindowMinimizedChecked(_)
+        | Message::WindowOpened(_)
         | Message::AreaMeasured(_)
         | Message::ArtworkLoaded { .. }
         | Message::RestoredCoverLoaded { .. }
@@ -565,11 +570,32 @@ impl App {
             return Task::none();
         }
         self.window_hidden_to_tray = true;
+        // The covers and the heap the page held go back while nothing is drawn.
+        self.release_artwork_off_screen();
+        if cfg!(target_os = "linux") {
+            // Wayland cannot hide a window, so on Linux it is closed and opened again from the
+            // tray. That also frees what drawing it holds.
+            self.window_closed_to_tray = true;
+            return iced::window::latest().and_then(iced::window::close);
+        }
         iced::window::latest().and_then(|id| iced::window::set_mode(id, iced::window::Mode::Hidden))
     }
 
     fn show_window_from_tray_task(&mut self) -> Task<Message> {
         self.window_hidden_to_tray = false;
+        if std::mem::take(&mut self.window_closed_to_tray) {
+            let (width, height) = layout::clamped_window(
+                self.preferences.window_width,
+                self.preferences.window_height,
+            );
+            let size = requested_window_size((width, height), self.preferences.scale_with_window);
+            let (_, open) = iced::window::open(main_window_settings(
+                size,
+                self.preferences.window_maximized,
+                false,
+            ));
+            return open.map(Message::WindowOpened);
+        }
         iced::window::latest().and_then(move |id| {
             // Restore the window only when it is minimized. Wayland does not report that
             // state, so nothing is sent there.
@@ -589,7 +615,7 @@ impl App {
         if should_close_to_tray(self.preferences.close_to_tray, self.tray_available) {
             self.hide_window_to_tray_task()
         } else {
-            iced::window::latest().and_then(iced::window::close)
+            iced::exit()
         }
     }
 
@@ -631,6 +657,7 @@ impl App {
             }
             Message::MinimizeWindow => {
                 self.window_minimized = true;
+                self.release_artwork_off_screen();
                 return iced::window::latest().and_then(|id| iced::window::minimize(id, true));
             }
             Message::ToggleMaximize => {
@@ -643,7 +670,28 @@ impl App {
                 return self.close_window_task();
             }
             Message::QuitApp => {
-                return iced::window::latest().and_then(iced::window::close);
+                return iced::exit();
+            }
+            Message::WindowOpened(id) => {
+                // Read back what the compositor gave the window, and on the first launch fit it to
+                // the monitor. A window opened again from the tray takes the focus.
+                let size = iced::window::size(id).map(|size| Message::Resized {
+                    width: size.width,
+                    height: size.height,
+                });
+                let scale = iced::window::scale_factor(id).map(Message::DisplayScaleChanged);
+                let first = !std::mem::replace(&mut self.window_opened_before, true);
+                let fit = if first && opens_at_default_size() {
+                    iced::window::monitor_size(id).map(Message::MonitorMeasured)
+                } else {
+                    Task::none()
+                };
+                let focus = if first {
+                    Task::none()
+                } else {
+                    iced::window::gain_focus(id)
+                };
+                return Task::batch([size, scale, fit, focus, self.preload_current_page_artwork()]);
             }
 
             Message::ShuffleContext(..)
@@ -1925,8 +1973,13 @@ impl App {
             Message::WindowFocusChanged(focused) => {
                 self.window_focused = Some(focused);
                 if focused {
-                    self.window_minimized = false;
-                    return self.arm_karaoke_wake().unwrap_or_else(Task::none);
+                    let was_minimized = std::mem::replace(&mut self.window_minimized, false);
+                    let wake = self.arm_karaoke_wake().unwrap_or_else(Task::none);
+                    // The covers went back while the window was minimized.
+                    if was_minimized {
+                        return Task::batch([wake, self.preload_current_page_artwork()]);
+                    }
+                    return wake;
                 } else {
                     // Minimizing takes the focus away too, so ask the window what happened.
                     return iced::window::latest()
@@ -1937,9 +1990,16 @@ impl App {
                 }
             }
             Message::WindowMinimizedChecked(minimized) => {
-                self.window_minimized = minimized;
+                let was_minimized = std::mem::replace(&mut self.window_minimized, minimized);
+                if minimized && !was_minimized {
+                    self.release_artwork_off_screen();
+                }
                 if !minimized {
-                    return self.arm_karaoke_wake().unwrap_or_else(Task::none);
+                    let wake = self.arm_karaoke_wake().unwrap_or_else(Task::none);
+                    if was_minimized {
+                        return Task::batch([wake, self.preload_current_page_artwork()]);
+                    }
+                    return wake;
                 }
             }
             Message::ClockTick => {
@@ -2176,6 +2236,8 @@ impl App {
             tray_available: false,
             tray_status: "System tray is starting.".into(),
             window_hidden_to_tray: false,
+            window_closed_to_tray: false,
+            window_opened_before: false,
             window_minimized: false,
             clock: crate::local_clock::LocalClock::now(),
             process_reading: None,
@@ -2292,27 +2354,19 @@ impl App {
         app.apply_ui_zoom();
         app.zoom_applied = app.ui_zoom;
         app.area = estimated_area(app.window_width, app.window_height);
-        // The window opens at the saved size (see `run`); read back what the
-        // compositor actually gave it.
-        let restore_window = iced::window::latest()
-            .and_then(iced::window::size)
-            .map(|size| Message::Resized {
-                width: size.width,
-                height: size.height,
-            });
-        let display_scale = iced::window::latest()
-            .and_then(iced::window::scale_factor)
-            .map(Message::DisplayScaleChanged);
-        let fit_to_monitor = if opens_at_default_size() {
-            iced::window::latest()
-                .and_then(iced::window::monitor_size)
-                .map(Message::MonitorMeasured)
-        } else {
+        // The window opens at the saved size; once it exists, what the compositor actually gave it
+        // is read back (see `WindowOpened`).
+        let (_, open_window) = iced::window::open(main_window_settings(
+            initial_window_size(),
+            opens_maximized(),
+            opens_at_default_size(),
+        ));
+        let open_window = open_window.map(Message::WindowOpened);
+        if !opens_at_default_size() {
             // A window that opens at a saved size is compared with the monitor once its layout
             // has settled; a maximized one already fills it.
             app.saved_window_unchecked = !opens_maximized();
-            Task::none()
-        };
+        }
         app.mpris.update(app.mpris_player_state());
         #[cfg(feature = "diagnostics")]
         let diagnostic_exit = Task::batch([
@@ -2330,9 +2384,7 @@ impl App {
                 artwork_task,
                 restored_cover,
                 tray_task,
-                restore_window,
-                display_scale,
-                fit_to_monitor,
+                open_window,
                 diagnostic_exit,
             ]),
         )
@@ -2642,9 +2694,14 @@ impl App {
     /// The notification for a track that started while the window is in the background.
     fn track_notice_task(&mut self) -> Option<Task<Message>> {
         let track = self.playback_status.track.clone();
+        // The window is in the background when another window has the focus, or it is minimized or
+        // in the tray.
+        let in_background = self.window_focused == Some(false)
+            || self.window_minimized
+            || self.window_hidden_to_tray;
         if !wants_track_notice(
             self.preferences.track_notifications,
-            self.window_focused,
+            in_background,
             self.playback_status.state,
             track.as_ref(),
             self.announced_track.as_deref(),
@@ -3217,7 +3274,7 @@ impl App {
         }
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    fn view(&self, _window: iced::window::Id) -> Element<'_, Message> {
         #[cfg(feature = "diagnostics")]
         let started = std::time::Instant::now();
         let element = self.view_content();
@@ -3395,13 +3452,13 @@ fn estimated_area(window_width: f32, window_height: f32) -> iced::Size {
 /// in the background, the title is known, and the track has not been announced yet.
 fn wants_track_notice(
     enabled: bool,
-    window_focused: Option<bool>,
+    in_background: bool,
     state: PlaybackState,
     track: Option<&Track>,
     announced: Option<&str>,
 ) -> bool {
     enabled
-        && window_focused == Some(false)
+        && in_background
         && matches!(state, PlaybackState::Playing | PlaybackState::Buffering)
         && track.is_some_and(|track| {
             !metadata_pending(track) && announced != Some(track.video_id.as_str())
@@ -3520,46 +3577,56 @@ fn window_icon() -> Option<iced::window::Icon> {
 }
 
 pub fn run() -> iced::Result {
-    iced::application(App::boot, App::update, App::view)
+    // A daemon keeps running without a window: on Linux the window is closed while the app plays
+    // from the tray, since Wayland cannot hide one, and opened again from there.
+    iced::daemon(App::boot, App::update, App::view)
         .executor::<AppExecutor>()
         .font(theme::FONT_REGULAR_BYTES)
         .font(theme::FONT_BOLD_BYTES)
         .default_font(theme::MONO)
-        .title("CrabyTube")
+        .title(|_: &App, _: iced::window::Id| "CrabyTube".to_owned())
         .subscription(App::subscription)
-        .theme(|_: &App| theme::app_theme())
-        .scale_factor(|app: &App| app.ui_zoom)
-        .window(iced::window::Settings {
-            size: initial_window_size(),
-            maximized: opens_maximized(),
-            position: if opens_at_default_size() {
-                iced::window::Position::Centered
-            } else {
-                iced::window::Position::Default
-            },
-            min_size: Some(iced::Size::new(layout::MIN_WIDTH, layout::MIN_HEIGHT)),
-            icon: window_icon(),
-            // The system frame is kept, with its bar transparent and the title hidden, so that the
-            // window has the borders, corners, shadow and buttons of macOS and the bar of the app
-            // fills the top.
-            #[cfg(target_os = "macos")]
-            platform_specific: iced::window::settings::PlatformSpecific {
-                title_hidden: true,
-                titlebar_transparent: true,
-                fullsize_content_view: true,
-            },
-            #[cfg(target_os = "linux")]
-            platform_specific: iced::window::settings::PlatformSpecific {
-                // Matches the desktop entry of the same name, so docks and task
-                // switchers show the app icon on Wayland.
-                application_id: crate::APP_ID.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .exit_on_close_request(false)
-        .decorations(cfg!(target_os = "macos"))
+        .theme(|_: &App, _: iced::window::Id| theme::app_theme())
+        .scale_factor(|app: &App, _: iced::window::Id| app.ui_zoom)
         .run()
+}
+
+/// The settings of the main window, opened at `size` (as Iced takes it) and maximized or not.
+fn main_window_settings(
+    size: iced::Size,
+    maximized: bool,
+    centered: bool,
+) -> iced::window::Settings {
+    iced::window::Settings {
+        size,
+        maximized,
+        position: if centered {
+            iced::window::Position::Centered
+        } else {
+            iced::window::Position::Default
+        },
+        min_size: Some(iced::Size::new(layout::MIN_WIDTH, layout::MIN_HEIGHT)),
+        icon: window_icon(),
+        decorations: cfg!(target_os = "macos"),
+        exit_on_close_request: false,
+        // The system frame is kept, with its bar transparent and the title hidden, so that the
+        // window has the borders, corners, shadow and buttons of macOS and the bar of the app
+        // fills the top.
+        #[cfg(target_os = "macos")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            title_hidden: true,
+            titlebar_transparent: true,
+            fullsize_content_view: true,
+        },
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            // Matches the desktop entry of the same name, so docks and task
+            // switchers show the app icon on Wayland.
+            application_id: crate::APP_ID.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
@@ -3658,22 +3725,16 @@ mod tests {
     #[test]
     fn a_track_is_announced_only_when_it_plays_in_the_background() {
         let track = song("Song");
-        let play = |enabled, focus, state, announced| {
-            wants_track_notice(enabled, focus, state, Some(&track), announced)
+        let play = |enabled, background, state, announced| {
+            wants_track_notice(enabled, background, state, Some(&track), announced)
         };
-        assert!(play(true, Some(false), PlaybackState::Playing, None));
-        assert!(play(true, Some(false), PlaybackState::Buffering, None));
-        // Off by default, focused, unknown focus, not playing, or already announced: no notice.
-        assert!(!play(false, Some(false), PlaybackState::Playing, None));
-        assert!(!play(true, Some(true), PlaybackState::Playing, None));
-        assert!(!play(true, None, PlaybackState::Playing, None));
-        assert!(!play(true, Some(false), PlaybackState::Paused, None));
-        assert!(!play(
-            true,
-            Some(false),
-            PlaybackState::Playing,
-            Some("abc123")
-        ));
+        assert!(play(true, true, PlaybackState::Playing, None));
+        assert!(play(true, true, PlaybackState::Buffering, None));
+        // Off by default, in front, not playing, or already announced: no notice.
+        assert!(!play(false, true, PlaybackState::Playing, None));
+        assert!(!play(true, false, PlaybackState::Playing, None));
+        assert!(!play(true, true, PlaybackState::Paused, None));
+        assert!(!play(true, true, PlaybackState::Playing, Some("abc123")));
         // A track whose title is still its ID waits for the metadata.
         let unnamed = Track {
             title: "abc123".into(),
@@ -3681,11 +3742,34 @@ mod tests {
         };
         assert!(!wants_track_notice(
             true,
-            Some(false),
+            true,
             PlaybackState::Playing,
             Some(&unnamed),
             None
         ));
+    }
+
+    #[test]
+    fn a_minimized_window_or_one_in_the_tray_counts_as_in_the_background() {
+        let mut app = App {
+            window_focused: Some(true),
+            window_minimized: true,
+            ..App::default()
+        };
+        app.preferences.track_notifications = true;
+        app.playback_status = PlaybackStatus {
+            track: Some(song("Song")),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        };
+        assert!(app.track_notice_task().is_some());
+        app.announced_track = None;
+        app.window_minimized = false;
+        app.window_hidden_to_tray = true;
+        assert!(app.track_notice_task().is_some());
+        app.announced_track = None;
+        app.window_hidden_to_tray = false;
+        assert!(app.track_notice_task().is_none(), "in front: no notice");
     }
 
     use super::{

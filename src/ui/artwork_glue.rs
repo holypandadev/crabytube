@@ -382,6 +382,17 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// While nothing is drawn (minimized, or in the tray), keeps only the player's cover and hands
+    /// the freed heap back. The page asks for its covers again when it is shown.
+    pub(super) fn release_artwork_off_screen(&mut self) {
+        self.cancel_artwork_batch();
+        self.artwork_generation = self.artwork_generation.wrapping_add(1);
+        let keep = self.playing_cover_url().map(str::to_owned);
+        self.artwork_cache
+            .retain_urls(|url| keep.as_deref() == Some(url));
+        crate::memory::trim_heap();
+    }
+
     /// Drops cached covers that `page` will not show (keeping the playing track's).
     pub(super) fn release_offscreen_artwork_for(&mut self, page: &Page) {
         let current = std::mem::replace(&mut self.page, page.clone());

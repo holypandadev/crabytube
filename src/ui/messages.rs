@@ -57,6 +57,8 @@ pub(super) enum Message {
     ToggleMaximize,
     CloseWindow,
     CloseRequested,
+    /// The main window exists: at start, or opened again from the tray.
+    WindowOpened(iced::window::Id),
     QuitApp,
     RemoveFromQueue(usize),
     ClearUpcomingQueue,
