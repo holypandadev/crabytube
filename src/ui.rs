@@ -902,7 +902,7 @@ impl App {
                 return {
                     let size = self.os_window;
                     let geometry = iced::window::latest()
-                        .and_then(iced::window::is_maximized)
+                        .and_then(fills_screen)
                         .map(move |maximized| Message::WindowGeometry { size, maximized });
                     Task::batch([settle, geometry, self.schedule_resize_work()])
                 };
@@ -975,7 +975,7 @@ impl App {
                     let artwork = {
                         let size = self.os_window;
                         let geometry = iced::window::latest()
-                            .and_then(iced::window::is_maximized)
+                            .and_then(fills_screen)
                             .map(move |maximized| Message::WindowGeometry { size, maximized });
                         Task::batch([artwork, geometry])
                     };
@@ -3484,6 +3484,14 @@ fn resize_request(os_size: (f32, f32), current_zoom: f32) -> iced::Size {
 /// is given (at creation and in resize requests) by the interface zoom, so the zoom that
 /// `os_size` itself produces is divided out first. Without this the window grows by the zoom on
 /// each launch.
+/// Whether the window fills the screen: maximized, or in full screen as macOS's green button puts
+/// it. Neither size is kept as the window's own, so closing it there keeps the size it had before.
+fn fills_screen(id: iced::window::Id) -> Task<bool> {
+    iced::window::is_maximized(id).then(move |maximized| {
+        iced::window::mode(id).map(move |mode| maximized || mode == iced::window::Mode::Fullscreen)
+    })
+}
+
 fn requested_window_size(os_size: (f32, f32), scale_with_window: bool) -> iced::Size {
     let zoom = ui_zoom_for(os_size.0, os_size.1, scale_with_window);
     iced::Size::new(os_size.0 / zoom, os_size.1 / zoom)
