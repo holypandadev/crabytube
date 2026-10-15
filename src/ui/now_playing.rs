@@ -432,6 +432,20 @@ impl App {
                 .on_press(Message::ToggleRowMenu(menu))
                 .padding(6)
                 .style(theme::row_icon_button(current, open));
+            let mut names = column![
+                text(fit(&title, text_width, TEXT_BODY))
+                    .size(TEXT_BODY)
+                    .font(MONO)
+                    .color(ink.title),
+            ];
+            // A track without an artist (an album's, before it plays) keeps its title alone, centred,
+            // rather than over an empty line.
+            if !entry.artist.trim().is_empty() {
+                names = names.push(
+                    label(fit(&entry.artist, text_width, TEXT_CAPTION), TEXT_CAPTION)
+                        .color(ink.secondary),
+                );
+            }
             let main = button(
                 row![
                     self.cover(
@@ -439,16 +453,7 @@ impl App {
                         cover,
                         crate::artwork::THUMB_MAX
                     ),
-                    column![
-                        text(fit(&title, text_width, TEXT_BODY))
-                            .size(TEXT_BODY)
-                            .font(MONO)
-                            .color(ink.title),
-                        label(fit(&entry.artist, text_width, TEXT_CAPTION), TEXT_CAPTION)
-                            .color(ink.secondary),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
+                    names.spacing(6).width(Length::Fill),
                     label(duration, TEXT_CAPTION).color(ink.secondary),
                     more,
                 ]
