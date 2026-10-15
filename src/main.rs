@@ -135,6 +135,8 @@ fn main() {
     );
 
     crabytube::ui::configure_renderer_from_preferences();
+    #[cfg(target_os = "linux")]
+    crabytube::playback::output::provide_sound_server_cookie();
     crabytube::temp_cleanup::sweep_in_background();
     crabytube::storage::tighten_app_folders();
 

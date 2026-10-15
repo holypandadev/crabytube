@@ -105,6 +105,42 @@ fn default_output_name() -> Option<String> {
         .map(|description| description.name().to_owned())
 }
 
+/// Linux: makes sure the sound server can be reached. Its client authenticates with a cookie it
+/// looks for in the home folder, which a Flatpak sandbox does not show; without one it sends an empty
+/// cookie, the server never answers, and the app falls back to ALSA's raw devices. PipeWire does not
+/// check the cookie's contents, so a cookie of the app's own is made when none is in reach. Call it
+/// from `main` before any thread starts: it sets an environment variable.
+#[cfg(target_os = "linux")]
+pub fn provide_sound_server_cookie() {
+    use rand::RngCore;
+    if std::env::var_os("PULSE_COOKIE").is_some() {
+        return;
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    if home.as_ref().is_some_and(|home| {
+        home.join(".config/pulse/cookie").is_file() || home.join(".pulse-cookie").is_file()
+    }) {
+        return;
+    }
+    let Some(path) = crate::app_dirs::config_dir().map(|dir| dir.join("pulse/cookie")) else {
+        return;
+    };
+    if !path.is_file() {
+        let mut cookie = [0_u8; 256];
+        rand::thread_rng().fill_bytes(&mut cookie);
+        let written = path
+            .parent()
+            .is_some_and(|parent| crate::storage::create_private_dir_all(parent).is_ok())
+            && crate::playback::pot::write_private_file(&path, &cookie).is_ok();
+        if !written {
+            return;
+        }
+    }
+    // SAFETY: called from main before any other thread is started, so no other thread can read the
+    // environment concurrently.
+    unsafe { std::env::set_var("PULSE_COOKIE", &path) };
+}
+
 /// Whether the output a stored id names is still there. The sound server moves the stream of an output
 /// that goes away to another one without reporting an error, so the app asks. An answer it cannot get
 /// counts as still there.
