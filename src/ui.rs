@@ -3001,10 +3001,20 @@ impl App {
             } else {
                 Task::none()
             };
+            // The lyrics view is rebuilt on every visit and starts at the top, as when its tab
+            // opens: following resumes and the view goes to the line that is sung now.
+            let lyrics = if self.now_playing_tab == NowPlayingTab::Lyrics {
+                self.resync_lyrics();
+                let resync = self.take_lyrics_resync();
+                self.follow_lyrics_task(None, resync)
+            } else {
+                Task::none()
+            };
             Task::batch([
                 operation::scroll_to("queue-content", self.queue_scroll),
                 self.preload_current_page_artwork(),
                 large_cover,
+                lyrics,
             ])
         } else {
             Task::none()
@@ -3919,6 +3929,42 @@ mod tests {
         assert!(!app.current_page_artwork().is_empty());
         drop(app.update(Message::SearchSubmitted));
         assert_eq!(app.page, Page::Home);
+    }
+
+    #[test]
+    fn coming_back_to_now_playing_follows_the_line_that_is_sung() {
+        let line = |start: f64, text: &str| crate::lyrics::Line {
+            start,
+            end: None,
+            text: text.into(),
+            words: Vec::new(),
+            translation: None,
+            romanization: None,
+            background: None,
+        };
+        let mut app = App {
+            page: Page::Settings,
+            now_playing_tab: super::NowPlayingTab::Lyrics,
+            lyrics: Some(crate::lyrics::Lyrics {
+                source: "line-timed".into(),
+                lines: vec![line(1.0, "first"), line(5.0, "second"), line(9.0, "third")],
+                length_mismatch: false,
+                plain: None,
+            }),
+            lyric_active: Some(2),
+            lyrics_follow_paused: true,
+            ..App::default()
+        };
+        app.preferences.lyrics_follow = true;
+        app.playback_status.track = Some(song("Track"));
+
+        drop(app.update(Message::Navigate(Page::NowPlaying)));
+
+        assert!(!app.lyrics_follow_paused, "following resumes");
+        assert!(
+            app.lyrics_auto_scroll_until.is_some(),
+            "the rebuilt view goes to the active line"
+        );
     }
 
     #[test]
