@@ -595,7 +595,10 @@ impl App {
     }
 
     pub(super) fn mpris_player_state(&self) -> crate::mpris::PlayerState {
-        let track = self.playback_status.track.as_ref();
+        // A queue entry restored at startup is offered as paused, as the player bar shows it: the
+        // system only sends the media keys to a session it knows about.
+        let restored = self.playback_status.track.is_none();
+        let track = self.shown_track();
         let position = self.playback_status.position;
         crate::mpris::PlayerState {
             title: track.map(|track| super::shell::display_title(&track.title).to_owned()),
@@ -607,6 +610,7 @@ impl App {
                     "Playing"
                 }
                 PlaybackState::Paused => "Paused",
+                _ if restored && track.is_some() => "Paused",
                 _ => "Stopped",
             }
             .into(),

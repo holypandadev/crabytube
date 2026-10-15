@@ -5564,6 +5564,31 @@ mod tests {
     }
 
     #[test]
+    fn the_system_media_controls_offer_a_restored_queue_entry_and_play_starts_it() {
+        let mut app = App {
+            queue: Arc::new(vec![fixture_track("a"), fixture_track("b")]),
+            queue_index: Some(1),
+            ..App::default()
+        };
+        let state = app.mpris_player_state();
+        assert_eq!(state.title.as_deref(), Some("Title b"));
+        assert_eq!(state.playback_status, "Paused");
+        assert!(state.can_play);
+        let _ = app.apply_mpris_command(crate::mpris::RemoteCommand::Play);
+        assert_eq!(
+            app.playback_status
+                .track
+                .as_ref()
+                .map(|track| track.video_id.as_str()),
+            Some("b")
+        );
+        // With nothing to show the session is stopped.
+        let empty = App::default().mpris_player_state();
+        assert!(empty.title.is_none());
+        assert_eq!(empty.playback_status, "Stopped");
+    }
+
+    #[test]
     fn now_playing_opens_for_a_restored_queue_entry_without_fetching_lyrics() {
         let mut app = App {
             queue: Arc::new(vec![fixture_track("a")]),
