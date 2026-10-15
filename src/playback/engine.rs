@@ -630,6 +630,9 @@ async fn actor(
     // When the chosen output was last looked for. It is asked for every few seconds: the sound server
     // moves the stream of an output that went away without telling the stream.
     let mut device_checked_at = Instant::now();
+    // The chosen output was listed again but would not open, so the system default stands in until it
+    // is gone and back, or another output is chosen: it is not retried every few seconds meanwhile.
+    let mut retried_while_present = false;
     let mut paused_by_user = false;
     // Counts pauses, so a release timer from an earlier pause is ignored.
     let mut pause_serial = 0_u64;
@@ -873,6 +876,7 @@ async fn actor(
                 Some(Command::SetOutputDevice(device_id)) => {
                     let changed = output_device_id != device_id;
                     output_device_id = device_id;
+                    retried_while_present = false;
                     // The track moves to the new device now, from where it is. An output released
                     // during a pause opens on it when playback resumes, and a seek opens it when it lands.
                     if changed
@@ -1226,15 +1230,21 @@ async fn actor(
                     {
                         device_checked_at = Instant::now();
                         let present = crate::playback::output::output_device_present(selected);
+                        if !present {
+                            retried_while_present = false;
+                        }
                         if let Some(open) = output.as_ref() {
                             if !present && !open.stand_in {
                                 // The chosen output went away and the server moved the sound elsewhere:
                                 // the output opens again below, on the system default, under its real name.
                                 info!("the selected output device went away");
                                 open._device.mark_gone();
-                            } else if present && open.stand_in {
-                                // The chosen output is back: the sound goes there again.
+                            } else if present && open.stand_in && !retried_while_present {
+                                // The chosen output is back: the sound goes there again. If it still will
+                                // not open, the default keeps playing and it is not tried again until it
+                                // goes and comes back.
                                 info!("the selected output device is back");
+                                retried_while_present = true;
                                 open._device.mark_gone();
                             }
                         }

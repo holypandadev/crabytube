@@ -119,6 +119,12 @@ fn main() {
 
     crabytube::logging::init();
 
+    // Both set environment variables, so they run before any thread starts: claiming the single
+    // instance starts one.
+    crabytube::ui::configure_renderer_from_preferences();
+    #[cfg(target_os = "linux")]
+    crabytube::playback::output::provide_sound_server_cookie();
+
     // Diagnostics runs use their own throwaway profile and may start beside a running app.
     #[cfg(not(feature = "diagnostics"))]
     if !crabytube::single_instance::claim() {
@@ -134,9 +140,6 @@ fn main() {
         "Applied Linux glibc allocator defaults"
     );
 
-    crabytube::ui::configure_renderer_from_preferences();
-    #[cfg(target_os = "linux")]
-    crabytube::playback::output::provide_sound_server_cookie();
     crabytube::temp_cleanup::sweep_in_background();
     crabytube::storage::tighten_app_folders();
 
