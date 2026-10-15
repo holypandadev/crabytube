@@ -13,6 +13,9 @@ finish-args:
   - --share=network
   - --socket=pulseaudio
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Track notifications go to the desktop's notification service, which the portal does not always
+  # reach (it may hand them to a backend the desktop does not show).
+  - --talk-name=org.freedesktop.Notifications
   - --own-name=org.mpris.MediaPlayer2.crabytube
   # Discord's rich presence: the native socket, and the socket of Discord's own Flatpak.
   - --filesystem=xdg-run/discord-ipc-0

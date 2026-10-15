@@ -1,6 +1,8 @@
 //! Track notifications. The session's notification service decides how they look; CrabyTube sends
-//! the title, the artist, and the cover when the artwork cache already holds it. Inside a Flatpak
-//! sandbox they go through the notification portal, the one route the sandbox has to the session.
+//! the title, the artist, and the cover when the artwork cache already holds it. They go to the
+//! service itself, from inside the Flatpak sandbox too, since the portal hands them to a backend of
+//! its own choice that need not be the one the desktop shows (a Plasma backend under another
+//! shell, for example). The portal is the way left when the service cannot be reached.
 
 use std::path::PathBuf;
 
@@ -32,10 +34,12 @@ const PORTAL_SENT: u32 = 1;
 /// notification service is running.
 #[cfg(target_os = "linux")]
 pub async fn show(notice: TrackNotice) -> u32 {
-    let sent = if crate::flatpak::in_flatpak() {
-        send_portal(&notice).await.map(|()| PORTAL_SENT)
-    } else {
-        send(&notice).await
+    let sent = match send(&notice).await {
+        Err(error) if crate::flatpak::in_flatpak() => {
+            tracing::debug!(%error, "notification service unreachable; trying the portal");
+            send_portal(&notice).await.map(|()| PORTAL_SENT)
+        }
+        sent => sent,
     };
     match sent {
         Ok(id) => id,
