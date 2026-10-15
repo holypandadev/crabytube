@@ -239,7 +239,9 @@ impl HomeLayout {
     pub fn new(area: Size, items: usize, extras: HomeExtras) -> Self {
         let width = area.width.max(CARD_MIN);
         let page_h = (area.height - STATUS_H).max(0.0);
-        let items = items.clamp(1, 8) as f32;
+        // Before Home has loaded, or when it failed, the page has the column a full row of cards
+        // would give it, so the search field keeps its width.
+        let items = if items == 0 { 8 } else { items.clamp(1, 8) } as f32;
         let narrow = width < NARROW_W;
         let card_gap = if narrow { CARD_GAP_NARROW } else { CARD_GAP };
         let gap = (page_h * 0.06).clamp(24.0, 56.0).floor();
@@ -518,7 +520,11 @@ impl App {
             } else if let Some(error) = &self.home_error {
                 column![
                     label(self.tr("[ HOME COULD NOT LOAD ]").into_owned(), TEXT_BODY),
-                    label(fit(&self.tr(error), area.width, TEXT_CAPTION), TEXT_CAPTION).color(DIM),
+                    label(
+                        fit(&self.tr(error), layout.row_width, TEXT_CAPTION),
+                        TEXT_CAPTION
+                    )
+                    .color(DIM),
                     button(label(self.tr("Retry").into_owned(), TEXT_BODY))
                         .on_press(Message::ReloadHome)
                         .padding([8, 18])
@@ -534,7 +540,10 @@ impl App {
                 .color(DIM)
                 .into()
             };
-            container(status).center_x(Length::Fill).into()
+            // The notice starts where the search field does.
+            container(container(status).width(layout.row_width))
+                .center_x(Length::Fill)
+                .into()
         } else {
             container(self.essentials(&layout))
                 .width(Length::Fill)
@@ -1266,6 +1275,16 @@ mod tests {
         }
         // Phone width: at least two cards, so the row reads as a carousel.
         assert!(HomeLayout::new(Size::new(326.0, 650.0), 12, HomeExtras::default()).visible >= 2);
+    }
+
+    #[test]
+    fn a_home_that_has_not_loaded_keeps_the_column_of_a_full_row() {
+        let area = Size::new(1024.0, 720.0);
+        let empty = HomeLayout::new(area, 0, HomeExtras::default());
+        let loaded = HomeLayout::new(area, 12, HomeExtras::default());
+        assert_eq!(empty.search_width, loaded.search_width);
+        assert_eq!(empty.row_width, loaded.row_width);
+        assert!(empty.search_width > area.width * 0.8);
     }
 
     #[test]
