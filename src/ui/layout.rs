@@ -17,15 +17,20 @@ pub fn default_window_size() -> (f32, f32) {
     }
 }
 
-/// Share of the monitor the default window may take.
-const DEFAULT_WINDOW_SHARE: f32 = 0.9;
+/// Share of the monitor's width the default window may take.
+const DEFAULT_WIDTH_SHARE: f32 = 0.9;
+/// Share of the monitor's height the default window may take. The window is centred on the whole
+/// monitor, and the taskbar (48 px on Windows) takes the bottom of it: with this share the window
+/// stays above it on any monitor from 640 px high. With 90 % a 768 or 800 px laptop screen hid the
+/// bottom of the player bar.
+const DEFAULT_HEIGHT_SHARE: f32 = 0.85;
 
-/// The default window size, limited to about 90 % of the monitor so that a first launch fits on a
-/// small screen. A size that already fits is kept, and the result never drops below the minimum.
+/// The default window size, limited to part of the monitor so that a first launch fits on a small
+/// screen. A size that already fits is kept, and the result never drops below the minimum.
 pub fn fit_to_monitor(size: (f32, f32), monitor: (f32, f32)) -> (f32, f32) {
     clamped_window(
-        size.0.min(monitor.0 * DEFAULT_WINDOW_SHARE),
-        size.1.min(monitor.1 * DEFAULT_WINDOW_SHARE),
+        size.0.min(monitor.0 * DEFAULT_WIDTH_SHARE),
+        size.1.min(monitor.1 * DEFAULT_HEIGHT_SHARE),
     )
 }
 
@@ -119,19 +124,28 @@ mod tests {
     }
 
     #[test]
-    fn the_default_window_is_limited_to_nine_tenths_of_the_monitor() {
+    fn the_default_window_leaves_room_on_the_monitor() {
         // A large monitor keeps the default.
         assert_eq!(
             fit_to_monitor((1440.0, 900.0), (2560.0, 1440.0)),
             (1440.0, 900.0)
         );
-        // A 1440x900 laptop gets 90 % of each side.
+        // A 1440x900 laptop gets 90 % of the width and 85 % of the height.
         let (width, height) = fit_to_monitor((1440.0, 900.0), (1440.0, 900.0));
-        assert!((width - 1296.0).abs() < 0.01 && (height - 810.0).abs() < 0.01);
+        assert!((width - 1296.0).abs() < 0.01 && (height - 765.0).abs() < 0.01);
         // Only the side that does not fit shrinks.
         let (width, height) = fit_to_monitor((1440.0, 900.0), (2560.0, 800.0));
         assert_eq!(width, 1440.0);
-        assert!((height - 720.0).abs() < 0.01);
+        assert!((height - 680.0).abs() < 0.01);
+        // Centred on a 768 or 800 px screen, the window ends above a 48 px taskbar.
+        for monitor_height in [768.0_f32, 800.0, 900.0] {
+            let (_, height) = fit_to_monitor((1440.0, 900.0), (1366.0, monitor_height));
+            let bottom = (monitor_height + height) / 2.0;
+            assert!(
+                bottom <= monitor_height - 48.0,
+                "{monitor_height}: {bottom}"
+            );
+        }
         // A tiny monitor never takes the window below the minimum.
         assert_eq!(
             fit_to_monitor((1440.0, 900.0), (400.0, 300.0)),
@@ -191,11 +205,11 @@ mod tests {
         let adjustment = fit_saved_window((2600.0, 1392.0), monitor, Some((312.0, 312.0)))
             .expect("larger than the monitor");
         let (width, height) = adjustment.size;
-        assert!((width - 2304.0).abs() < 0.01 && (height - 1296.0).abs() < 0.01);
+        assert!((width - 2304.0).abs() < 0.01 && (height - 1224.0).abs() < 0.01);
         let (x, y) = adjustment
             .position
             .expect("a window on the monitor is centred");
-        assert!((x - 128.0).abs() < 0.01 && (y - 72.0).abs() < 0.01);
+        assert!((x - 128.0).abs() < 0.01 && (y - 108.0).abs() < 0.01);
     }
 
     #[test]
@@ -206,10 +220,10 @@ mod tests {
         assert_eq!(beyond.position, None);
         let unknown = fit_saved_window((2560.0, 1392.0), monitor, None).expect("larger");
         assert_eq!(unknown.position, None);
-        // Only the side that does not fit is cut when the other is within 90 %.
+        // Only the side that does not fit is cut when the other is within its share.
         let tall = fit_saved_window((1200.0, 1500.0), monitor, None).expect("too tall");
         assert_eq!(tall.size.0, 1200.0);
-        assert!((tall.size.1 - 972.0).abs() < 0.01);
+        assert!((tall.size.1 - 918.0).abs() < 0.01);
     }
 
     #[test]
