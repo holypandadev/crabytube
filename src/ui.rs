@@ -251,6 +251,10 @@ fn cache_cleared_notice(kind: crate::storage::CacheKind, cleared: &Result<u64, S
     }
 }
 
+/// How long a confirmation waits for its second press. Long enough to read the import summary: when
+/// it lapses the row it replaced comes back, and a late press would land on that row's buttons.
+const CONFIRMATION_TIME: Duration = Duration::from_secs(10);
+
 /// Progress and the lyric highlight refresh this often while playing. Word-timed lyrics use the
 /// same tick: at 100 ms the Now Playing view alone costs about 9 % of a core.
 const PLAYBACK_TICK: Duration = Duration::from_millis(250);
@@ -2405,13 +2409,13 @@ impl App {
         })
     }
 
-    /// Shows a destructive change for a second press. It clears itself after five seconds.
+    /// Shows a destructive change for a second press. It clears itself after `CONFIRMATION_TIME`.
     fn ask_confirmation(&mut self, kind: Confirmation) -> Task<Message> {
         self.confirmation_count = self.confirmation_count.wrapping_add(1);
         let count = self.confirmation_count;
         self.confirmation = Some(PendingConfirmation { kind, count });
         Task::perform(
-            async { tokio::time::sleep(Duration::from_secs(5)).await },
+            async { tokio::time::sleep(CONFIRMATION_TIME).await },
             move |()| Message::ConfirmationExpired(count),
         )
     }
