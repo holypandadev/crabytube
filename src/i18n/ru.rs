@@ -338,8 +338,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Reset", "Сбросить"),
         ("Reset settings?", "Сбросить настройки?"),
         (
-            "Language, window size and lyrics offsets stay.",
-            "Язык, размер окна и сдвиги текстов сохранятся.",
+            "Language, window size, volume and lyrics offsets stay.",
+            "Язык, размер окна, громкость и сдвиги текстов сохранятся.",
         ),
         ("Cancel", "Отмена"),
         ("Confirm", "Подтвердить"),
@@ -360,9 +360,9 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Turn off history and remove Jump back in?",
             "Отключить историю и убрать «Продолжить слушать»?",
         ),
-        ("{} saved searches.", "Сохранённые запросы: {}."),
+        ("Saved searches: {}.", "Сохранённые запросы: {}."),
         (
-            "{} saved searches. Clearing or turning this off also removes 'Jump back in'.",
+            "Saved searches: {}. Clearing or turning this off also removes 'Jump back in'.",
             "Сохранённые запросы: {}. Очистка или отключение также убирает «Продолжить слушать».",
         ),
         ("Importing local data…", "Импорт локальных данных…"),

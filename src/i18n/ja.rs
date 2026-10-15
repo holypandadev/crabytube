@@ -341,8 +341,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Reset", "リセット"),
         ("Reset settings?", "設定をリセットしますか？"),
         (
-            "Language, window size and lyrics offsets stay.",
-            "言語、ウィンドウサイズ、歌詞のずれ補正はそのまま残ります。",
+            "Language, window size, volume and lyrics offsets stay.",
+            "言語、ウィンドウサイズ、音量、歌詞のずれ補正はそのまま残ります。",
         ),
         ("Cancel", "キャンセル"),
         ("Confirm", "確認"),
@@ -363,9 +363,9 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Turn off history and remove Jump back in?",
             "履歴をオフにして「もう一度聴く」を削除しますか？",
         ),
-        ("{} saved searches.", "保存した検索：{}件。"),
+        ("Saved searches: {}.", "保存した検索：{}件。"),
         (
-            "{} saved searches. Clearing or turning this off also removes 'Jump back in'.",
+            "Saved searches: {}. Clearing or turning this off also removes 'Jump back in'.",
             "保存した検索：{}件。消去またはオフにすると「もう一度聴く」も削除されます。",
         ),
         ("Importing local data…", "ローカルデータを読み込み中…"),

@@ -305,8 +305,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Reset", "重置"),
         ("Reset settings?", "要重置设置吗？"),
         (
-            "Language, window size and lyrics offsets stay.",
-            "语言、窗口大小和歌词偏移会保留。",
+            "Language, window size, volume and lyrics offsets stay.",
+            "语言、窗口大小、音量和歌词偏移会保留。",
         ),
         ("Cancel", "取消"),
         ("Confirm", "确认"),
@@ -327,9 +327,9 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Turn off history and remove Jump back in?",
             "要关闭历史记录并移除“继续收听”吗？",
         ),
-        ("{} saved searches.", "已保存的搜索：{} 条。"),
+        ("Saved searches: {}.", "已保存的搜索：{} 条。"),
         (
-            "{} saved searches. Clearing or turning this off also removes 'Jump back in'.",
+            "Saved searches: {}. Clearing or turning this off also removes 'Jump back in'.",
             "已保存的搜索：{} 条。清除或关闭后也会移除“继续收听”。",
         ),
         ("Importing local data…", "正在导入本地数据…"),

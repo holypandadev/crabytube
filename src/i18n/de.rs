@@ -353,8 +353,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Reset", "Zurücksetzen"),
         ("Reset settings?", "Einstellungen zurücksetzen?"),
         (
-            "Language, window size and lyrics offsets stay.",
-            "Sprache, Fenstergröße und Songtext-Versatz bleiben erhalten.",
+            "Language, window size, volume and lyrics offsets stay.",
+            "Sprache, Fenstergröße, Lautstärke und Songtext-Versatz bleiben erhalten.",
         ),
         ("Cancel", "Abbrechen"),
         ("Confirm", "Bestätigen"),
@@ -375,9 +375,9 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Turn off history and remove Jump back in?",
             "Verlauf ausschalten und „Weiterhören“ entfernen?",
         ),
-        ("{} saved searches.", "Gespeicherte Suchen: {}."),
+        ("Saved searches: {}.", "Gespeicherte Suchen: {}."),
         (
-            "{} saved searches. Clearing or turning this off also removes 'Jump back in'.",
+            "Saved searches: {}. Clearing or turning this off also removes 'Jump back in'.",
             "Gespeicherte Suchen: {}. Löschen oder Ausschalten entfernt auch „Weiterhören“.",
         ),
         ("Importing local data…", "Lokale Daten werden importiert…"),

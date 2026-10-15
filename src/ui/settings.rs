@@ -223,7 +223,7 @@ impl App {
     fn reset_confirmation(&self) -> Element<'_, Message> {
         column![
             label(self.tr("Reset settings?").into_owned(), TEXT_BODY),
-            text(self.tr("Language, window size and lyrics offsets stay."))
+            text(self.tr("Language, window size, volume and lyrics offsets stay."))
                 .size(TEXT_CAPTION)
                 .font(MONO)
                 .color(DIM),
@@ -269,10 +269,10 @@ impl App {
             _ => {
                 let hint = if shelf {
                     self.tr_static(
-                        "{} saved searches. Clearing or turning this off also removes 'Jump back in'.",
+                        "Saved searches: {}. Clearing or turning this off also removes 'Jump back in'.",
                     )
                 } else {
-                    self.tr_static("{} saved searches.")
+                    self.tr_static("Saved searches: {}.")
                 }
                 .replacen("{}", &searches.to_string(), 1);
                 let remember = self.preferences.remember_history;
