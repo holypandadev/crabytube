@@ -4,11 +4,12 @@ use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tracing::info;
 
 /// Parser version: bump invalidates old disk entries.
-pub const PARSER_VERSION: u32 = 4;
+pub const PARSER_VERSION: u32 = 5;
 /// Disk budget for lyrics JSON (small text, not pixels).
 pub const MAX_LYRICS_BYTES: u64 = 2 * 1024 * 1024;
 /// Time-to-live for cached lyrics.
@@ -323,8 +324,51 @@ fn non_blank(text: String) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+/// The texts the head of an Apple-style TTML gives each line in one of its `section` lists
+/// (`translations` or `transliterations`), by the line's `itunes:key`. Of several languages, the one
+/// of the interface wins, then the first.
+fn ttml_head_texts(doc: &roxmltree::Document<'_>, section: &str) -> HashMap<String, String> {
+    let wanted = crate::i18n::current_language().content_code();
+    let wanted = wanted.split('-').next().unwrap_or(wanted);
+    let lists: Vec<roxmltree::Node<'_, '_>> = doc
+        .descendants()
+        .filter(|node| node.tag_name().name() == section)
+        .flat_map(|list| list.children().filter(roxmltree::Node::is_element))
+        .filter(|list| list.children().any(|text| text.tag_name().name() == "text"))
+        .collect();
+    let language = |list: &roxmltree::Node<'_, '_>| {
+        list.attributes()
+            .find(|attribute| attribute.name() == "lang")
+            .map(|attribute| attribute.value().to_ascii_lowercase())
+            .unwrap_or_default()
+    };
+    let Some(chosen) = lists
+        .iter()
+        .find(|list| language(list).split('-').next() == Some(wanted))
+        .or_else(|| lists.first())
+    else {
+        return HashMap::new();
+    };
+    chosen
+        .children()
+        .filter(|text| text.tag_name().name() == "text")
+        .filter_map(|text| {
+            let key = text.attribute("for")?;
+            let value: String = text
+                .descendants()
+                .filter(roxmltree::Node::is_text)
+                .filter_map(|node| node.text())
+                .collect();
+            Some((key.to_owned(), non_blank(value)?))
+        })
+        .collect()
+}
+
 pub fn ttml(input: &str) -> Option<Lyrics> {
     let doc = roxmltree::Document::parse(input).ok()?;
+    // Translations and romanizations an Apple-style file keeps in its head, line by line.
+    let head_translations = ttml_head_texts(&doc, "translations");
+    let head_romanizations = ttml_head_texts(&doc, "transliterations");
     let mut lines = Vec::new();
     for p in doc
         .descendants()
@@ -333,6 +377,10 @@ pub fn ttml(input: &str) -> Option<Lyrics> {
         let Some(start) = p.attribute("begin").and_then(timestamp) else {
             continue;
         };
+        let key = p
+            .attributes()
+            .find(|attribute| attribute.name() == "key")
+            .map(|attribute| attribute.value());
         let mut words = Vec::new();
         let mut text = String::new();
         let mut translation = String::new();
@@ -377,13 +425,15 @@ pub fn ttml(input: &str) -> Option<Lyrics> {
                 words.last_mut()?.text.push_str(value);
             }
         }
+        let from_head =
+            |texts: &HashMap<String, String>| key.and_then(|key| texts.get(key)).cloned();
         lines.push(Line {
             start,
             end: p.attribute("end").and_then(timestamp),
             text: text.trim().into(),
             words,
-            translation: (!translation.is_empty()).then_some(translation),
-            romanization: non_blank(romanization),
+            translation: non_blank(translation).or_else(|| from_head(&head_translations)),
+            romanization: non_blank(romanization).or_else(|| from_head(&head_romanizations)),
             background: non_blank(background),
         });
     }
@@ -1601,6 +1651,28 @@ mod tests {
         assert!(Lyrics::is_instrumental_text("[Instrumental]"));
         let l = lrc("Instrumental", "fixture");
         assert!(l.lines.is_empty());
+    }
+
+    #[test]
+    fn ttml_takes_translations_and_romanizations_from_its_head() {
+        let input = r#"<tt xmlns:itunes="http://music.apple.com/lyric-ttml-internal"><head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+            <translations><translation xml:lang="en"><text for="L1">Effort, future</text></translation></translations>
+            <transliterations><transliteration xml:lang="ja-Latn"><text for="L1"><span begin="1s" end="2s">doryoku</span> <span begin="2s" end="3s">mirai</span></text></transliteration></transliterations>
+            </iTunesMetadata></metadata></head>
+            <body><div><p begin="1s" end="3s" itunes:key="L1"><span begin="1s" end="2s">努力</span> <span begin="2s" end="3s">未来</span></p>
+            <p begin="4s" end="5s" itunes:key="L2"><span begin="4s" end="5s">A</span></p></div></body></tt>"#;
+        let lyrics = ttml(input).unwrap();
+        assert_eq!(lyrics.lines[0].text, "努力 未来");
+        assert_eq!(
+            lyrics.lines[0].translation.as_deref(),
+            Some("Effort, future")
+        );
+        assert_eq!(
+            lyrics.lines[0].romanization.as_deref(),
+            Some("doryoku mirai")
+        );
+        assert_eq!(lyrics.lines[1].translation, None);
+        assert_eq!(lyrics.lines[1].romanization, None);
     }
 
     #[test]
