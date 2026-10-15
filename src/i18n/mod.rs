@@ -104,8 +104,31 @@ fn entries(
     MAPS[language_index(language)].get_or_init(|| catalog.entries.iter().copied().collect())
 }
 
+/// English text that carries a count: the source reads "{#} songs", and one is "1 song".
+const ENGLISH_COUNTS: &[(&str, &str)] = &[
+    ("{#} results for {}", "{0} {0:result|results} for {1}"),
+    ("{#} saved tracks", "{0} saved {0:track|tracks}"),
+    ("{#} songs", "{0} {0:song|songs}"),
+    (
+        "Brings {} favorites and {} queued songs, plus its settings.",
+        "Brings {0} {0:favorite|favorites} and {1} queued {1:song|songs}, plus its settings.",
+    ),
+];
+
+fn english_plural(count: u64) -> usize {
+    usize::from(count != 1)
+}
+
 pub fn translate<'a>(language: UiLanguage, source: &'a str) -> Cow<'a, str> {
     let Some(catalog) = catalog(language) else {
+        // English is the source text; only its counts need the form that agrees with the number.
+        static NO_ENTRIES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+        for (english, counted) in ENGLISH_COUNTS {
+            if let Some(parts) = match_template(english, source) {
+                let entries = NO_ENTRIES.get_or_init(HashMap::new);
+                return Cow::Owned(render(counted, &parts, entries, english_plural));
+            }
+        }
         return Cow::Borrowed(source);
     };
     let entries = entries(language, catalog);
@@ -397,6 +420,27 @@ mod tests {
             translate(UiLanguage::English, "{} on disk · {} in memory"),
             "{} on disk · {} in memory"
         );
+    }
+
+    #[test]
+    fn english_counts_agree_with_the_number() {
+        let en = UiLanguage::English;
+        assert_eq!(translate(en, "1 saved tracks"), "1 saved track");
+        assert_eq!(translate(en, "2 saved tracks"), "2 saved tracks");
+        assert_eq!(
+            translate(en, "1 results for daft punk"),
+            "1 result for daft punk"
+        );
+        assert_eq!(translate(en, "1 songs"), "1 song");
+        assert_eq!(translate(en, "0 songs"), "0 songs");
+        assert_eq!(
+            translate(
+                en,
+                "Brings 1 favorites and 1 queued songs, plus its settings."
+            ),
+            "Brings 1 favorite and 1 queued song, plus its settings."
+        );
+        assert_eq!(translate(en, "Lyrics"), "Lyrics");
     }
 
     #[test]

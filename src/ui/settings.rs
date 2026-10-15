@@ -240,9 +240,12 @@ impl App {
 
     /// What an import brings, counted from the backup that was read.
     fn import_summary(&self, snapshot: &crate::preferences::Snapshot) -> String {
-        self.tr_static("Brings {} favorites and {} queued songs, plus its settings.")
+        let filled = self
+            .tr_static("Brings {} favorites and {} queued songs, plus its settings.")
             .replacen("{}", &snapshot.favorites.len().to_string(), 1)
-            .replacen("{}", &snapshot.queue.len().to_string(), 1)
+            .replacen("{}", &snapshot.queue.len().to_string(), 1);
+        // In English the counts then take the form that agrees with them.
+        self.tr_string(filled)
     }
 
     /// The search history row. Clearing it, or turning it off, also clears "Jump back in" when that

@@ -2371,10 +2371,9 @@ impl App {
     }
 
     fn tr_string(&self, source: String) -> String {
-        if self.preferences.ui_language == crate::preferences::UiLanguage::English {
-            source
-        } else {
-            crate::i18n::translate(self.preferences.ui_language, &source).into_owned()
+        match crate::i18n::translate(self.preferences.ui_language, &source) {
+            std::borrow::Cow::Borrowed(_) => source,
+            std::borrow::Cow::Owned(translated) => translated,
         }
     }
 
