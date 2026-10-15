@@ -84,26 +84,57 @@ fn list_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
     Ok(choices)
 }
 
+/// The host that plays on the system default output. On Linux that is ALSA's default device, which
+/// the sound server routes to its default sink and moves along when the user picks another one. The
+/// sound server's own host would pin the stream to the sink that was the default when it opened.
+fn system_default_host() -> cpal::Host {
+    #[cfg(target_os = "linux")]
+    if let Ok(host) = cpal::host_from_id(cpal::HostId::Alsa) {
+        return host;
+    }
+    cpal::default_host()
+}
+
+/// The name of the output the system plays on by default, as its sound server calls it. ALSA's
+/// default device on Linux only calls itself "Default Audio Device".
+fn default_output_name() -> Option<String> {
+    cpal::default_host()
+        .default_output_device()?
+        .description()
+        .ok()
+        .map(|description| description.name().to_owned())
+}
+
 pub fn open_output_device(selected_id: Option<&str>) -> Result<(OutputStream, String), String> {
     without_panics(|| open_device(selected_id))
 }
 
 fn open_device(selected_id: Option<&str>) -> Result<(OutputStream, String), String> {
-    let host = cpal::default_host();
     let device = match selected_id {
         Some(id) => {
             let id = cpal::DeviceId::from_str(id).map_err(|error| error.to_string())?;
-            host.device_by_id(&id)
+            // The host that listed the device: on Linux the sound server, which reaches every output
+            // by name, inside the Flatpak sandbox too.
+            cpal::host_from_id(id.host())
+                .map_err(|error| error.to_string())?
+                .device_by_id(&id)
                 .ok_or_else(|| "The selected output device is no longer available".to_owned())?
         }
-        None => host
+        None => system_default_host()
             .default_output_device()
             .ok_or_else(|| "No system default output device is available".to_owned())?,
     };
-    let label = device
-        .description()
-        .map(|description| description.name().to_owned())
-        .unwrap_or_else(|_| String::from("Audio output"));
+    let label = selected_id
+        .is_none()
+        .then(default_output_name)
+        .flatten()
+        .or_else(|| {
+            device
+                .description()
+                .ok()
+                .map(|description| description.name().to_owned())
+        })
+        .unwrap_or_else(|| String::from("Audio output"));
     let stream = open_stream(&device)?;
     Ok((stream, label))
 }
@@ -148,10 +179,10 @@ const FAILURES_FOR_A_LOST_DEVICE: u32 = 50;
 
 /// Whether a stream error leaves the stream dead: the device is gone, or the stream has to be
 /// built again. Underruns and backend hiccups do not stop it.
-fn ends_the_stream(error: &cpal::StreamError) -> bool {
+fn ends_the_stream(error: &cpal::Error) -> bool {
     matches!(
-        error,
-        cpal::StreamError::DeviceNotAvailable | cpal::StreamError::StreamInvalidated
+        error.kind(),
+        cpal::ErrorKind::DeviceNotAvailable | cpal::ErrorKind::StreamInvalidated
     )
 }
 
@@ -202,8 +233,7 @@ impl PlaybackClock {
 fn device_latency(timing: &OutputStreamTimestamp) -> Duration {
     timing
         .playback
-        .duration_since(&timing.callback)
-        .unwrap_or(Duration::ZERO)
+        .saturating_duration_since(timing.callback)
         .min(MAX_DEVICE_LATENCY)
 }
 
@@ -271,7 +301,7 @@ where
     let data_failures = Arc::clone(&failures);
     let stream = device
         .build_output_stream::<T, _, _>(
-            config,
+            *config,
             move |data: &mut [T], info: &OutputCallbackInfo| {
                 let now = Instant::now();
                 data_failures.store(0, Ordering::Relaxed);
@@ -282,7 +312,7 @@ where
                 callback_clock.record_buffer_end(now + latency + buffer);
             },
             move |error| {
-                let in_a_row = if matches!(error, cpal::StreamError::BackendSpecific { .. }) {
+                let in_a_row = if error.kind() == cpal::ErrorKind::BackendError {
                     failures.fetch_add(1, Ordering::Relaxed) + 1
                 } else {
                     0
@@ -324,15 +354,14 @@ mod tests {
     #[test]
     fn only_a_device_that_went_away_ends_the_stream() {
         use super::ends_the_stream;
-        use cpal::{BackendSpecificError, StreamError};
-        assert!(ends_the_stream(&StreamError::DeviceNotAvailable));
-        assert!(ends_the_stream(&StreamError::StreamInvalidated));
-        assert!(!ends_the_stream(&StreamError::BufferUnderrun));
-        assert!(!ends_the_stream(&StreamError::BackendSpecific {
-            err: BackendSpecificError {
-                description: String::from("poll failed"),
-            },
-        }));
+        use cpal::{Error, ErrorKind};
+        assert!(ends_the_stream(&Error::new(ErrorKind::DeviceNotAvailable)));
+        assert!(ends_the_stream(&Error::new(ErrorKind::StreamInvalidated)));
+        assert!(!ends_the_stream(&Error::new(ErrorKind::Xrun)));
+        assert!(!ends_the_stream(&Error::with_message(
+            ErrorKind::BackendError,
+            "poll failed"
+        )));
     }
 
     #[test]

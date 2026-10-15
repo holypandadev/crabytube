@@ -15,9 +15,11 @@ pub const MAX_LOG_BYTES: u64 = 1024 * 1024;
 
 /// Installs the global subscriber. Call it once, first thing in `main`.
 pub fn init() {
-    // Third-party crates log warnings only by default; the app's own info lines stay visible.
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,crabytube=info"));
+    // Third-party crates log warnings only by default; the app's own info lines stay visible. The
+    // PulseAudio client logs an error each time an output is closed, which is the normal end of a
+    // stream: a real failure reaches the app as a stream error and is logged there.
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("warn,crabytube=info,pulseaudio::client::reactor=off"));
     match open_log_file() {
         Some(file) => tracing_subscriber::fmt()
             .with_env_filter(filter)

@@ -217,10 +217,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Discord 接続エラー · 再試行中…",
         ),
         (
-            "The selected output applies when the next track starts.",
-            "選んだ出力は次の曲から適用されます。",
-        ),
-        (
             "Effective AAC format appears after a stream resolves.",
             "実際の AAC 形式はストリームの取得後に表示されます。",
         ),
@@ -450,8 +446,8 @@ pub(super) static CATALOG: Catalog = Catalog {
             "保存された出力先を利用できません。",
         ),
         (
-            "Changes apply to the next track.",
-            "変更は次の曲から適用されます。",
+            "Playback switches to it at once.",
+            "再生はすぐにこの出力に切り替わります。",
         ),
         ("Off", "オフ"),
         ("The queue is full.", "キューがいっぱいです。"),
@@ -493,10 +489,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("cache:BotGuard disk snapshots", "BotGuard のローカルコピー"),
     ],
     templates: &[
-        (
-            "Active: {}. Changes apply to the next track.",
-            "使用中：{0}。変更は次の曲から適用されます。",
-        ),
+        ("Active: {}.", "使用中：{0}。"),
         (
             "Saved settings could not be read and were moved to {}",
             "保存された設定を読み込めなかったため、{0} に移動しました",

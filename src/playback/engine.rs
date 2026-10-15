@@ -868,7 +868,31 @@ async fn actor(
                     let _ = status_tx.send(status.clone());
                 }
                 Some(Command::SetOutputDevice(device_id)) => {
+                    let changed = output_device_id != device_id;
                     output_device_id = device_id;
+                    // The track moves to the new device now, from where it is. An output released
+                    // during a pause opens on it when playback resumes, and a seek opens it when it lands.
+                    if changed
+                        && status.state != PlaybackState::Seeking
+                        && output.is_some()
+                        && let Some(audio) = active.as_ref()
+                    {
+                        // Dropping the player puts back what its source had not played.
+                        output = None;
+                        match reopen_output(audio, status.volume, output_device_id.as_deref()) {
+                            Ok(opened) => {
+                                if paused_by_user || status.state != PlaybackState::Playing {
+                                    opened.player.pause();
+                                }
+                                status.output_device = Some(opened.device_name.clone());
+                                output = Some(opened);
+                                info!("audio output moved to the selected device");
+                            }
+                            // The tick opens it again, on the system default if the device is gone.
+                            Err(error) => warn!(?error, "the selected audio device could not be opened"),
+                        }
+                        let _ = status_tx.send(status.clone());
+                    }
                 }
                 Some(Command::Seek(position)) => {
                     if !status.live && active.is_some() && seek_ends_track(position, status.duration) {

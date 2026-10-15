@@ -42,8 +42,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp4"] }
-cpal = "0.17.3"
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp4"] }
+cpal = { version = "0.18.2", features = ["pulseaudio"] }
 stream-download = { version = "0.24.4", default-features = false, features = ["temp-storage"] }
 crossbeam-channel = "0.5"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

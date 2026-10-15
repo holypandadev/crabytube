@@ -214,10 +214,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Ошибка подключения к Discord · повторная попытка…",
         ),
         (
-            "The selected output applies when the next track starts.",
-            "Выбранный вывод применится со следующего трека.",
-        ),
-        (
             "Effective AAC format appears after a stream resolves.",
             "Фактический формат AAC появится после получения потока.",
         ),
@@ -453,8 +449,8 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Сохранённое устройство вывода недоступно.",
         ),
         (
-            "Changes apply to the next track.",
-            "Изменения применятся со следующего трека.",
+            "Playback switches to it at once.",
+            "Воспроизведение сразу переключится на него.",
         ),
         ("Off", "Выкл."),
         ("The queue is full.", "Очередь заполнена."),
@@ -496,10 +492,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("cache:BotGuard disk snapshots", "Локальные копии BotGuard"),
     ],
     templates: &[
-        (
-            "Active: {}. Changes apply to the next track.",
-            "Активно: {0}. Изменения применятся со следующего трека.",
-        ),
+        ("Active: {}.", "Активно: {0}."),
         (
             "Saved settings could not be read and were moved to {}",
             "Не удалось прочитать сохранённые настройки; они перемещены в {0}",

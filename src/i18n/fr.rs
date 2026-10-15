@@ -223,10 +223,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Erreur de connexion à Discord · nouvelle tentative…",
         ),
         (
-            "The selected output applies when the next track starts.",
-            "La sortie choisie s'appliquera au prochain titre.",
-        ),
-        (
             "Effective AAC format appears after a stream resolves.",
             "Le format AAC effectif s'affiche une fois un flux résolu.",
         ),
@@ -468,8 +464,8 @@ pub(super) static CATALOG: Catalog = Catalog {
             "La sortie enregistrée n'est pas disponible.",
         ),
         (
-            "Changes apply to the next track.",
-            "Les modifications s'appliquent au prochain titre.",
+            "Playback switches to it at once.",
+            "La lecture y passe immédiatement.",
         ),
         ("Off", "Désactivé"),
         ("The queue is full.", "La file d'attente est pleine."),
@@ -517,10 +513,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
     ],
     templates: &[
-        (
-            "Active: {}. Changes apply to the next track.",
-            "Active : {0}. Les modifications s'appliquent au prochain titre.",
-        ),
+        ("Active: {}.", "Active : {0}."),
         (
             "Saved settings could not be read and were moved to {}",
             "Impossible de lire les réglages enregistrés ; ils ont été déplacés vers {0}",

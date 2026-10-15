@@ -202,10 +202,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Discord 连接出错 · 正在重试…",
         ),
         (
-            "The selected output applies when the next track starts.",
-            "所选输出将从下一首歌曲开始生效。",
-        ),
-        (
             "Effective AAC format appears after a stream resolves.",
             "获取音频流后将显示实际的 AAC 格式。",
         ),
@@ -402,8 +398,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Saved output is unavailable.", "已保存的输出设备不可用。"),
         (
-            "Changes apply to the next track.",
-            "更改将从下一首歌曲开始生效。",
+            "Playback switches to it at once.",
+            "播放会立即切换到该输出。",
         ),
         ("Off", "关闭"),
         ("The queue is full.", "队列已满。"),
@@ -439,10 +435,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("cache:BotGuard disk snapshots", "BotGuard 本地副本"),
     ],
     templates: &[
-        (
-            "Active: {}. Changes apply to the next track.",
-            "当前：{0}。更改将从下一首歌曲开始生效。",
-        ),
+        ("Active: {}.", "当前：{0}。"),
         (
             "Saved settings could not be read and were moved to {}",
             "无法读取已保存的设置，已移至 {0}",

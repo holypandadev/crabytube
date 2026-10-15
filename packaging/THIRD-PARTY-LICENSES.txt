@@ -150,7 +150,7 @@ pin-project-lite 0.2.17 (LICENSE-APACHE)
 range-alloc 0.1.5 (LICENSE.APACHE)
 raw-window-handle 0.6.2 (LICENSE-APACHE.md)
 resvg 0.45.1 (LICENSE-APACHE)
-rodio 0.22.2 (LICENSE-APACHE)
+rodio 0.23.0 (LICENSE-APACHE)
 sync_wrapper 1.0.2 (LICENSE)
 time 0.3.55 (LICENSE-Apache)
 time-core 0.1.9 (LICENSE-Apache)
@@ -1147,7 +1147,7 @@ async-trait 0.1.92 (LICENSE-APACHE)
 itoa 1.0.18 (LICENSE-APACHE)
 libc 0.2.190 (LICENSE-APACHE)
 litrs 1.0.0 (LICENSE-APACHE)
-mach2 0.5.0 (LICENSE-APACHE)
+mach2 0.6.0 (LICENSE-APACHE)
 paste 1.0.15 (LICENSE-APACHE)
 pastey 0.2.3 (LICENSE-APACHE)
 proc-macro2 1.0.107 (LICENSE-APACHE)
@@ -1735,7 +1735,7 @@ DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------------------------------
 as-raw-xcb-connection 1.0.1 (LICENSE-APACHE)
 codespan-reporting 0.12.0 (LICENSE)
-cpal 0.17.3 (LICENSE)
+cpal 0.18.2 (LICENSE)
 encoding_rs 0.8.33 (LICENSE-APACHE)
 hstr 4.0.2 (LICENSE)
 is-macro 0.3.8 (LICENSE)
@@ -7317,6 +7317,31 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
+enum-primitive-derive 0.3.0 (LICENSE)
+------------------------------------------------------------------------------
+
+Copyright (c) 2017 Doug Goldstein <cardoe@cardoe.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+“Software”), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
 enumflags2 0.7.12 (LICENSE-APACHE)
 ------------------------------------------------------------------------------
 
@@ -11782,7 +11807,7 @@ the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 
 ------------------------------------------------------------------------------
-mach2 0.5.0 (LICENSE-BSD)
+mach2 0.6.0 (LICENSE-BSD)
 ------------------------------------------------------------------------------
 
 Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
@@ -11810,7 +11835,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-mach2 0.5.0 (LICENSE-MIT)
+mach2 0.6.0 (LICENSE-MIT)
 ------------------------------------------------------------------------------
 
 Copyright (c) 2019 Nick Fitzgerald, 2021 Yuki Okushi
@@ -13923,6 +13948,18 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
+pulseaudio 0.3.1 (LICENSE.md)
+------------------------------------------------------------------------------
+
+Copyright 2023 Colin Marc <hi@colinmarc.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
 quick-error 2.0.1 (LICENSE-MIT)
 ------------------------------------------------------------------------------
 
@@ -15421,7 +15458,7 @@ OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ------------------------------------------------------------------------------
-rodio 0.22.2 (LICENSE-MIT)
+rodio 0.23.0 (LICENSE-MIT)
 ------------------------------------------------------------------------------
 
 Copyright (c) The Rodio Project Contributors

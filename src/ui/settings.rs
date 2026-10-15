@@ -10,7 +10,9 @@ use super::theme::{
 use super::{App, Message, Preference};
 use crate::playback::PlaybackState;
 use crate::preferences::{UiDensity, UiLanguage};
-use iced::widget::{Space, button, column, container, pick_list, row, scrollable, slider, text};
+use iced::widget::{
+    Column, Space, button, column, container, pick_list, row, scrollable, slider, text,
+};
 use iced::{Alignment, Element, Length, Size};
 
 const BOX_PADDING: f32 = 20.0;
@@ -307,6 +309,32 @@ impl App {
         control: Element<'a, Message>,
         _width: f32,
     ) -> Element<'a, Message> {
+        let left = self.setting_label(title, hint);
+        if self.area.width < STACK_ROWS_BELOW {
+            return column![left, control].spacing(10).padding([14, 0]).into();
+        }
+        row![container(left).width(Length::Fill), control]
+            .spacing(16)
+            .padding([14, 0])
+            .align_y(Alignment::Center)
+            .into()
+    }
+
+    /// One setting with its control under the label at any width, for a control that needs room.
+    fn setting_above<'a>(
+        &self,
+        title: &'static str,
+        hint: Option<String>,
+        control: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        column![self.setting_label(title, hint), control]
+            .spacing(10)
+            .padding([14, 0])
+            .into()
+    }
+
+    /// The label of a setting, with its hint under it.
+    fn setting_label<'a>(&self, title: &'static str, hint: Option<String>) -> Column<'a, Message> {
         let mut left = column![label(self.tr(title).into_owned(), TEXT_BODY)].spacing(4);
         if let Some(hint) = hint {
             left = left.push(
@@ -317,14 +345,7 @@ impl App {
                     .width(Length::Fill),
             );
         }
-        if self.area.width < STACK_ROWS_BELOW {
-            return column![left, control].spacing(10).padding([14, 0]).into();
-        }
-        row![container(left).width(Length::Fill), control]
-            .spacing(16)
-            .padding([14, 0])
-            .align_y(Alignment::Center)
-            .into()
+        left
     }
 
     /// Drop-downs shrink on narrow windows so rows never overflow.
@@ -469,17 +490,12 @@ impl App {
         } else if p.audio_output_device_id.is_some() && selected.is_none() {
             "Saved output is unavailable.".to_owned()
         } else if let Some(active) = &self.playback_status.output_device {
-            format!("Active: {active}. Changes apply to the next track.")
+            format!("Active: {active}.")
         } else {
-            "Changes apply to the next track.".to_owned()
+            "Playback switches to it at once.".to_owned()
         };
-        // Stacked rows give the device list the full width, so its names are not cut.
-        let stacked = self.area.width < STACK_ROWS_BELOW;
-        let device_width = if stacked {
-            Length::Fill
-        } else {
-            Length::Fixed((self.picker_width() - 40.0).max(100.0))
-        };
+        // The device list sits under its label at the full width of the box: device names are long.
+        let device_width = Length::Fill;
         let device_picker = row![
             pick_list(
                 self.output_devices.clone(),
@@ -503,20 +519,11 @@ impl App {
                 .style(theme::outline_button),
         ]
         .spacing(6)
-        .width(if stacked {
-            Length::Fill
-        } else {
-            Length::Shrink
-        });
+        .width(Length::Fill);
         self.settings_box(
             "Audio",
             width,
-            vec![self.setting(
-                "Output device",
-                Some(device_hint),
-                device_picker.into(),
-                width,
-            )],
+            vec![self.setting_above("Output device", Some(device_hint), device_picker.into())],
         )
     }
 

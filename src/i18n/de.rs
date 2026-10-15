@@ -223,10 +223,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Verbindungsfehler mit Discord · neuer Versuch…",
         ),
         (
-            "The selected output applies when the next track starts.",
-            "Die gewählte Ausgabe gilt ab dem nächsten Titel.",
-        ),
-        (
             "Effective AAC format appears after a stream resolves.",
             "Das tatsächliche AAC-Format erscheint, sobald ein Stream aufgelöst ist.",
         ),
@@ -468,8 +464,8 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Die gespeicherte Ausgabe ist nicht verfügbar.",
         ),
         (
-            "Changes apply to the next track.",
-            "Änderungen gelten ab dem nächsten Titel.",
+            "Playback switches to it at once.",
+            "Die Wiedergabe wechselt sofort dorthin.",
         ),
         ("Off", "Aus"),
         ("The queue is full.", "Die Warteschlange ist voll."),
@@ -511,10 +507,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("cache:BotGuard disk snapshots", "Lokale BotGuard-Kopien"),
     ],
     templates: &[
-        (
-            "Active: {}. Changes apply to the next track.",
-            "Aktiv: {0}. Änderungen gelten ab dem nächsten Titel.",
-        ),
+        ("Active: {}.", "Aktiv: {0}."),
         (
             "Saved settings could not be read and were moved to {}",
             "Die gespeicherten Einstellungen konnten nicht gelesen werden und wurden verschoben nach {0}",
