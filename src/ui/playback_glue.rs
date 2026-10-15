@@ -57,7 +57,19 @@ impl App {
         let previous_state = self.playback_status.state;
         let previous_position = self.playback_status.position;
         let previous_track = self.playback_status.track.clone();
+        let previous_device = self.playback_status.output_device.clone();
         self.playback_status = status;
+        // Another output plays now, which may mean one went away or came: the list in Settings is
+        // read again, so it does not offer an output that is gone.
+        let devices = if self.page == Page::Settings
+            && self.playback_status.output_device.is_some()
+            && self.playback_status.output_device != previous_device
+            && !self.output_devices_loading
+        {
+            self.refresh_output_devices_task()
+        } else {
+            Task::none()
+        };
         let seek_notice = self.note_seek_failures();
         self.playback_status_at = std::time::Instant::now();
         let recent_changed = self.record_playing_track();
@@ -87,7 +99,7 @@ impl App {
 
         // Follow first, so the branches below cannot skip the lyric scroll.
         let resync = self.lyric_active.is_some() && self.take_lyrics_resync();
-        let mut tasks = vec![self.follow_lyrics_task(old_active, resync)];
+        let mut tasks = vec![self.follow_lyrics_task(old_active, resync), devices];
         tasks.extend(seek_notice);
         tasks.append(&mut metadata_tasks);
         // A new entry in "Jump back in" brings a cover Home has not asked for yet.

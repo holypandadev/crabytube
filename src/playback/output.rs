@@ -105,6 +105,18 @@ fn default_output_name() -> Option<String> {
         .map(|description| description.name().to_owned())
 }
 
+/// Whether the output a stored id names is still there. The sound server moves the stream of an output
+/// that goes away to another one without reporting an error, so the app asks. An answer it cannot get
+/// counts as still there.
+pub fn output_device_present(selected_id: &str) -> bool {
+    without_panics(|| {
+        let id = cpal::DeviceId::from_str(selected_id).map_err(|error| error.to_string())?;
+        let host = cpal::host_from_id(id.host()).map_err(|error| error.to_string())?;
+        Ok(host.device_by_id(&id).is_some())
+    })
+    .unwrap_or(true)
+}
+
 pub fn open_output_device(selected_id: Option<&str>) -> Result<(OutputStream, String), String> {
     without_panics(|| open_device(selected_id))
 }
@@ -167,10 +179,16 @@ impl OutputStream {
         self.lost.load(Ordering::Relaxed)
     }
 
+    /// Reports the device gone, as its stream does when it is unplugged: the engine opens the output
+    /// again. The sound server says so only when asked.
+    pub fn mark_gone(&self) {
+        self.lost.store(true, Ordering::Relaxed);
+    }
+
     /// Diagnostics only: reports the device gone, as its stream does when it is unplugged.
     #[cfg(feature = "diagnostics")]
     pub fn mark_lost(&self) {
-        self.lost.store(true, Ordering::Relaxed);
+        self.mark_gone();
     }
 }
 

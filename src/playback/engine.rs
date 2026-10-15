@@ -627,6 +627,9 @@ async fn actor(
     let mut output_device_id: Option<String> = None;
     // When the output was last opened again after its device went away.
     let mut reopened_after_loss: Option<Instant> = None;
+    // When the chosen output was last looked for. It is asked for every few seconds: the sound server
+    // moves the stream of an output that went away without telling the stream.
+    let mut device_checked_at = Instant::now();
     let mut paused_by_user = false;
     // Counts pauses, so a release timer from an earlier pause is ignored.
     let mut pause_serial = 0_u64;
@@ -1217,6 +1220,25 @@ async fn actor(
                     {
                         output._device.mark_lost();
                     }
+                    if let Some(selected) = output_device_id.as_deref()
+                        && output.as_ref().is_some_and(|open| !open.is_lost())
+                        && device_checked_at.elapsed() >= SELECTED_DEVICE_CHECK
+                    {
+                        device_checked_at = Instant::now();
+                        let present = crate::playback::output::output_device_present(selected);
+                        if let Some(open) = output.as_ref() {
+                            if !present && !open.stand_in {
+                                // The chosen output went away and the server moved the sound elsewhere:
+                                // the output opens again below, on the system default, under its real name.
+                                info!("the selected output device went away");
+                                open._device.mark_gone();
+                            } else if present && open.stand_in {
+                                // The chosen output is back: the sound goes there again.
+                                info!("the selected output device is back");
+                                open._device.mark_gone();
+                            }
+                        }
+                    }
                     if status.state != PlaybackState::Seeking && output.as_ref().is_none_or(PlaybackOutput::is_lost) {
                         // The device went away (unplugged, or the remote session that carried it ended) and the
                         // stream plays nothing more, or an output dropped for that reason is still missing. The
@@ -1519,6 +1541,8 @@ struct PlaybackOutput {
     _device: crate::playback::output::OutputStream,
     player: Player,
     device_name: String,
+    /// The output the user chose was missing, so this one is the system default standing in for it.
+    stand_in: bool,
 }
 
 impl PlaybackOutput {
@@ -1531,6 +1555,7 @@ impl PlaybackOutput {
             _device: device,
             player,
             device_name,
+            stand_in: false,
         })
     }
 
@@ -1576,6 +1601,9 @@ fn audible_position(
 /// opening it again rather than by a pause.
 const REOPEN_SETTLE: Duration = Duration::from_secs(2);
 
+/// How often the engine checks that the output the user chose is still there.
+const SELECTED_DEVICE_CHECK: Duration = Duration::from_secs(3);
+
 /// Takes every source off the output. The stream of a device that went away plays nothing more, so
 /// such an output is dropped instead and opened again when audio needs it.
 fn clear_output(output: &mut Option<PlaybackOutput>) {
@@ -1599,7 +1627,10 @@ fn open_selected_output(
                 ?error,
                 "selected output device unavailable; using the system default"
             );
-            PlaybackOutput::open(volume, None)
+            PlaybackOutput::open(volume, None).map(|mut stand_in| {
+                stand_in.stand_in = true;
+                stand_in
+            })
         } else {
             Err(error)
         }
