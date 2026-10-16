@@ -80,11 +80,14 @@ impl App {
                 {
                     return Task::none();
                 }
-                // An automatic check leaves an update already found as it is.
-                if !manual && self.update.available().is_some() {
+                if manual {
+                    self.update = UpdateState::Checking;
+                } else if self.update.available().is_some() {
+                    // An automatic check leaves an update already found as it is.
                     return Task::none();
                 }
-                self.update = UpdateState::Checking;
+                // An automatic check runs out of sight: Settings changes only when it finds a
+                // version, so it never replaces what a check by hand has just said.
                 let install = self.update_install.clone();
                 Task::perform(
                     async move {
@@ -94,25 +97,31 @@ impl App {
                 )
             }
             Message::UpdateChecked { manual, result } => {
-                self.update = match result {
+                // A late answer does not interrupt a download or an install under way.
+                if matches!(
+                    self.update,
+                    UpdateState::Downloading { .. } | UpdateState::Installing
+                ) {
+                    return Task::none();
+                }
+                match result {
                     Ok(Some(available)) => {
                         tracing::info!(version = %available.version, "a newer version is available");
-                        UpdateState::Available(available)
+                        self.update = UpdateState::Available(available);
                     }
-                    Ok(None) => UpdateState::UpToDate,
+                    Ok(None) => self.update = UpdateState::UpToDate,
                     Err(error) => {
                         tracing::info!(%error, manual, "the update check failed");
-                        // An automatic check that fails says nothing; the next one tries again.
+                        // An automatic check that fails changes nothing on screen; the next one
+                        // tries again.
                         if manual {
-                            UpdateState::Failed {
+                            self.update = UpdateState::Failed {
                                 reason: reason_for(&error),
                                 available: None,
-                            }
-                        } else {
-                            UpdateState::Idle
+                            };
                         }
                     }
-                };
+                }
                 Task::none()
             }
             Message::InstallUpdate => {
@@ -354,6 +363,62 @@ mod tests {
         // An automatic check leaves the update found on screen.
         drop(app.update(Message::CheckForUpdates { manual: false }));
         assert_eq!(app.update, UpdateState::Available(available(true)));
+    }
+
+    #[test]
+    fn an_automatic_check_never_replaces_what_a_check_by_hand_said() {
+        let mut app = App {
+            update_install: Install::WindowsMsi,
+            ..App::default()
+        };
+        // Check now fails, shortly after the start.
+        assert!(
+            app.update(Message::CheckForUpdates { manual: true })
+                .units()
+                > 0
+        );
+        drop(app.update(Message::UpdateChecked {
+            manual: true,
+            result: Err(UpdateError::Network("404".into())),
+        }));
+        let failed = app.update.clone();
+        assert!(matches!(failed, UpdateState::Failed { .. }));
+        // The check of the start runs after it, out of sight, and fails too.
+        assert!(
+            app.update(Message::CheckForUpdates { manual: false })
+                .units()
+                > 0
+        );
+        assert_eq!(app.update, failed);
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Err(UpdateError::Network("404".into())),
+        }));
+        assert_eq!(app.update, failed);
+        // When it finds a version, that is shown.
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Ok(Some(available(true))),
+        }));
+        assert_eq!(app.update, UpdateState::Available(available(true)));
+    }
+
+    #[test]
+    fn a_late_answer_does_not_interrupt_a_download() {
+        let mut app = App {
+            update_install: Install::WindowsMsi,
+            ..App::default()
+        };
+        app.update = UpdateState::Downloading {
+            available: available(true),
+            received: 5,
+            total: 10,
+        };
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Ok(None),
+        }));
+        assert!(matches!(app.update, UpdateState::Downloading { .. }));
     }
 
     #[test]
