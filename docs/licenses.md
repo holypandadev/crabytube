@@ -119,9 +119,11 @@ It talks to them at runtime; no code from them is distributed with CrabyTube.
 | Service | Used for |
 | --- | --- |
 | YouTube Music / YouTube (Google) | Catalog, search, artwork, audio streams, and the BotGuard and player-script challenges that streams require. Used anonymously. |
-| LRCLIB (`lrclib.net`) | Lyrics, when the Lyrics tab is open. |
-| Better Lyrics (`api.betterlyrics.org`) | Timed lyrics, when the Lyrics tab is open. |
+| LRCLIB (`lrclib.net`) | Lyrics, when the Lyrics tab is open, and for the next track in the queue during the last 30 seconds of a track. |
+| Better Lyrics (`api.betterlyrics.org`) | Timed lyrics, at the same moments as LRCLIB. |
 | Discord | Rich Presence through the local Discord client's IPC socket, only when enabled in Settings. |
+| GitHub (`github.com`) | On Windows and macOS, the update check: `update.json` and its signature from the latest release once a day, and the new package when you choose to update. It can be turned off in Settings → Updates. |
 
 YouTube and YouTube Music are trademarks of Google LLC. Discord is a trademark of Discord Inc.
+GitHub is a trademark of GitHub, Inc.
 Other names belong to their respective owners.

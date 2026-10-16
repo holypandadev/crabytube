@@ -50,8 +50,9 @@ matching `.desktop` file, so install it to get the icon in docks and task switch
 The application icon and the version information are embedded in the three executables at build
 time. Keep `botguard-helper.exe` and `js-challenge-helper.exe` next to `crabytube.exe`.
 
-The Windows release is a zip with the three executables, the license and a first-launch note. Build
-it on an x64 Windows PC with the MSVC Rust toolchain and the Visual Studio C++ build tools:
+The Windows release has a zip with the three executables, the license and a first-launch note, and
+an installer made from the same files (below). Build them on an x64 Windows PC with the MSVC Rust
+toolchain and the Visual Studio C++ build tools:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-zip.ps1
@@ -119,7 +120,7 @@ CrabyTube stores everything on your device:
 | What | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | Settings, favorites, queue, search history (`state.json`) | `~/.config/crabytube/` | `~/Library/Application Support/crabytube/` | `%APPDATA%\crabytube\` |
-| Caches: artwork, lyrics, Home snapshot, player script, BotGuard snapshot and tokens, streaming buffer | `~/.cache/crabytube/` | `~/Library/Caches/crabytube/` | `%LOCALAPPDATA%\crabytube\` |
+| Caches: artwork, lyrics, Home snapshot, player script, BotGuard snapshot and tokens, streaming buffer, an update being downloaded | `~/.cache/crabytube/` | `~/Library/Caches/crabytube/` | `%LOCALAPPDATA%\crabytube\` |
 
 On Linux, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are honoured, and "Launch on startup" writes
 `~/.config/autostart/crabytube.desktop`. The caches are size-limited and can be inspected and cleared from

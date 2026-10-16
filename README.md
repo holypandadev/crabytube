@@ -17,11 +17,28 @@
 
 ## Features
 
-| `01` **LIGHTWEIGHT** | `02` **NATIVE** | `03` **NO ACCOUNT** |
-| :--- | :--- | :--- |
-| Under 100 MB of RAM while playing and a few dozen at rest. Idle CPU stays near zero. | Pure Rust and Iced. No browser, no Electron. Opens fast, and the next track is ready before the current one ends. | Plays YouTube Music anonymously. No sign-in, no cookies, no telemetry. Your data stays on your device. |
-| `04` **SYNCED LYRICS** | `05` **BRUTALIST DESIGN** | `06` **FITS YOUR DESKTOP** |
-| Line-by-line synced lyrics, and word-by-word karaoke with translations for many popular songs, from two sources at once. | Pure black, monospaced type and one-pixel outlines. The layout scales from a phone-sized window to 4K. | Media keys and the system media controls on all three systems; on Linux also a tray icon and track notifications. Discord Rich Presence. Nine languages: English, Spanish, Portuguese, French, German, Italian, Russian, Japanese and Chinese. |
+<table>
+  <tr>
+    <th width="33%" align="left"><code>01</code> LIGHTWEIGHT</th>
+    <th width="33%" align="left"><code>02</code> NATIVE</th>
+    <th width="33%" align="left"><code>03</code> NO ACCOUNT</th>
+  </tr>
+  <tr>
+    <td valign="top">Under 100 MB of RAM while playing and a few dozen at rest. Idle CPU stays near zero.</td>
+    <td valign="top">Pure Rust and Iced: no browser, no Electron. Opens fast and preloads the next track.</td>
+    <td valign="top">Plays YouTube Music anonymously. No sign-in, cookies or telemetry; your data stays local.</td>
+  </tr>
+  <tr>
+    <th width="33%" align="left"><code>04</code> SYNCED LYRICS</th>
+    <th width="33%" align="left"><code>05</code> BRUTALIST DESIGN</th>
+    <th width="33%" align="left"><code>06</code> FITS YOUR DESKTOP</th>
+  </tr>
+  <tr>
+    <td valign="top">Synced lyrics from two sources; word-by-word karaoke and translations for many songs.</td>
+    <td valign="top">Pure black, monospaced type and one-pixel outlines. Scales from phone size up to 4K.</td>
+    <td valign="top">Media keys on every system, a Linux tray icon, Discord Rich Presence and nine languages.</td>
+  </tr>
+</table>
 
 ## Screenshots
 
@@ -101,9 +118,10 @@ shows what it found and has **Check now**. The daily check can be turned off the
 
 - **Windows, installed with the `.msi`**: **Update now** downloads the new installer, closes
   CrabyTube, installs it and opens CrabyTube again.
-- **macOS**: when CrabyTube is in a folder you can write to, such as Applications on an
+- **macOS**: when CrabyTube was moved to a folder you can write to, such as Applications on an
   administrator account, **Update now** downloads the new version, puts it in place of the app and
-  opens it again. Otherwise it opens the release page.
+  opens it again. Otherwise, as for an app opened straight from where it was unpacked, it opens the
+  release page.
 - **The Windows zip** does not update itself: **Download page** opens the release page. Extract the
   new zip over the old folder.
 - **Linux**: the Flatpak does not check for updates. Install the new `.flatpak` the same way as the
@@ -112,11 +130,12 @@ shows what it found and has **Check now**. The daily check can be turned off the
 Settings, favorites, the queue and the history are kept apart from the app, so an update leaves
 them as they are.
 
-Every release carries `update.json`, which names the version and the size and SHA-256 of each
-package, and its Ed25519 signature by the release key. CrabyTube uses it only when the signature
-is right, and installs a download only when its size and SHA-256 match it, so a file that was
-changed, or a release someone else made, is never installed. `SHA256SUMS` lists the same checksums
-for checking a download by hand.
+Every release carries `update.json`, which names the version and the size and SHA-256 of the
+`.msi`, the Windows zip and the macOS zip, and its Ed25519 signature by the release key. CrabyTube
+uses it only when the signature is right, and installs a download only when its size and SHA-256
+match it, so a file that was changed, or a release someone else made, is never installed.
+`SHA256SUMS` lists the SHA-256 of every package, the `.flatpak` and the `.dmg` included, for
+checking a download by hand.
 
 ## Privacy
 
@@ -148,8 +167,10 @@ for checking a download by hand.
 
 ## Translations
 
-The interface follows the system language on the first start and can be changed in Settings. If a
-translation reads wrong in your language, an issue with the correction is welcome.
+The interface is in nine languages: English, Spanish, Brazilian Portuguese, French, German, Italian,
+Russian, Japanese and Simplified Chinese. It follows the system language on the first start and can
+be changed in Settings. If a translation reads wrong in your language, an issue with the correction
+is welcome.
 
 ## Disclaimer
 

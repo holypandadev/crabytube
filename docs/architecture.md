@@ -1,12 +1,13 @@
 # Architecture
 
-CrabyTube is a Cargo workspace with three executables:
+CrabyTube is a Cargo workspace with three executables and one small library:
 
 | Crate | Path | Role |
 | --- | --- | --- |
 | `crabytube` | `src/` | The desktop application: GUI, catalog client, playback, local state. |
 | `botguard-helper` | `botguard-helper/` | Solves YouTube's BotGuard challenge and mints proof-of-origin (PO) tokens. |
 | `js-challenge-helper` | `js-challenge-helper/` | Runs the YouTube player's signature and `n` parameter transforms. |
+| `helper-guard` | `helper-guard/` | Library both helpers use: the limits a helper puts on itself, so one its app has abandoned does not keep running. |
 
 Two vendored crates are patched in through `[patch.crates-io]`: `iced_tiny_skia` (renderer fixes,
 see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
@@ -16,7 +17,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 
 | Module | Responsibility |
 | --- | --- |
-| `main.rs` | Process entry: allocator tuning on Linux/glibc, logging (`tracing`, `RUST_LOG`), renderer selection, start of the GUI. |
+| `main.rs` | Process entry: allocator tuning on Linux/glibc, logging (`logging.rs`; `crabytube.log` on Windows and macOS), renderer selection, the single-instance check, start of the GUI and, once it ends, the Windows installer of a downloaded update. |
 | `ui.rs`, `ui/` | Iced application (`App`): state, `update`, `view`, subscriptions. |
 | `music.rs`, `music/browse.rs` | `MusicService` trait and its YouTube Music implementation: Home feed, search and suggestions, radio, album/artist/playlist pages and continuations. |
 | `playback/` | `resolver.rs` (stream resolution), `pot.rs` (PO tokens via the BotGuard helper), `engine.rs` (playback actor, HTTP streaming, decoding, output), `output.rs` (audio device enumeration and opening). |
@@ -30,9 +31,13 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
 | `i18n/` | Interface translations: English, Spanish, Brazilian Portuguese, French, German, Italian, Russian, Japanese and Simplified Chinese. English is the key; each language has a file of exact entries and templates for text with numbers or names. |
 | `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). Other platforms use `tray_stub.rs`. |
-| `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what is not specific to one system: the player state, the commands, and the rules for what to tell the system and when. |
+| `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what the macOS and Windows backends share: the player state, the commands, and the rules for what to tell the system and when. |
 | `mpris_windows.rs` | The Windows media keys and media panel through the System Media Transport Controls (`windows`). Other platforms use `mpris_stub.rs`. |
 | `discord.rs` | Optional Discord Rich Presence over the local Discord IPC socket. |
+| `updater.rs`, `ui/updates.rs` | Daily check of the latest release's `update.json`, used only with a valid Ed25519 signature; downloads the package and checks its size and SHA-256. On Windows the `.msi` installs after the app has exited; on macOS the `.app` bundle is swapped; other copies open the release page. The Flatpak and other Linux builds do not check. |
+| `single_instance.rs` | One running copy: a second launch asks the first to show its window and exits. |
+| `app_dirs.rs`, `flatpak.rs`, `background_portal.rs` | Data folders, Flatpak detection, and launch on startup through the Background portal inside the Flatpak. |
+| `playback/live.rs` | Live broadcasts, which have no length and cannot be sought. |
 
 Catalog and playback code does not depend on Iced; the UI talks to them through `MusicService`,
 `StreamResolver` and `PlaybackHandle`.
@@ -78,8 +83,10 @@ Track (video ID)
   events from a superseded or cancelled track are ignored. The next track in the queue is resolved,
   opened and decoded ahead of time. Seeking reopens the range reader at the new position. A 403
   from googlevideo during playback (an expired URL) triggers a fresh resolution. After a few
-  seconds of pause the output device is released and reopened on resume. When the device goes
-  away, the output is opened again on the system default, or playback pauses if there is none.
+  seconds of pause the output device is released and reopened on resume. Choosing another output in
+  Settings moves the playing track there at once. When the chosen device goes away, playback
+  continues on the system default and returns to the device when it is back; with no device at
+  all, playback pauses.
 - **Errors** are typed (`StreamError`: network, unavailable or login required, PO token, cipher,
   media rejected, unsupported format, decoder, device, cancelled). The UI shows a short message;
   logs keep the details with URLs, tokens and identifiers replaced by short fingerprints.
@@ -111,10 +118,16 @@ in-memory artwork budget (`memory.rs`).
 
 ## User interface
 
-The UI is an Iced 0.14 application (`App` in `ui.rs`) using the message/update/view model and a
-custom Tokio executor (two worker threads by default, `TOKIO_WORKER_THREADS` overrides it).
+The UI is an Iced 0.14 daemon (`App` in `ui.rs`) using the message/update/view model and a custom
+Tokio executor (two worker threads by default, `TOKIO_WORKER_THREADS` overrides it). It opens its
+window with `window::open` and keeps running without one: close-to-tray, which needs the tray and so
+exists on Linux only, closes the window, because Wayland cannot hide one, and the tray opens it
+again. When the window is minimized or closed to the tray, cached covers other than the playing
+track's are dropped and the freed heap is returned.
 
-- `ui/shell.rs`: window chrome (the window is undecorated): title bar, tabs and the player bar.
+- `ui/shell.rs`: window chrome: title bar, tabs and the player bar. The window is undecorated on
+  Linux and Windows; on macOS the system frame stays, with a transparent, untitled bar that the
+  app's bar fills.
 - Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`), Favorites (`ui/favorites.rs`),
   album/artist/playlist detail (`ui/collection.rs`), Now Playing with Up Next and Lyrics
   (`ui/now_playing.rs`) and Settings (`ui/settings.rs`).
@@ -153,7 +166,10 @@ All paths come from the `dirs` crate (`~/.config/crabytube` and `~/.cache/crabyt
 | Lyrics | `cache/crabytube/lyrics/` | 30-day lifetime, 2 MiB in total |
 | Player script (raw and preprocessed) | `cache/crabytube/player-js/` | Latest player versions only; 8 MiB per preprocessed file |
 | BotGuard snapshots, PO tokens | `cache/crabytube/botguard-*.bin`, `pot.json` | 8 files / 16 MiB; tokens until expiry |
+| Player configuration | `cache/crabytube/player-config.json` | Six hours |
 | Streaming buffer | `cache/crabytube/stream/` | Temporary files for the current tracks |
+| Update download | `cache/crabytube/updates/` | One package, removed at the next start |
+| Log (Windows and macOS) | `crabytube.log` in the local data folder | Moved to `crabytube.log.1` past 1 MiB |
 
 `state.json` is written by a single background writer that coalesces rapid changes and writes
 through a temporary file. Nothing in local state contains credentials, cookies, signed media URLs or
@@ -164,11 +180,13 @@ individually.
 
 - **Linux:** MPRIS (`org.mpris.MediaPlayer2.crabytube`) with metadata, the saved cover file and controls; a
   StatusNotifier tray icon with optional close-to-tray; desktop notifications; launch on startup
-  through `~/.config/autostart`. The window's application ID is `dev.holypanda.CrabyTube`, matching
+  through `~/.config/autostart`, or the Background portal inside the Flatpak. The window's application ID is `dev.holypanda.CrabyTube`, matching
   `packaging/linux/dev.holypanda.CrabyTube.desktop`.
 - **Windows:** media keys and the system media panel (title, artist, cover, position) through the
   System Media Transport Controls. The icon is embedded by `build.rs` (`winresource`).
-- **macOS:** media keys, headphone buttons and Control Center through `MPRemoteCommandCenter`, and Now Playing (title, artist, album, cover, position and a progress bar that advances by itself) through `MPNowPlayingInfoCenter`. The cover is read from the file the app already saved, never from a URL the system downloads. `packaging/macos/build-app.sh` builds the signed universal app bundle.
+  `packaging/windows/build-zip.ps1` builds the portable zip, and `build-msi.ps1` a per-user `.msi`
+  from `crabytube.wxs`, whose Start menu entry carries the app id the installed copy gives itself.
+- **macOS:** media keys, headphone buttons and Control Center through `MPRemoteCommandCenter`, and Now Playing (title, artist, album, cover, position and a progress bar that advances by itself) through `MPNowPlayingInfoCenter`. The cover is read from the file the app already saved, never from a URL the system downloads. `packaging/macos/build-app.sh` builds the universal app bundle (macOS 11 or later, ad hoc signature) and the release zip and disk image.
 - **All platforms:** optional Discord Rich Presence.
 
 ## Development tools
@@ -176,7 +194,9 @@ individually.
 The `diagnostics` feature adds command-line test modes (`--scroll-test`, `--soak`, `--autoplay`,
 `--screenshots`, `--exit-after`), environment overrides for the helper paths, a lyric fixture for
 the screenshots, fault injection, and Iced's debug overlay. Release builds contain none of these,
-apart from a few environment switches for network troubleshooting (`CRABYTUBE_FORCE_IPV4`,
-`CRABYTUBE_HTTP1_ONLY`, `CRABYTUBE_UA_PROFILE`, and `CRABYTUBE_NETWORK_DIAGNOSTICS`, which the
-BotGuard helper reads). `scripts/peak-rss.sh` and
+apart from a few environment switches: for network troubleshooting `CRABYTUBE_FORCE_IPV4`,
+`CRABYTUBE_HTTP1_ONLY`, `CRABYTUBE_UA_PROFILE` and `CRABYTUBE_NETWORK_DIAGNOSTICS` (which the
+BotGuard helper reads); `CRABYTUBE_JS_PROFILE`, which makes the JS helper report its memory use at each stage; and
+`CRABYTUBE_UPDATE_FEED`, which points the update check at a test feed, whose signature is still
+required. `scripts/peak-rss.sh` and
 `scripts/soak-memory-cpu.sh` measure memory and CPU on Linux.

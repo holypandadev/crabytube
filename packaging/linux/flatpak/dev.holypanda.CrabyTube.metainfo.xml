@@ -26,19 +26,19 @@
   <screenshots>
     <screenshot type="default">
       <caption>Home</caption>
-      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/home.webp</image>
+      <image type="source" width="1841" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/home.webp</image>
     </screenshot>
     <screenshot>
       <caption>Now Playing</caption>
-      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/now-playing.webp</image>
+      <image type="source" width="1841" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/now-playing.webp</image>
     </screenshot>
     <screenshot>
       <caption>Playlist</caption>
-      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/playlist.webp</image>
+      <image type="source" width="1841" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/playlist.webp</image>
     </screenshot>
     <screenshot>
       <caption>Search</caption>
-      <image type="source" width="1842" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/search.webp</image>
+      <image type="source" width="1841" height="1034">https://raw.githubusercontent.com/holypandadev/crabytube/v0.1.0/docs/screenshots/search.webp</image>
     </screenshot>
   </screenshots>
   <categories>
