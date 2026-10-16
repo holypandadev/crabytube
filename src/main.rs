@@ -149,6 +149,8 @@ fn main() {
     parse_diagnostic_args();
 
     let result = crabytube::ui::run();
+    // An update the app has downloaded installs now that it has let go of its files.
+    crabytube::updater::run_scheduled_install();
     #[cfg(feature = "diagnostics")]
     if let Some(root) = isolated_profile {
         let _ = std::fs::remove_dir_all(root);

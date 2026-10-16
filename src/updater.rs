@@ -262,14 +262,30 @@ async fn fetch_small(
     if !response.status().is_success() {
         return Err(UpdateError::Network(format!("HTTP {}", response.status())));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| UpdateError::Network(error.to_string()))?;
-    if bytes.len() > limit {
-        return Err(UpdateError::Manifest("too large".into()));
+    read_at_most(response, limit).await
+}
+
+/// The body of a response, refused as soon as it passes `limit`, so a server that sends more than
+/// a description is never read whole.
+async fn read_at_most(response: reqwest::Response, limit: usize) -> Result<Vec<u8>, UpdateError> {
+    use futures_util::StreamExt;
+    let too_large = || UpdateError::Manifest("too large".into());
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(too_large());
     }
-    Ok(bytes.to_vec())
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| UpdateError::Network(error.to_string()))?;
+        if bytes.len() + chunk.len() > limit {
+            return Err(too_large());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 /// Asks the latest release whether it is newer than the running version. `Ok(None)` means this
@@ -455,9 +471,10 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Starts installing a downloaded update. The app must quit right after: the Windows Installer
-/// replaces its files once it has closed and opens the new version, and on a Mac a script waits for
-/// this process to end before it opens the new bundle.
+/// Installs a downloaded update, or prepares it. The app must quit right after. On Windows the
+/// installer starts once the app has shut down (`run_scheduled_install`), replaces its files and
+/// opens the new version; on a Mac the new bundle is put in place now, and a script waits for this
+/// process to end before it opens it.
 pub fn install(downloaded: &Path, install: &Install) -> Result<(), UpdateError> {
     match install {
         #[cfg(windows)]
@@ -473,20 +490,55 @@ pub fn install(downloaded: &Path, install: &Install) -> Result<(), UpdateError> 
     }
 }
 
-/// Runs the Windows Installer on the new package with its progress bar only. The package opens the
-/// app when it has finished (see `packaging/windows/crabytube.wxs`).
+/// The Windows Installer package that `run_scheduled_install` runs once the app has shut down.
+#[cfg(windows)]
+static SCHEDULED_PACKAGE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(windows)]
+fn msiexec() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join("msiexec.exe")
+}
+
+/// Keeps the package for `run_scheduled_install`. The installer must not find the app's files in
+/// use, or it would leave the old ones for a restart that never comes.
 #[cfg(windows)]
 fn install_msi(package: &Path) -> Result<(), UpdateError> {
-    let system = std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-    std::process::Command::new(system.join("System32").join("msiexec.exe"))
-        .arg("/i")
-        .arg(package)
-        .args(["/passive", "/norestart"])
-        .spawn()
-        .map(drop)
-        .map_err(|error| UpdateError::Install(error.to_string()))
+    if !msiexec().is_file() {
+        return Err(UpdateError::Install("msiexec.exe was not found".into()));
+    }
+    let mut scheduled = SCHEDULED_PACKAGE
+        .lock()
+        .map_err(|_| UpdateError::Install("the update could not be scheduled".into()))?;
+    *scheduled = Some(package.to_path_buf());
+    Ok(())
+}
+
+/// Runs the Windows Installer, with its progress bar only, on the package an update scheduled. `main`
+/// calls it once the interface has ended and the app has let go of its files; the process ends right
+/// after. The package opens the app when it has finished (see `packaging/windows/crabytube.wxs`).
+pub fn run_scheduled_install() {
+    #[cfg(windows)]
+    {
+        let package = SCHEDULED_PACKAGE
+            .lock()
+            .ok()
+            .and_then(|mut scheduled| scheduled.take());
+        if let Some(package) = package {
+            match std::process::Command::new(msiexec())
+                .arg("/i")
+                .arg(&package)
+                .args(["/passive", "/norestart"])
+                .spawn()
+            {
+                Ok(_) => tracing::info!("the installer of the update started"),
+                Err(error) => tracing::error!(%error, "the installer of the update did not start"),
+            }
+        }
+    }
 }
 
 /// Unpacks the new app beside the running one, swaps the two, and leaves a script that opens the
@@ -516,8 +568,16 @@ fn install_mac_bundle(zip: &Path, bundle: &Path) -> Result<(), UpdateError> {
     let old_bundle = staging.join("CrabyTube-old.app");
     std::fs::rename(bundle, &old_bundle).map_err(failed)?;
     if let Err(error) = std::fs::rename(&new_bundle, bundle) {
-        let _ = std::fs::rename(&old_bundle, bundle);
-        let _ = std::fs::remove_dir_all(&staging);
+        // The app goes back where it was. If that fails too, it stays where it is now, and nothing
+        // is deleted: the staging folder holds the only copy.
+        if std::fs::rename(&old_bundle, bundle).is_ok() {
+            let _ = std::fs::remove_dir_all(&staging);
+        } else {
+            tracing::error!(
+                kept = %old_bundle.display(),
+                "the app could not be put back after a failed update"
+            );
+        }
         return Err(failed(error));
     }
     // The running app keeps its files open, so the old bundle is removed after it has quit.
@@ -664,6 +724,48 @@ mod tests {
         let manual = newer(manifest("1.0.0"), running, &Install::Manual).unwrap();
         assert!(manual.package.is_none());
         assert!(manual.notes_url.ends_with("/v1.0.0"));
+    }
+
+    /// A one-shot server on the loopback address that answers with `body`, with or without a
+    /// length, and the address it listens on.
+    async fn serve_once(body: Vec<u8>, with_length: bool) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request).await;
+            let head = if with_length {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+            } else {
+                "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_owned()
+            };
+            let _ = socket.write_all(head.as_bytes()).await;
+            let _ = socket.write_all(&body).await;
+        });
+        format!("http://{address}/update.json")
+    }
+
+    #[tokio::test]
+    async fn a_description_larger_than_its_limit_is_not_read_whole() {
+        let client = client().unwrap();
+        // Within the limit, with and without a length.
+        for with_length in [true, false] {
+            let url = serve_once(vec![b'a'; 100], with_length).await;
+            assert_eq!(fetch_small(&client, &url, 1000).await.unwrap().len(), 100);
+        }
+        // Over it: refused by the length it announces, or as soon as the bytes pass it.
+        for with_length in [true, false] {
+            let url = serve_once(vec![b'a'; 300_000], with_length).await;
+            assert_eq!(
+                fetch_small(&client, &url, 1000).await,
+                Err(UpdateError::Manifest("too large".into()))
+            );
+        }
     }
 
     #[test]
