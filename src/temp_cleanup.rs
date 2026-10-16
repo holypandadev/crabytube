@@ -74,6 +74,8 @@ pub fn sweep_in_background() {
             if removed > 0 {
                 tracing::info!(removed, "removed stale cache temp files");
             }
+            // Only the first instance gets here, so no update of a running app is downloading.
+            crate::updater::remove_old_downloads();
         });
 }
 

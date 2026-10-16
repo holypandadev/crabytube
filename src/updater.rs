@@ -372,6 +372,20 @@ fn download_folder() -> Result<PathBuf, UpdateError> {
         .ok_or_else(|| UpdateError::Storage("no cache folder".into()))
 }
 
+/// Removes what an earlier update downloaded. By the time the new version starts, the installer has
+/// its own copy, so the download only takes room. A file still open is left for the next start.
+pub fn remove_old_downloads() {
+    let Ok(folder) = download_folder() else {
+        return;
+    };
+    if folder.exists() {
+        match std::fs::remove_dir_all(&folder) {
+            Ok(()) => tracing::info!("removed the download of an installed update"),
+            Err(error) => tracing::debug!(%error, "the update download is still in use"),
+        }
+    }
+}
+
 /// Downloads the package, reporting the bytes received and the total, and returns the file once its
 /// size and SHA-256 are the ones the release names. A file that does not match is deleted.
 pub async fn download(
