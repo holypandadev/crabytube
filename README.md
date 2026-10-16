@@ -24,9 +24,9 @@
     <th width="33%" align="left"><code>03</code> NO ACCOUNT</th>
   </tr>
   <tr>
-    <td valign="top">Under 100 MB of RAM while playing and a few dozen at rest. Idle CPU stays near zero.</td>
+    <td valign="top">Under 100 MB of RAM while playing, a few dozen at rest. Idle CPU stays near zero.</td>
     <td valign="top">Pure Rust and Iced: no browser, no Electron. Opens fast and preloads the next track.</td>
-    <td valign="top">Plays YouTube Music anonymously. No sign-in, cookies or telemetry; your data stays local.</td>
+    <td valign="top">Anonymous YouTube Music: no sign-in, cookies or telemetry. Your data stays local.</td>
   </tr>
   <tr>
     <th width="33%" align="left"><code>04</code> SYNCED LYRICS</th>
@@ -34,9 +34,9 @@
     <th width="33%" align="left"><code>06</code> FITS YOUR DESKTOP</th>
   </tr>
   <tr>
-    <td valign="top">Synced lyrics from two sources; word-by-word karaoke and translations for many songs.</td>
-    <td valign="top">Pure black, monospaced type and one-pixel outlines. Scales from phone size up to 4K.</td>
-    <td valign="top">Media keys on every system, a Linux tray icon, Discord Rich Presence and nine languages.</td>
+    <td valign="top">Synced lyrics, plus word-by-word karaoke and translations for many popular songs.</td>
+    <td valign="top">Pure black, monospaced type and one-pixel outlines. Scales from phone size to 4K.</td>
+    <td valign="top">Media keys everywhere, a Linux tray icon, Discord Rich Presence and nine languages.</td>
   </tr>
 </table>
 
