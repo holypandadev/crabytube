@@ -748,6 +748,8 @@ async fn actor(
                     status.underruns = 0;
                     status.resolved_format = None;
                     status.error = None;
+                    // A broadcast before is not this track: it is live only once its stream says so.
+                    status.live = false;
                     let _ = status_tx.send(status.clone());
                     let events_tx = events_tx.clone();
                     let current_generation = generation;
@@ -863,6 +865,7 @@ async fn actor(
                     status.output_device = None;
                     transition(&mut status, PlaybackState::Stopped);
                     status.position = Duration::ZERO;
+                    status.live = false;
                     info!("stop");
                     let _ = status_tx.send(status.clone());
                 }

@@ -283,6 +283,18 @@ const PLAYBACK_TICK: Duration = Duration::from_millis(250);
 /// Messages the app sends itself: timers, loads, scrolling, frames and window state, and keyboard
 /// events that press nothing: releases and modifier changes. They leave a pending confirmation in
 /// place. Every other message counts as a press.
+/// Whether a message is a press of Escape.
+fn is_escape_press(message: &Message) -> bool {
+    use iced::keyboard::{Event as KeyEvent, Key, key::Named};
+    matches!(
+        message,
+        Message::KeyPressed(KeyEvent::KeyPressed {
+            key: Key::Named(Named::Escape),
+            ..
+        })
+    )
+}
+
 fn keeps_confirmation(message: &Message) -> bool {
     match message {
         Message::ConfirmImport
@@ -655,6 +667,10 @@ impl App {
         // includes leaving Settings. Timers, loads, scrolling and window events do not count.
         if self.confirmation.is_some() && !keeps_confirmation(&message) {
             self.confirmation = None;
+            // Escape closes the confirmation alone, rather than also leaving Settings.
+            if is_escape_press(&message) {
+                return Task::none();
+            }
         }
         #[cfg(feature = "diagnostics")]
         let (name, started) = (timing::message_name(&message), std::time::Instant::now());
@@ -2181,8 +2197,13 @@ impl App {
                         defaults.startup = true;
                     }
                 }
+                let was_shuffled = self.shuffle;
                 self.preferences = defaults;
                 self.apply_preferences();
+                // Turning shuffle off puts the queue back in its order, as the button does.
+                if was_shuffled && !self.shuffle {
+                    self.restore_unshuffled_order();
+                }
                 self.sync_discord_presence(true);
                 self.persist();
                 return startup_task;
@@ -2614,6 +2635,17 @@ impl App {
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.queue_index = snapshot.queue_index;
         self.radio_track_ids.clear();
+        // The imported queue is not the list that played before: its album or playlist, a radio on
+        // its way and the lyrics fetched ahead belong to the old one.
+        self.queue_source = None;
+        if let Some(token) = self.radio_cancel.take() {
+            token.cancel();
+        }
+        self.radio_generation = self.radio_generation.wrapping_add(1);
+        self.radio_loading = false;
+        self.radio_error = None;
+        self.radio_attempted_for = None;
+        self.prefetch_requested = None;
         self.queue_notice = None;
         self.queue_scroll = AbsoluteOffset::default();
         self.search_history = snapshot.history;
@@ -4331,6 +4363,128 @@ mod tests {
     }
 
     #[test]
+    fn the_end_of_the_track_before_does_not_skip_the_one_just_picked() {
+        let mut app = App {
+            queue: Arc::new(vec![
+                fixture_track("before"),
+                fixture_track("picked"),
+                fixture_track("after"),
+            ]),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        app.playback_status.track = Some(fixture_track("before"));
+        app.playback_status.state = PlaybackState::Playing;
+        drop(app.update(Message::PlayQueueIndex(1)));
+        assert_eq!(app.queue_index, Some(1));
+        // The engine had sent the end of the track before just as the new one was picked.
+        drop(app.update_playback_status(PlaybackStatus {
+            track: Some(fixture_track("before")),
+            state: PlaybackState::Finished,
+            ..PlaybackStatus::default()
+        }));
+        assert_eq!(app.queue_index, Some(1), "the picked track stays selected");
+        // Its own end moves the queue on as before.
+        drop(app.update_playback_status(PlaybackStatus {
+            track: Some(fixture_track("picked")),
+            state: PlaybackState::Playing,
+            ..PlaybackStatus::default()
+        }));
+        drop(app.update_playback_status(PlaybackStatus {
+            track: Some(fixture_track("picked")),
+            state: PlaybackState::Finished,
+            ..PlaybackStatus::default()
+        }));
+        assert_eq!(app.queue_index, Some(2));
+    }
+
+    #[test]
+    fn reset_puts_a_shuffled_queue_back_in_its_order() {
+        let tracks: Vec<_> = (0..12).map(|i| fixture_track(&format!("t{i}"))).collect();
+        let order: Vec<String> = tracks.iter().map(|track| track.video_id.clone()).collect();
+        let mut app = App {
+            queue: Arc::new(tracks),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        drop(app.update(Message::ToggleShuffle));
+        assert!(app.shuffle);
+        drop(app.update(Message::ResetSettings));
+        assert!(!app.shuffle);
+        let now: Vec<String> = app
+            .queue
+            .iter()
+            .map(|track| track.video_id.clone())
+            .collect();
+        assert_eq!(now, order);
+    }
+
+    #[test]
+    fn an_imported_queue_leaves_the_old_one_behind() {
+        let mut app = App {
+            queue: Arc::new(vec![fixture_track("old")]),
+            queue_index: Some(0),
+            queue_source: Some(super::QueueSource {
+                title: "Old album".into(),
+                track_count: 9,
+                browse: None,
+                thumbnail_url: None,
+                album: true,
+            }),
+            radio_loading: true,
+            radio_cancel: Some(CancellationToken::new()),
+            radio_attempted_for: Some("old".into()),
+            prefetch_requested: Some("old".into()),
+            ..App::default()
+        };
+        let token = app.radio_cancel.clone().unwrap();
+        let generation = app.radio_generation;
+        let snapshot = crate::preferences::Snapshot {
+            queue: Arc::new(vec![fixture_track("imported")]),
+            queue_index: Some(0),
+            ..crate::preferences::Snapshot::default()
+        };
+        drop(app.apply_snapshot(snapshot));
+        assert_eq!(app.queue[0].video_id, "imported");
+        assert!(app.queue_source.is_none());
+        assert!(!app.radio_loading && app.radio_attempted_for.is_none());
+        assert!(token.is_cancelled());
+        assert_ne!(
+            app.radio_generation, generation,
+            "a radio still on its way is dropped"
+        );
+        assert!(app.prefetch_requested.is_none());
+    }
+
+    #[test]
+    fn a_lyric_time_out_of_any_range_never_ends_the_app() {
+        // A cached record from an older parser could still hold one.
+        let mut app = App {
+            lyrics: Some(crate::lyrics::Lyrics {
+                source: "fixture".into(),
+                lines: vec![crate::lyrics::Line {
+                    start: 1e30,
+                    end: None,
+                    text: "far".into(),
+                    words: Vec::new(),
+                    translation: None,
+                    romanization: None,
+                    background: None,
+                }],
+                length_mismatch: false,
+                plain: None,
+            }),
+            ..App::default()
+        };
+        app.playback_status.track = Some(song("Track"));
+        // As the next boundary, and when its line is pressed.
+        assert!(app.karaoke_wait().is_some());
+        drop(app.update(Message::SeekTo(1e30)));
+        drop(app.update(Message::SeekTo(f64::INFINITY)));
+        drop(app.update(Message::SeekTo(f64::NAN)));
+    }
+
+    #[test]
     fn synced_lyrics_wake_at_the_next_word_instead_of_a_fixed_tick() {
         let word = |start: f64| crate::lyrics::Word {
             start,
@@ -6032,6 +6186,32 @@ mod tests {
         assert!(app.seek_notice.is_some());
         drop(app.update(Message::SeekNoticeExpired(shown)));
         assert!(app.seek_notice.is_none());
+    }
+
+    #[test]
+    fn escape_closes_a_confirmation_and_stays_in_settings() {
+        use iced::keyboard::{Event as KeyEvent, Key, Location, Modifiers, key::Named};
+        let escape = KeyEvent::KeyPressed {
+            key: Key::Named(Named::Escape),
+            modified_key: Key::Named(Named::Escape),
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        };
+        let mut app = App::default();
+        drop(app.update(Message::Navigate(Page::Settings)));
+        drop(app.update(Message::AskResetSettings));
+        assert!(app.confirmation.is_some());
+        drop(app.update(Message::KeyPressed(escape.clone())));
+        assert!(app.confirmation.is_none());
+        assert_eq!(app.page, Page::Settings);
+        // With nothing open, Escape leaves Settings as before.
+        drop(app.update(Message::KeyPressed(escape)));
+        assert_ne!(app.page, Page::Settings);
     }
 
     #[test]

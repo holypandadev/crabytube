@@ -62,9 +62,22 @@ The script compiles the workspace in release mode and writes `target\windows\Cra
 `packaging/windows/README-first-launch.txt`, which goes into the zip, explains the SmartScreen
 warning. `-NoBuild` packs the executables already in `target\release\`.
 
+The Windows Installer package is made from the folder the zip comes from, with the WiX Toolset 5:
+
+```powershell
+dotnet tool install --global wix --version 5.0.2
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-msi.ps1
+```
+
+It writes `target\windows\CrabyTube-<version>-windows-x64.msi` (`packaging/windows/crabytube.wxs`).
+The package installs for the user who runs it, without an administrator password, into
+`%LOCALAPPDATA%\Programs\CrabyTube`, with a Start menu entry and an entry in Settings → Apps. That
+copy updates itself (see `src/updater.rs`).
+
 ## macOS
 
-`packaging/macos/build-app.sh` builds the signed application bundle and the zip for users:
+`packaging/macos/build-app.sh` builds the signed application bundle, and the zip and the disk image
+for users:
 
 ```sh
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -76,8 +89,9 @@ programs in `CrabyTube.app/Contents/MacOS/` next to the executable, writes the `
 the helpers and then the bundle ad hoc (no certificate, no hardened runtime, no notarization) and
 zips the result into `target/macos/CrabyTube-<version>-macos-universal.zip`. The zip also holds
 `README-first-launch.txt` (how to get past the first-start warning of macOS and where the data is),
-`LICENSE.txt`, `THIRD-PARTY-LICENSES.md` and `THIRD-PARTY-LICENSES.txt`. Set `TARGETS=aarch64-apple-darwin` for a quick build of
-one architecture.
+`LICENSE.txt`, `THIRD-PARTY-LICENSES.md` and `THIRD-PARTY-LICENSES.txt`. The disk image,
+`target/macos/CrabyTube-<version>-macos-universal.dmg`, holds the same files and a link to
+Applications. Set `TARGETS=aarch64-apple-darwin` for a quick build of one architecture.
 
 The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
 on Linux. On macOS the media keys and Now Playing work from the application bundle. On Windows the
@@ -85,11 +99,16 @@ media keys and the media panel of the system flyout work from the executable, wi
 
 ## Release builds on GitHub
 
-The workflow `.github/workflows/release.yml` builds the three packages on GitHub's runners: the
-Flatpak bundle (`packaging/linux/flatpak`), the Windows zip (`packaging/windows/build-zip.ps1`) and
-the universal macOS zip (`packaging/macos/build-app.sh`). It starts only by hand (**Actions →
-Release builds → Run workflow**, or `gh workflow run release.yml`) and keeps the packages as
-artifacts of the run. It publishes nothing, needs no secrets and only reads the repository. Every
+The workflow `.github/workflows/release.yml` builds the five packages on GitHub's runners: the
+Flatpak bundle (`packaging/linux/flatpak`), the Windows zip and installer
+(`packaging/windows/build-zip.ps1` and `build-msi.ps1`) and the universal macOS zip and disk image
+(`packaging/macos/build-app.sh`). It starts only by hand (**Actions → Release builds → Run
+workflow**, or `gh workflow run release.yml`) and keeps the packages as artifacts of the run. It
+publishes nothing, needs no secrets and only reads the repository.
+
+A release also carries `update.json`, `update.json.sig` and `SHA256SUMS`, which
+`scripts/make-update-manifest.py` writes from the five packages and signs with the release key on
+the release machine. The key never goes into the repository or the workflow. Every
 third-party action and the Flatpak container image are pinned by commit or digest; update them
 deliberately and keep the version in the comment beside each one.
 

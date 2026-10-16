@@ -253,6 +253,27 @@ pub fn titles_match(query: &str, candidate: &str) -> bool {
     // Same base: version markers must agree, otherwise live/remix/cover confusion.
     version_markers(query) == version_markers(candidate)
 }
+/// The latest time a lyric may have: no song lasts a day.
+const MAX_LYRIC_SECONDS: f64 = 24.0 * 60.0 * 60.0;
+
+/// Whether a time a provider gave is one a song can have. Its text can carry "inf", "1e30" or an
+/// offset that pushes every line out of range, and such a time must never reach a `Duration`.
+fn plausible_time(seconds: f64) -> bool {
+    seconds.is_finite() && (0.0..=MAX_LYRIC_SECONDS).contains(&seconds)
+}
+
+/// Drops the lines and words whose times no song has.
+fn keep_plausible_times(lines: &mut Vec<Line>) {
+    lines.retain(|line| plausible_time(line.start));
+    for line in lines.iter_mut() {
+        if line.end.is_some_and(|end| !plausible_time(end)) {
+            line.end = None;
+        }
+        line.words
+            .retain(|word| plausible_time(word.start) && plausible_time(word.end));
+    }
+}
+
 fn timestamp(raw: &str) -> Option<f64> {
     if let Some(ms) = raw.strip_suffix("ms") {
         return ms.parse::<f64>().ok().map(|v| v / 1000.0);
@@ -275,7 +296,10 @@ pub fn lrc(input: &str, source: &str) -> Lyrics {
             .and_then(|s| s.strip_suffix(']'))
             .and_then(|s| s.parse::<f64>().ok())
         {
-            offset = v / 1000.0;
+            // An offset of more than a day is no offset.
+            if (v / 1000.0).abs() <= MAX_LYRIC_SECONDS {
+                offset = v / 1000.0;
+            }
             continue;
         }
         let mut rest = raw;
@@ -307,6 +331,7 @@ pub fn lrc(input: &str, source: &str) -> Lyrics {
     for line in &mut lines {
         line.start = (line.start - offset).max(0.0);
     }
+    keep_plausible_times(&mut lines);
     lines.sort_by(|a, b| a.start.total_cmp(&b.start));
     for i in 0..lines.len().saturating_sub(1) {
         lines[i].end = Some(lines[i + 1].start);
@@ -437,6 +462,7 @@ pub fn ttml(input: &str) -> Option<Lyrics> {
             background: non_blank(background),
         });
     }
+    keep_plausible_times(&mut lines);
     lines.sort_by(|a, b| a.start.total_cmp(&b.start));
     (!lines.is_empty()).then(|| Lyrics {
         source: "Better Lyrics / TTML".into(),
@@ -526,6 +552,7 @@ pub fn qrc(input: &str) -> Option<Lyrics> {
             }
         }
     }
+    keep_plausible_times(&mut lines);
     (!lines.is_empty()).then(|| Lyrics {
         source: "QQ Music via Better Lyrics".into(),
         lines,
@@ -1356,6 +1383,37 @@ mod tests {
         assert_eq!(lyrics.next_boundary(Some(1), 14.5), None);
         // Before the first line, with no active line.
         assert_eq!(lyrics.next_boundary(None, 5.0), Some(10.0));
+    }
+
+    #[test]
+    fn times_no_song_has_are_dropped_from_a_provider_text() {
+        let l = lrc(
+            "[inf]a\n[1e30:00]b\n[1e30ms]c\n[00:05.00]ok\n[NaN]d\n[-3s]e",
+            "fixture",
+        );
+        assert!(l.lines.iter().all(|line| plausible_time(line.start)));
+        assert!(
+            l.lines
+                .iter()
+                .any(|line| line.text == "ok" && line.start == 5.0)
+        );
+        assert!(
+            l.lines
+                .iter()
+                .all(|line| line.end.is_none_or(plausible_time))
+        );
+        // An offset out of range is no offset, and leaves the lines where they are.
+        let shifted = lrc("[offset:-1e400]\n[00:05.00]ok", "fixture");
+        assert_eq!(shifted.lines.len(), 1);
+        assert_eq!(shifted.lines[0].start, 5.0);
+        let words = lrc("[00:01.00]<00:01.00>one <1e30:00>two", "fixture");
+        assert!(
+            words
+                .lines
+                .iter()
+                .flat_map(|line| &line.words)
+                .all(|word| plausible_time(word.start) && plausible_time(word.end))
+        );
     }
 
     #[test]

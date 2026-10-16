@@ -356,7 +356,9 @@ impl ValidatedPlaybackResolution {
             .diagnostics
             .expires_at_unix
             .and_then(|seconds| u64::try_from(seconds).ok())
-            .map(|seconds| UNIX_EPOCH + Duration::from_secs(seconds));
+            // The time comes from YouTube's address; one past what the system clock holds (which on
+            // Windows ends far sooner than on Unix) is no expiry.
+            .and_then(|seconds| UNIX_EPOCH.checked_add(Duration::from_secs(seconds)));
         Self {
             stream,
             created_at,
@@ -2450,6 +2452,15 @@ fn choose_aac_format(formats: &[Value], quality: AudioQuality) -> Option<&Value>
                 .unwrap_or_default();
             mime.starts_with("audio/mp4") && mime.contains("mp4a.40.2")
         })
+        // Surround (5.1, itag 258) holds three times the samples of stereo: the buffer the player
+        // keeps is sized for two channels, and a player of music gains nothing from more. A format
+        // that does not say counts as stereo.
+        .filter(|format| {
+            format
+                .get("audioChannels")
+                .and_then(Value::as_u64)
+                .is_none_or(|channels| channels <= 2)
+        })
         .filter(|format| {
             quality_allows(
                 quality,
@@ -2903,6 +2914,22 @@ mod tests {
                 .and_then(|format| format["itag"].as_u64()),
             Some(140)
         );
+    }
+
+    #[test]
+    fn surround_audio_is_passed_over_for_stereo() {
+        let mut surround = format(258, "audio/mp4; codecs=\"mp4a.40.2\"", 384_000, true);
+        surround["audioChannels"] = json!(6);
+        let mut stereo = format(140, "audio/mp4; codecs=\"mp4a.40.2\"", 128_000, true);
+        stereo["audioChannels"] = json!(2);
+        let formats = [surround.clone(), stereo];
+        assert_eq!(
+            choose_aac_format(&formats, AudioQuality::Auto)
+                .and_then(|format| format["itag"].as_u64()),
+            Some(140)
+        );
+        // Surround alone offers nothing to play.
+        assert!(choose_aac_format(&[surround], AudioQuality::Auto).is_none());
     }
 
     #[test]

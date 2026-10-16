@@ -57,6 +57,7 @@ impl App {
         let previous_state = self.playback_status.state;
         let previous_position = self.playback_status.position;
         let previous_track = self.playback_status.track.clone();
+        let previous_video = previous_track.as_ref().map(|track| track.video_id.clone());
         let previous_device = self.playback_status.output_device.clone();
         self.playback_status = status;
         // Another output plays now, which may mean one went away or came: the list in Settings is
@@ -128,9 +129,18 @@ impl App {
             tasks.push(self.load_lyrics(track));
         }
 
-        // Auto-advance with repeat support, gated by the Autoplay toggle.
+        // Auto-advance with repeat support, gated by the Autoplay toggle. Only the end of the track
+        // the app had selected moves the queue on: the end of the one before, reported just as
+        // another was picked, would skip the one picked.
+        let finished_selected = self
+            .playback_status
+            .track
+            .as_ref()
+            .map(|track| &track.video_id)
+            == previous_video.as_ref();
         if self.playback_status.state == PlaybackState::Finished
             && previous_state != PlaybackState::Finished
+            && finished_selected
             && let Some(task) = self.advance_after_finish()
         {
             tasks.push(task);
@@ -210,7 +220,8 @@ impl App {
         let until = lyrics
             .next_boundary(self.lyric_active, now)
             .map_or(KARAOKE_MAX_WAIT, |boundary| {
-                Duration::from_secs_f64((boundary - now).max(0.0))
+                // A time out of any range waits the longest, rather than ending the app.
+                Duration::try_from_secs_f64((boundary - now).max(0.0)).unwrap_or(KARAOKE_MAX_WAIT)
             })
             .clamp(KARAOKE_MIN_WAIT, KARAOKE_MAX_WAIT);
         // A few milliseconds past the boundary, so the wake-up finds the word started.
@@ -888,7 +899,11 @@ impl App {
 
             Message::SeekTo(seconds) => {
                 let audio_seconds = seconds - self.current_lyrics_offset() as f64 / 1000.0;
-                self.seek_playback(Duration::from_secs_f64(audio_seconds.max(0.0)));
+                // The time of a lyric line comes from its provider: one out of any range is no
+                // place to go to.
+                if let Ok(target) = Duration::try_from_secs_f64(audio_seconds.max(0.0)) {
+                    self.seek_playback(target);
+                }
             }
             Message::ToggleShuffle => {
                 self.shuffle = !self.shuffle;

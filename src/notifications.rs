@@ -106,8 +106,11 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
             Value::from(cover.to_string_lossy().into_owned()),
         );
     }
-    let summary = escape_markup(&notice.title);
-    let body = escape_markup(&notice.artist);
+    // Both go as plain text, as the portal takes them. The specification makes the summary plain,
+    // and a server that says it reads markup in the body may still show it as it is: Caelestia's
+    // showed "Simon &amp; Garfunkel". Plasma and GNOME accept a bare "&" in a body they parse.
+    let summary = notice.title.as_str();
+    let body = notice.artist.as_str();
     let reply = connection
         .call_method(
             Some("org.freedesktop.Notifications"),
@@ -119,8 +122,8 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
                 service_replaces_id(notice.replaces_id),
                 // The installed icon name (see `packaging/icons`).
                 crate::APP_ID,
-                summary.as_str(),
-                body.as_str(),
+                summary,
+                body,
                 Vec::<&str>::new(),
                 hints,
                 EXPIRE_MS,
@@ -173,27 +176,8 @@ fn portal_icon(cover: Option<Vec<u8>>) -> zbus::zvariant::Structure<'static> {
     }
 }
 
-/// Notification text may carry a little markup. Escaping keeps titles such as "A & B" as written.
-#[cfg(any(target_os = "linux", test))]
-fn escape_markup(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::escape_markup;
-
-    #[test]
-    fn titles_keep_their_characters_when_markup_is_escaped() {
-        assert_eq!(
-            escape_markup("Tom & Jerry <live>"),
-            "Tom &amp; Jerry &lt;live&gt;"
-        );
-        assert_eq!(escape_markup("Plain Song Title"), "Plain Song Title");
-    }
-
     #[cfg(target_os = "linux")]
     #[test]
     fn the_portal_placeholder_replaces_nothing_at_the_service() {

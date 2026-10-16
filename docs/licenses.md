@@ -83,8 +83,8 @@ dependencies:
 | `reqwest` 0.13, `rustls` 0.23 | app, BotGuard helper | MIT OR Apache-2.0; `rustls`: Apache-2.0 OR ISC OR MIT |
 | `aws-lc-rs` / `aws-lc-sys`, `ring` | TLS cryptography | ISC and Apache-2.0 (with MIT and BSD-3-Clause parts in `aws-lc-sys`) |
 | `webpki-root-certs` | TLS root certificates | CDLA-Permissive-2.0 |
-| `rodio` 0.22, `stream-download` 0.24 | app (playback) | MIT OR Apache-2.0 |
-| `cpal` 0.17 | app (audio output) | Apache-2.0 |
+| `rodio` 0.23, `stream-download` 0.24 | app (playback) | MIT OR Apache-2.0 |
+| `cpal` 0.18 | app (audio output) | Apache-2.0 |
 | `symphonia` 0.5 | app (MP4 demuxing, AAC decoding) | MPL-2.0 |
 | `image` 0.25, `zune-jpeg`, `png` | app (artwork) | MIT OR Apache-2.0 (`zune-jpeg` also Zlib) |
 | `zbus` 5 | app (MPRIS, notifications; Linux) | MIT |

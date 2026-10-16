@@ -140,7 +140,17 @@ ditto "$stage" "$dmg_stage"
 ln -s /Applications "$dmg_stage/Applications"
 dmg="$out/CrabyTube-$version-macos-universal.dmg"
 rm -f "$dmg"
-hdiutil create -volname "CrabyTube" -srcfolder "$dmg_stage" -fs HFS+ -format UDZO -ov "$dmg"
+# hdiutil sometimes answers "Resource busy" while the system still looks at the new files, as it
+# did on a build machine, so it is tried a few times.
+attempt=1
+until hdiutil create -volname "CrabyTube" -srcfolder "$dmg_stage" -fs HFS+ -format UDZO -ov "$dmg"; do
+    if [ "$attempt" -ge 5 ]; then
+        echo "hdiutil could not create the disk image" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 10
+done
 hdiutil verify "$dmg"
 
 echo
