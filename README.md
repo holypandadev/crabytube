@@ -38,8 +38,8 @@
 
 ## Install
 
-Each release on the GitHub Releases page has one file per platform. Nothing is signed with a paid
-certificate, so your system asks you to confirm the first start once.
+Each release on the GitHub Releases page has the packages for each platform. Nothing is signed
+with a paid certificate, so your system asks you to confirm the first start once.
 
 ### Linux
 
@@ -57,16 +57,28 @@ The Flatpak has no access to your Documents folder, so Settings → Export and I
 
 ### Windows
 
-1. Download the `.zip` file and extract it to a folder of your choice. Keep all the files together.
-2. Run `CrabyTube.exe`. Windows SmartScreen shows "Windows protected your PC" because the app is not
-   signed. Click **More info**, then **Run anyway**. You only need to do this once.
+The installer is the easiest way, and the installed app updates itself:
+
+1. Download `CrabyTube-<version>-windows-x64.msi` and open it. Windows SmartScreen may show
+   "Windows protected your PC" because the package is not signed. Click **More info**, then
+   **Run anyway**.
+2. It installs CrabyTube for your user, without an administrator password, into
+   `%LOCALAPPDATA%\Programs\CrabyTube`, adds it to the Start menu and opens it. To remove it, use
+   **Settings → Apps → Installed apps**.
+
+There is also a portable copy, which does not update itself:
+
+1. Download `CrabyTube-windows-x64.zip` and extract it to a folder of your choice. Keep all the
+   files together.
+2. Run `CrabyTube.exe`. Confirm the SmartScreen warning once, as above.
 
 Nothing else needs to be installed: the Visual C++ runtime is built into the executables.
 
 ### macOS
 
-1. Download the `.zip` file, extract it and move `CrabyTube.app` to `/Applications`. The app is
-   universal and runs natively on Apple Silicon and Intel Macs.
+1. Download `CrabyTube-<version>-macos-universal.dmg`, open it and drag CrabyTube to
+   Applications. (The `.zip` holds the same app: extract it and move `CrabyTube.app` to
+   `/Applications`.) The app is universal and runs natively on Apple Silicon and Intel Macs.
 2. The app is signed ad hoc and not notarized, so macOS blocks the first start. Allow it once:
    - On macOS 15 and later, double-click `CrabyTube.app` and click **Done** in the message that
      says it was not opened. Then open **System Settings → Privacy & Security**, scroll to
@@ -79,7 +91,32 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
      xattr -dr com.apple.quarantine /Applications/CrabyTube.app
      ```
 
-   The zip also contains a short first-launch note, the license and the third-party notices.
+   The disk image and the zip also contain a short first-launch note, the license and the
+   third-party notices.
+
+## Updates
+
+On Windows and macOS, CrabyTube looks once a day for a newer version, and **Settings → Updates**
+shows what it found and has **Check now**. The daily check can be turned off there.
+
+- **Windows, installed with the `.msi`**: **Update now** downloads the new installer, closes
+  CrabyTube, installs it and opens CrabyTube again.
+- **macOS**: when CrabyTube is in a folder you can write to, such as Applications on an
+  administrator account, **Update now** downloads the new version, puts it in place of the app and
+  opens it again. Otherwise it opens the release page.
+- **The Windows zip** does not update itself: **Download page** opens the release page. Extract the
+  new zip over the old folder.
+- **Linux**: the Flatpak does not check for updates. Install the new `.flatpak` the same way as the
+  first one.
+
+Settings, favorites, the queue and the history are kept apart from the app, so an update leaves
+them as they are.
+
+Every release carries `update.json`, which names the version and the size and SHA-256 of each
+package, and its Ed25519 signature by the release key. CrabyTube uses it only when the signature
+is right, and installs a download only when its size and SHA-256 match it, so a file that was
+changed, or a release someone else made, is never installed. `SHA256SUMS` lists the same checksums
+for checking a download by hand.
 
 ## Privacy
 
@@ -90,6 +127,10 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
   YouTube and Google servers (catalog, artwork, audio and the BotGuard challenge), and the lyrics
   services LRCLIB and Better Lyrics (see below).
   Discord Rich Presence (off by default) talks only to the Discord client running on your computer.
+- On Windows and macOS, the update check (on by default, Settings → Updates) downloads
+  `update.json` and its signature from the latest release on GitHub once a day, and the new
+  package when you choose to update. The requests carry the app's version in their user agent
+  and nothing about you. The Flatpak makes no update requests.
 - Lyrics come from two services. LRCLIB (lrclib.net) receives the track's title and artist. Better
   Lyrics (api.betterlyrics.org) receives the title, the artist and the duration when they are
   known, and the YouTube video ID; its QQ Music and Kugou lookups go through the same service.

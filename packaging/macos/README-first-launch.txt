@@ -53,6 +53,16 @@ If you prefer Terminal, this does the same thing. Run it once, then open the app
 (Change the path if the app is somewhere else.)
 
 
+Updates
+-------
+
+CrabyTube looks for a new version once a day; Settings > Updates shows what it found, has
+"Check now", and can turn the daily check off. "Update now" downloads the new version, checks
+that it is the one the release signed, puts it in place of the app and opens it again. That needs
+the app in a folder you can write to, such as Applications on an administrator account; otherwise
+"Update now" opens the release page. Your settings, favorites and queue stay as they are.
+
+
 Media keys and "Now Playing"
 ----------------------------
 

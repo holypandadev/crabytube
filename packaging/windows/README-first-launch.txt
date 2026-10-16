@@ -2,8 +2,9 @@ CrabyTube for Windows
 =====================
 
 A lightweight YouTube Music player. No account, no sign-in and no telemetry.
-It needs Windows 10 or 11 (64-bit) and an internet connection. There is no installer and no
-administrator rights are needed.
+It needs Windows 10 or 11 (64-bit) and an internet connection. This is the portable copy: it
+needs no installation and no administrator rights. The release also has an installer (.msi),
+which adds CrabyTube to the Start menu and updates it by itself.
 
 
 What is in this folder
@@ -39,6 +40,14 @@ file, choose Properties, tick "Unblock" at the bottom and click OK.
 
 Some antivirus programs also check unknown programs the first time they run. If yours does, let
 the check finish.
+
+
+Updates
+-------
+
+This portable copy does not update itself. When a new version is out, Settings > Updates says
+so, and "Download page" opens it. Extract the new zip over this folder: your settings, favorites
+and queue are kept elsewhere (see below) and stay as they are.
 
 
 Where CrabyTube keeps its data
