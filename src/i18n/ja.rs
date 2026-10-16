@@ -4,6 +4,55 @@ use super::Catalog;
 
 pub(super) static CATALOG: Catalog = Catalog {
     entries: &[
+        ("Updates", "アップデート"),
+        ("Check for updates", "アップデートを確認"),
+        (
+            "Once a day, CrabyTube asks GitHub whether a new version is out.",
+            "CrabyTube は 1 日に 1 回、新しいバージョンが出ているか GitHub に確認します。",
+        ),
+        ("Check now", "今すぐ確認"),
+        ("Update now", "今すぐアップデート"),
+        ("Download page", "ダウンロードページ"),
+        ("Checking for updates…", "アップデートを確認しています…"),
+        (
+            "CrabyTube {} is installed.",
+            "CrabyTube {} がインストールされています。",
+        ),
+        ("CrabyTube {} is up to date.", "CrabyTube {} は最新です。"),
+        ("Version {} is available.", "バージョン {} を利用できます。"),
+        (
+            "Downloading version {}… {}%",
+            "バージョン {} をダウンロードしています… {}%",
+        ),
+        (
+            "Installing the update…",
+            "アップデートをインストールしています…",
+        ),
+        ("Update available", "アップデートがあります"),
+        (
+            "Could not reach GitHub. Try again later.",
+            "GitHub に接続できません。後でもう一度お試しください。",
+        ),
+        (
+            "The update is not signed with CrabyTube's release key, so it was not used.",
+            "このアップデートは CrabyTube のリリース鍵で署名されていないため、使用しませんでした。",
+        ),
+        (
+            "The update information could not be read.",
+            "アップデートの情報を読み取れませんでした。",
+        ),
+        (
+            "The download did not match the release and was deleted.",
+            "ダウンロードしたファイルがリリースと一致しなかったため、削除しました。",
+        ),
+        (
+            "The update could not be saved.",
+            "アップデートを保存できませんでした。",
+        ),
+        (
+            "The update could not be installed.",
+            "アップデートをインストールできませんでした。",
+        ),
         (
             "Network setup failed. Please restart the app and try again.",
             "ネットワークの準備に失敗しました。アプリを再起動してもう一度お試しください。",

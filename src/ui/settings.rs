@@ -120,7 +120,7 @@ impl App {
             .into()
         };
 
-        let sections = [
+        let mut sections = vec![
             self.appearance_box(box_width),
             self.playback_box(box_width),
             self.audio_box(box_width),
@@ -128,8 +128,12 @@ impl App {
             self.lyrics_box(box_width),
             self.integrations_box(box_width),
             self.storage_box(box_width),
-            self.about_box(box_width),
         ];
+        // A package manager updates the app where nothing is checked (a Flatpak).
+        if self.update_install.checks() {
+            sections.push(self.updates_box(box_width));
+        }
+        sections.push(self.about_box(box_width));
         let grid: Element<'_, Message> = if two_columns {
             let heights: Vec<f32> = sections
                 .iter()
@@ -807,6 +811,47 @@ impl App {
             );
         }
         self.settings_box("Storage", width, rows)
+    }
+
+    fn updates_box(&self, width: f32) -> Section<'_> {
+        let check = self.preferences.check_updates;
+        let automatic = self.setting(
+            "Check for updates",
+            Some(
+                self.tr_static("Once a day, CrabyTube asks GitHub whether a new version is out.")
+                    .into(),
+            ),
+            toggle(check, Message::Preference(Preference::CheckUpdates(!check))),
+            width,
+        );
+        let (status, action) = self.update_status();
+        let status_text: Element<'_, Message> = text(status)
+            .size(TEXT_CAPTION)
+            .font(MONO)
+            .color(DIM)
+            .width(Length::Fill)
+            .into();
+        let action: Element<'_, Message> = match action {
+            Some((title, message)) => button(label(title, TEXT_CAPTION))
+                .on_press(message)
+                .padding([6, 12])
+                .style(theme::outline_button)
+                .into(),
+            None => Space::new().width(0).into(),
+        };
+        let state: Element<'_, Message> = if self.area.width < STACK_ROWS_BELOW {
+            column![status_text, action]
+                .spacing(10)
+                .padding([14, 0])
+                .into()
+        } else {
+            row![status_text, action]
+                .spacing(16)
+                .padding([14, 0])
+                .align_y(Alignment::Center)
+                .into()
+        };
+        self.settings_box("Updates", width, vec![automatic, state])
     }
 
     fn about_box(&self, width: f32) -> Section<'_> {

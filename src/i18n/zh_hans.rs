@@ -4,6 +4,40 @@ use super::Catalog;
 
 pub(super) static CATALOG: Catalog = Catalog {
     entries: &[
+        ("Updates", "更新"),
+        ("Check for updates", "检查更新"),
+        (
+            "Once a day, CrabyTube asks GitHub whether a new version is out.",
+            "CrabyTube 每天向 GitHub 查询一次是否有新版本。",
+        ),
+        ("Check now", "立即检查"),
+        ("Update now", "立即更新"),
+        ("Download page", "下载页面"),
+        ("Checking for updates…", "正在检查更新…"),
+        ("CrabyTube {} is installed.", "已安装 CrabyTube {}。"),
+        ("CrabyTube {} is up to date.", "CrabyTube {} 已是最新版本。"),
+        ("Version {} is available.", "新版本 {} 已发布。"),
+        ("Downloading version {}… {}%", "正在下载版本 {}… {}%"),
+        ("Installing the update…", "正在安装更新…"),
+        ("Update available", "有可用更新"),
+        (
+            "Could not reach GitHub. Try again later.",
+            "无法连接 GitHub。请稍后再试。",
+        ),
+        (
+            "The update is not signed with CrabyTube's release key, so it was not used.",
+            "此更新未使用 CrabyTube 的发布密钥签名，因此未被使用。",
+        ),
+        (
+            "The update information could not be read.",
+            "无法读取更新信息。",
+        ),
+        (
+            "The download did not match the release and was deleted.",
+            "下载的文件与发布版本不符，已删除。",
+        ),
+        ("The update could not be saved.", "无法保存更新。"),
+        ("The update could not be installed.", "无法安装更新。"),
         (
             "Network setup failed. Please restart the app and try again.",
             "网络准备失败。请重启应用后重试。",

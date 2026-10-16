@@ -4,6 +4,49 @@ use super::Catalog;
 
 pub(super) static CATALOG: Catalog = Catalog {
     entries: &[
+        ("Updates", "Mises à jour"),
+        ("Check for updates", "Rechercher des mises à jour"),
+        (
+            "Once a day, CrabyTube asks GitHub whether a new version is out.",
+            "Une fois par jour, CrabyTube demande à GitHub si une nouvelle version est sortie.",
+        ),
+        ("Check now", "Rechercher maintenant"),
+        ("Update now", "Mettre à jour"),
+        ("Download page", "Page de téléchargement"),
+        ("Checking for updates…", "Recherche de mises à jour…"),
+        ("CrabyTube {} is installed.", "CrabyTube {} est installé."),
+        ("CrabyTube {} is up to date.", "CrabyTube {} est à jour."),
+        ("Version {} is available.", "La version {} est disponible."),
+        (
+            "Downloading version {}… {}%",
+            "Téléchargement de la version {}… {} %",
+        ),
+        ("Installing the update…", "Installation de la mise à jour…"),
+        ("Update available", "Mise à jour disponible"),
+        (
+            "Could not reach GitHub. Try again later.",
+            "Impossible de joindre GitHub. Réessayez plus tard.",
+        ),
+        (
+            "The update is not signed with CrabyTube's release key, so it was not used.",
+            "La mise à jour n'est pas signée avec la clé de publication de CrabyTube ; elle n'a pas été utilisée.",
+        ),
+        (
+            "The update information could not be read.",
+            "Impossible de lire les informations de la mise à jour.",
+        ),
+        (
+            "The download did not match the release and was deleted.",
+            "Le téléchargement ne correspondait pas à la version publiée et a été supprimé.",
+        ),
+        (
+            "The update could not be saved.",
+            "Impossible d'enregistrer la mise à jour.",
+        ),
+        (
+            "The update could not be installed.",
+            "Impossible d'installer la mise à jour.",
+        ),
         (
             "Network setup failed. Please restart the app and try again.",
             "La préparation du réseau a échoué. Redémarrez l'application et réessayez.",

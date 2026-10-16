@@ -4,6 +4,52 @@ use super::Catalog;
 
 pub(super) static CATALOG: Catalog = Catalog {
     entries: &[
+        ("Updates", "Aktualisierungen"),
+        ("Check for updates", "Nach Aktualisierungen suchen"),
+        (
+            "Once a day, CrabyTube asks GitHub whether a new version is out.",
+            "Einmal am Tag fragt CrabyTube bei GitHub, ob eine neue Version erschienen ist.",
+        ),
+        ("Check now", "Jetzt suchen"),
+        ("Update now", "Jetzt aktualisieren"),
+        ("Download page", "Downloadseite"),
+        ("Checking for updates…", "Suche nach Aktualisierungen…"),
+        (
+            "CrabyTube {} is installed.",
+            "CrabyTube {} ist installiert.",
+        ),
+        ("CrabyTube {} is up to date.", "CrabyTube {} ist aktuell."),
+        ("Version {} is available.", "Version {} ist verfügbar."),
+        (
+            "Downloading version {}… {}%",
+            "Version {} wird heruntergeladen… {} %",
+        ),
+        ("Installing the update…", "Aktualisierung wird installiert…"),
+        ("Update available", "Aktualisierung verfügbar"),
+        (
+            "Could not reach GitHub. Try again later.",
+            "GitHub ist nicht erreichbar. Versuche es später erneut.",
+        ),
+        (
+            "The update is not signed with CrabyTube's release key, so it was not used.",
+            "Die Aktualisierung ist nicht mit dem Veröffentlichungsschlüssel von CrabyTube signiert und wurde nicht verwendet.",
+        ),
+        (
+            "The update information could not be read.",
+            "Die Informationen zur Aktualisierung konnten nicht gelesen werden.",
+        ),
+        (
+            "The download did not match the release and was deleted.",
+            "Der Download stimmte nicht mit der Veröffentlichung überein und wurde gelöscht.",
+        ),
+        (
+            "The update could not be saved.",
+            "Die Aktualisierung konnte nicht gespeichert werden.",
+        ),
+        (
+            "The update could not be installed.",
+            "Die Aktualisierung konnte nicht installiert werden.",
+        ),
         (
             "Network setup failed. Please restart the app and try again.",
             "Die Netzwerkeinrichtung ist fehlgeschlagen. Starte die App neu und versuche es erneut.",

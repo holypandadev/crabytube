@@ -351,6 +351,8 @@ pub struct Preferences {
     pub track_notifications: bool,
     /// Scales the whole interface with the window so proportions stay the same.
     pub scale_with_window: bool,
+    /// Asks the latest release on GitHub once a day whether a newer version is out.
+    pub check_updates: bool,
     pub lyrics_offset_ms: i64,
     pub lyrics_font_size: f32,
     pub lyrics_show_translation: bool,
@@ -399,6 +401,7 @@ impl Default for Preferences {
             search_suggestions: true,
             track_notifications: false,
             scale_with_window: true,
+            check_updates: true,
             lyrics_offset_ms: 0,
             lyrics_font_size: 16.0,
             lyrics_show_translation: true,

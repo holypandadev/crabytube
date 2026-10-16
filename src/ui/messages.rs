@@ -44,6 +44,7 @@ pub(super) enum Preference {
     SearchSuggestions(bool),
     TrackNotifications(bool),
     ScaleWithWindow(bool),
+    CheckUpdates(bool),
 }
 
 #[derive(Clone, Debug)]
@@ -57,6 +58,22 @@ pub(super) enum Message {
     ToggleMaximize,
     CloseWindow,
     CloseRequested,
+    /// Asks the latest release whether it is newer: by hand from Settings, or by the daily check.
+    CheckForUpdates {
+        manual: bool,
+    },
+    UpdateChecked {
+        manual: bool,
+        result: Result<Option<crate::updater::Available>, crate::updater::UpdateError>,
+    },
+    /// Downloads and installs the update found, or opens its page where the app cannot install it.
+    InstallUpdate,
+    UpdateProgress {
+        received: u64,
+        total: u64,
+    },
+    UpdateDownloaded(Result<std::path::PathBuf, crate::updater::UpdateError>),
+    OpenUpdatePage,
     /// The main window exists: at start, or opened again from the tray.
     WindowOpened(iced::window::Id),
     QuitApp,

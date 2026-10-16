@@ -16,6 +16,7 @@ mod theme;
 #[cfg(feature = "diagnostics")]
 mod timing;
 mod track_actions;
+mod updates;
 use collection::CollectionState;
 
 use std::time::Duration;
@@ -165,6 +166,9 @@ struct App {
     window_hidden_to_tray: bool,
     /// The window was closed for the tray (Linux) and opens again from there.
     window_closed_to_tray: bool,
+    /// How this copy was installed, which decides whether and how it updates itself.
+    update_install: crate::updater::Install,
+    update: updates::UpdateState,
     /// Where the lists stood when the window was closed for the tray.
     scroll_before_tray: Option<ListScroll>,
     /// The window has been opened once; later openings come from the tray.
@@ -294,6 +298,10 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ShowWindowRequested
         | Message::ClockTick
         | Message::StatusReading(_)
+        | Message::CheckForUpdates { manual: false }
+        | Message::UpdateChecked { .. }
+        | Message::UpdateProgress { .. }
+        | Message::UpdateDownloaded(_)
         | Message::Resized { .. }
         | Message::WindowGeometry { .. }
         | Message::MonitorMeasured(_)
@@ -1117,6 +1125,13 @@ impl App {
                     }
                     Preference::ShowLyricsDefault(v) => self.preferences.show_lyrics_default = v,
                     Preference::TrackNotifications(v) => self.preferences.track_notifications = v,
+                    Preference::CheckUpdates(v) => {
+                        self.preferences.check_updates = v;
+                        if v {
+                            self.persist();
+                            return self.update(Message::CheckForUpdates { manual: false });
+                        }
+                    }
                     Preference::ScaleWithWindow(v) => {
                         self.preferences.scale_with_window = v;
                         self.apply_ui_zoom();
@@ -1621,6 +1636,12 @@ impl App {
             | Message::DiagnosticCapture(..)
             | Message::DiagnosticCaptured(..)
             | Message::DiagnosticFrame(..) => return self.update_diagnostics(message),
+            Message::CheckForUpdates { .. }
+            | Message::UpdateChecked { .. }
+            | Message::InstallUpdate
+            | Message::UpdateProgress { .. }
+            | Message::UpdateDownloaded(_)
+            | Message::OpenUpdatePage => return self.update_updates(message),
             Message::ShowWindowRequested => {
                 return self.show_window_from_tray_task();
             }
@@ -2274,6 +2295,8 @@ impl App {
             tray_status: "System tray is starting.".into(),
             window_hidden_to_tray: false,
             window_closed_to_tray: false,
+            update_install: crate::updater::Install::Managed,
+            update: updates::UpdateState::default(),
             scroll_before_tray: None,
             window_opened_before: false,
             window_minimized: false,
@@ -2378,6 +2401,8 @@ impl App {
         }
         let home_task = app.load_home_task();
         let tray_task = Task::perform(app.tray.start_service(), Message::TrayServiceStarted);
+        app.update_install = crate::updater::current_install();
+        let update_check = app.first_update_check_task();
         let artwork_task = if app.home_shelves.is_empty() {
             Task::none()
         } else {
@@ -2423,6 +2448,7 @@ impl App {
                 restored_cover,
                 tray_task,
                 open_window,
+                update_check,
                 diagnostic_exit,
             ]),
         )

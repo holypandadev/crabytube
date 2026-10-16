@@ -100,6 +100,7 @@ impl App {
             iced::window::close_requests().map(|_| Message::CloseRequested),
             display_scale,
             show_requests,
+            self.update_check_subscription(),
             iced::window::events().filter_map(|(_, event)| match event {
                 iced::window::Event::Focused => Some(Message::WindowFocusChanged(true)),
                 iced::window::Event::Unfocused => Some(Message::WindowFocusChanged(false)),

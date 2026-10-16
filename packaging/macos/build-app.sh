@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # Builds CrabyTube.app for macOS and zips it: universal binaries (arm64 and x86_64 joined with
 # lipo), the two helper programs next to the executable, an Info.plist, the icon and an ad hoc
-# signature. The app is not notarized and not built with the hardened runtime. The zip also holds
-# the first-launch note, the license and the third-party notices.
+# signature. The app is not notarized and not built with the hardened runtime. The zip and the disk
+# image also hold the first-launch note, the license and the third-party notices.
 #
 #   packaging/macos/build-app.sh
 #
@@ -10,6 +10,7 @@
 # Xcode's command line tools. The result is in target/macos/:
 #   CrabyTube.app
 #   CrabyTube-<version>-macos-universal.zip
+#   CrabyTube-<version>-macos-universal.dmg
 #
 # TARGETS overrides the Rust targets to build, for a quick local check on one architecture.
 set -eu
@@ -131,6 +132,17 @@ zip="$out/CrabyTube-$version-macos-universal.zip"
 rm -f "$zip"
 ditto -c -k --norsrc --noextattr --noacl "$stage" "$zip"
 
+# The disk image: what the zip holds, beside a link to Applications to install the app by dragging
+# it across. The app updates itself from the zip, not from this image.
+dmg_stage="$out/dmg-contents"
+rm -rf "$dmg_stage"
+ditto "$stage" "$dmg_stage"
+ln -s /Applications "$dmg_stage/Applications"
+dmg="$out/CrabyTube-$version-macos-universal.dmg"
+rm -f "$dmg"
+hdiutil create -volname "CrabyTube" -srcfolder "$dmg_stage" -fs HFS+ -format UDZO -ov "$dmg"
+hdiutil verify "$dmg"
+
 echo
 echo "Architectures:"
 for program in "$executable" $helpers; do
@@ -141,3 +153,5 @@ unzip -Z1 "$zip" | grep -v '/.' | sed 's/^/  /'
 echo "App: $app"
 echo "Zip: $zip"
 echo "SHA-256: $(shasum -a 256 "$zip" | cut -d ' ' -f 1)"
+echo "Disk image: $dmg"
+echo "SHA-256: $(shasum -a 256 "$dmg" | cut -d ' ' -f 1)"

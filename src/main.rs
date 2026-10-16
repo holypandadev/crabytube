@@ -118,6 +118,8 @@ fn main() {
     let allocator_settings = tune_glibc_allocator();
 
     crabytube::logging::init();
+    // Before any window exists, which takes the id it has then.
+    crabytube::updater::identify_process();
 
     // Both set environment variables, so they run before any thread starts: claiming the single
     // instance starts one.

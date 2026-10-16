@@ -4,6 +4,49 @@ use super::Catalog;
 
 pub(super) static CATALOG: Catalog = Catalog {
     entries: &[
+        ("Updates", "Обновления"),
+        ("Check for updates", "Проверять обновления"),
+        (
+            "Once a day, CrabyTube asks GitHub whether a new version is out.",
+            "Раз в день CrabyTube спрашивает у GitHub, вышла ли новая версия.",
+        ),
+        ("Check now", "Проверить сейчас"),
+        ("Update now", "Обновить сейчас"),
+        ("Download page", "Страница загрузки"),
+        ("Checking for updates…", "Поиск обновлений…"),
+        ("CrabyTube {} is installed.", "Установлен CrabyTube {}."),
+        (
+            "CrabyTube {} is up to date.",
+            "CrabyTube {} — последняя версия.",
+        ),
+        ("Version {} is available.", "Доступна версия {}."),
+        ("Downloading version {}… {}%", "Загрузка версии {}… {}%"),
+        ("Installing the update…", "Установка обновления…"),
+        ("Update available", "Доступно обновление"),
+        (
+            "Could not reach GitHub. Try again later.",
+            "Не удалось связаться с GitHub. Попробуйте позже.",
+        ),
+        (
+            "The update is not signed with CrabyTube's release key, so it was not used.",
+            "Обновление не подписано ключом выпусков CrabyTube, поэтому оно не использовано.",
+        ),
+        (
+            "The update information could not be read.",
+            "Не удалось прочитать сведения об обновлении.",
+        ),
+        (
+            "The download did not match the release and was deleted.",
+            "Загруженный файл не совпал с выпуском и был удалён.",
+        ),
+        (
+            "The update could not be saved.",
+            "Не удалось сохранить обновление.",
+        ),
+        (
+            "The update could not be installed.",
+            "Не удалось установить обновление.",
+        ),
         (
             "Network setup failed. Please restart the app and try again.",
             "Не удалось подготовить сеть. Перезапустите приложение и попробуйте ещё раз.",

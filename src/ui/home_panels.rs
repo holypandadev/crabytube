@@ -391,17 +391,32 @@ impl App {
     }
 
     /// The status line at the foot of Home: memory and CPU of this process on the left, the
-    /// version on the right.
+    /// version on the right, after a link to Settings when a newer one is out.
     pub(super) fn status_line(&self, width: f32) -> Element<'_, Message> {
         let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let update: Element<'_, Message> = if self.update.available().is_some() {
+            button(
+                text(self.tr("Update available"))
+                    .size(TEXT_CAPTION)
+                    .font(MONO),
+            )
+            .on_press(Message::Navigate(super::Page::Settings))
+            .padding(0)
+            .style(theme::text_link(theme::INK))
+            .into()
+        } else {
+            Space::new().width(0).into()
+        };
         column![
             hrule(RULE),
             Space::new().height(8.0),
             row![
                 label(self.status_text(), TEXT_CAPTION).color(FADED),
                 Space::new().width(Length::Fill),
+                update,
                 label(version, TEXT_CAPTION).color(FADED),
             ]
+            .spacing(16)
             .align_y(Alignment::Center),
         ]
         .width(width)

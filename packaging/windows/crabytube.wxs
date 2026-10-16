@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Windows Installer package of CrabyTube (WiX Toolset 5), built by build-msi.ps1 from the folder
+  the zip is made of.
+
+  It installs for the user who runs it, without an administrator password, into
+  %LOCALAPPDATA%\Programs\CrabyTube, which is where the app recognises its installed copy
+  (src/updater.rs). It adds a Start menu entry, whose app id is the one the installed app gives
+  itself, so the media panel shows its name and icon, and an entry in Settings > Apps to remove it.
+  A newer package replaces an older one, and keeps the settings, which live elsewhere.
+
+  After an install with a visible window (opened by hand, or the progress bar of an update the app
+  starts) it opens CrabyTube. A silent install (/qn) does not.
+
+  The UpgradeCode and the component GUIDs never change: they are how Windows knows a newer package
+  replaces this one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="CrabyTube"
+           Manufacturer="Holy Panda"
+           Version="$(Version)"
+           UpgradeCode="C34FADFC-6E2B-4159-9EF7-C0910C8361FE"
+           Scope="perUser"
+           Compressed="yes"
+           Language="1033">
+    <SummaryInformation Description="CrabyTube, a YouTube Music player" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of CrabyTube is already installed."
+                  AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="CrabyTube.ico" SourceFile="$(IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="CrabyTube.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/holypandadev/crabytube" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="CrabyTube" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- In a user's profile the key of each component is a registry value under HKCU, and each
+         folder is removed on uninstall (when empty), as Windows Installer requires there. -->
+    <ComponentGroup Id="Program">
+      <Component Id="ProgramFiles" Directory="INSTALLFOLDER" Guid="B25B003F-70CD-4C74-9296-1D12AF02ACC2">
+        <File Id="CrabyTubeExe" Source="$(Stage)\CrabyTube.exe" />
+        <File Id="BotguardHelper" Source="$(Stage)\botguard-helper.exe" />
+        <File Id="JsChallengeHelper" Source="$(Stage)\js-challenge-helper.exe" />
+        <File Id="License" Source="$(Stage)\LICENSE.txt" />
+        <File Id="ThirdPartyNotices" Source="$(Stage)\THIRD-PARTY-LICENSES.md" />
+        <File Id="ThirdPartyLicenses" Source="$(Stage)\THIRD-PARTY-LICENSES.txt" />
+        <RegistryValue Root="HKCU" Key="Software\Holy Panda\CrabyTube" Name="InstallFolder"
+                       Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+      </Component>
+      <Component Id="StartMenuEntry" Directory="ProgramMenuFolder" Guid="A2B162D3-4EE1-4A28-A97F-EFAC44D80983">
+        <Shortcut Id="CrabyTubeShortcut"
+                  Name="CrabyTube"
+                  Description="YouTube Music player"
+                  Target="[INSTALLFOLDER]CrabyTube.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="CrabyTube.ico">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="dev.holypanda.CrabyTube" />
+        </Shortcut>
+        <RegistryValue Root="HKCU" Key="Software\Holy Panda\CrabyTube" Name="StartMenuEntry"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="CrabyTube">
+      <ComponentGroupRef Id="Program" />
+    </Feature>
+
+    <CustomAction Id="OpenCrabyTube" FileRef="CrabyTubeExe" ExeCommand="" Return="asyncNoWait"
+                  Impersonate="yes" />
+    <InstallExecuteSequence>
+      <Custom Action="OpenCrabyTube" After="InstallFinalize" Condition="NOT REMOVE AND UILevel &gt;= 3" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

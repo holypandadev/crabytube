@@ -24,6 +24,7 @@ pub mod single_instance;
 pub mod storage;
 pub mod system_language;
 pub mod temp_cleanup;
+pub mod updater;
 
 pub mod lyrics;
 #[cfg(any(target_os = "macos", windows, test))]
