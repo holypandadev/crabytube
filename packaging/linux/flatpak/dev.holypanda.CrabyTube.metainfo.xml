@@ -48,6 +48,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.2" date="2026-10-18">
+      <description>
+        <p>A tray icon on Windows and macOS, updates offered in the Flatpak, and Discord Rich
+        Presence that finds Discord, its Flatpak, Snap and Vesktop and says when Discord refuses
+        the activity. Also fixes for playback, the media controls, the seek bar and lyrics.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-10-18">
       <description>
         <p>Closing the window keeps CrabyTube in the tray, and Open in the tray brings the window
