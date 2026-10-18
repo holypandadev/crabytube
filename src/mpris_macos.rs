@@ -76,6 +76,8 @@ struct Session {
     cover: Cover,
     registrations: Vec<Registration>,
     controls: Option<Controls>,
+    /// The first track was reported: the media keys were asked for then, or left to another app.
+    media_keys_asked: bool,
 }
 
 pub struct MprisRemote {
@@ -101,6 +103,7 @@ impl MprisRemote {
                 cover: Cover::Missing,
                 registrations,
                 controls: Some(controls),
+                media_keys_asked: false,
             }),
         }
     }
@@ -323,6 +326,16 @@ impl Session {
             match track {
                 Some(track) => {
                     center.setNowPlayingInfo(Some(&info_dictionary(&track, &playback, cover)));
+                    // macOS sends the media keys only to an app that has been playing, so a track
+                    // restored in pause would leave them to Music. Reported as playing for an
+                    // instant first, it gets them; but only while nothing sounds, so an app that
+                    // is playing keeps its keys.
+                    if !std::mem::replace(&mut self.media_keys_asked, true)
+                        && playback.kind == PlaybackKind::Paused
+                        && !output_in_use()
+                    {
+                        center.setPlaybackState(MPNowPlayingPlaybackState::Playing);
+                    }
                     center.setPlaybackState(playback_state(playback.kind));
                 }
                 None => {
@@ -333,6 +346,55 @@ impl Session {
         }
         self.published = Some((state, now, wall));
     }
+}
+
+/// Whether the default output device is playing for any process, as CoreAudio says.
+fn output_in_use() -> bool {
+    use std::ffi::c_void;
+    #[repr(C)]
+    struct PropertyAddress {
+        selector: u32,
+        scope: u32,
+        element: u32,
+    }
+    #[link(name = "CoreAudio", kind = "framework")]
+    unsafe extern "C" {
+        fn AudioObjectGetPropertyData(
+            object: u32,
+            address: *const PropertyAddress,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: *mut u32,
+            data: *mut c_void,
+        ) -> i32;
+    }
+    const SYSTEM_OBJECT: u32 = 1;
+    let global = |selector: &[u8; 4]| PropertyAddress {
+        selector: u32::from_be_bytes(*selector),
+        scope: u32::from_be_bytes(*b"glob"),
+        element: 0,
+    };
+    let read = |object: u32, address: PropertyAddress| {
+        let mut value: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: both properties are 32-bit values, read into a local of that size.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                object,
+                &address,
+                0,
+                std::ptr::null(),
+                &mut size,
+                (&mut value as *mut u32).cast(),
+            )
+        };
+        (status == 0).then_some(value)
+    };
+    // kAudioHardwarePropertyDefaultOutputDevice, then kAudioDevicePropertyDeviceIsRunningSomewhere.
+    // When it cannot be told, the keys are left alone.
+    read(SYSTEM_OBJECT, global(b"dOut"))
+        .and_then(|device| read(device, global(b"gone")))
+        .is_none_or(|running| running != 0)
 }
 
 /// Whether the Mac slept, or the process stood still, between the last report and now: the wall
