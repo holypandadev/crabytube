@@ -3,7 +3,7 @@ use std::{
     num::NonZero,
     str::FromStr,
     sync::{
-        Arc, OnceLock,
+        Arc, Mutex, OnceLock, PoisonError,
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -47,8 +47,53 @@ fn without_panics<T>(query: impl FnOnce() -> Result<T, String>) -> Result<T, Str
         .unwrap_or_else(|_| Err(String::from("The audio system is not available")))
 }
 
+/// The audio hosts in use, made once for the whole process. On Linux every new host of the sound
+/// server is a new client connection whose thread never ends, so a host made for each query leaked
+/// a thread, three file descriptors and a megabyte at every check of the selected output.
+static HOSTS: Mutex<Vec<cpal::Host>> = Mutex::new(Vec::new());
+
+/// The backend `cpal::default_host` picks, learnt the first time it is made.
+static DEFAULT_HOST: OnceLock<cpal::HostId> = OnceLock::new();
+
+/// Runs `query` on the host `id`, or on the default host for `None`, made the first time it is
+/// asked for. A host whose query fails is made again the next time, since the sound server may
+/// have restarted under it. Queries never nest: the hosts stay locked while one runs.
+fn with_host<T>(
+    id: Option<cpal::HostId>,
+    query: impl FnOnce(&cpal::Host) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut hosts = HOSTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let id = match id.or_else(|| DEFAULT_HOST.get().copied()) {
+        Some(id) => id,
+        None => {
+            let host = cpal::default_host();
+            let id = host.id();
+            let _ = DEFAULT_HOST.set(id);
+            if !hosts.iter().any(|known| known.id() == id) {
+                hosts.push(host);
+            }
+            id
+        }
+    };
+    let index = match hosts.iter().position(|host| host.id() == id) {
+        Some(index) => index,
+        None => {
+            hosts.push(cpal::host_from_id(id).map_err(|error| error.to_string())?);
+            hosts.len() - 1
+        }
+    };
+    let result = query(&hosts[index]);
+    if result.is_err() {
+        hosts.remove(index);
+    }
+    result
+}
+
 fn list_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
-    let host = cpal::default_host();
+    with_host(None, list_devices_of)
+}
+
+fn list_devices_of(host: &cpal::Host) -> Result<Vec<OutputDeviceChoice>, String> {
     let default_id = host
         .default_output_device()
         .and_then(|device| device.id().ok())
@@ -87,22 +132,24 @@ fn list_output_devices() -> Result<Vec<OutputDeviceChoice>, String> {
 /// The host that plays on the system default output. On Linux that is ALSA's default device, which
 /// the sound server routes to its default sink and moves along when the user picks another one. The
 /// sound server's own host would pin the stream to the sink that was the default when it opened.
-fn system_default_host() -> cpal::Host {
-    #[cfg(target_os = "linux")]
-    if let Ok(host) = cpal::host_from_id(cpal::HostId::Alsa) {
-        return host;
+fn system_default_host() -> Option<cpal::HostId> {
+    if cfg!(target_os = "linux") && cpal::available_hosts().contains(&cpal::HostId::Alsa) {
+        return Some(cpal::HostId::Alsa);
     }
-    cpal::default_host()
+    None
 }
 
 /// The name of the output the system plays on by default, as its sound server calls it. ALSA's
 /// default device on Linux only calls itself "Default Audio Device".
 fn default_output_name() -> Option<String> {
-    cpal::default_host()
-        .default_output_device()?
-        .description()
-        .ok()
-        .map(|description| description.name().to_owned())
+    with_host(None, |host| {
+        Ok(host
+            .default_output_device()
+            .and_then(|device| device.description().ok())
+            .map(|description| description.name().to_owned()))
+    })
+    .ok()
+    .flatten()
 }
 
 /// Linux: makes sure the sound server can be reached. Its client authenticates with a cookie it
@@ -147,8 +194,15 @@ pub fn provide_sound_server_cookie() {
 pub fn output_device_present(selected_id: &str) -> bool {
     without_panics(|| {
         let id = cpal::DeviceId::from_str(selected_id).map_err(|error| error.to_string())?;
-        let host = cpal::host_from_id(id.host()).map_err(|error| error.to_string())?;
-        Ok(host.device_by_id(&id).is_some())
+        let wanted = id.to_string();
+        // The list is read as a result, so a host that lost its server is made again rather than
+        // taken for an output that went away.
+        with_host(Some(id.host()), |host| {
+            let devices = host.output_devices().map_err(|error| error.to_string())?;
+            Ok(devices
+                .filter_map(|device| device.id().ok())
+                .any(|found| found.to_string() == wanted))
+        })
     })
     .unwrap_or(true)
 }
@@ -163,14 +217,14 @@ fn open_device(selected_id: Option<&str>) -> Result<(OutputStream, String), Stri
             let id = cpal::DeviceId::from_str(id).map_err(|error| error.to_string())?;
             // The host that listed the device: on Linux the sound server, which reaches every output
             // by name, inside the Flatpak sandbox too.
-            cpal::host_from_id(id.host())
-                .map_err(|error| error.to_string())?
-                .device_by_id(&id)
+            // A missing device is no fault of the host, which is kept.
+            with_host(Some(id.host()), |host| Ok(host.device_by_id(&id)))?
                 .ok_or_else(|| "The selected output device is no longer available".to_owned())?
         }
-        None => system_default_host()
-            .default_output_device()
-            .ok_or_else(|| "No system default output device is available".to_owned())?,
+        None => with_host(system_default_host(), |host| {
+            Ok(host.default_output_device())
+        })?
+        .ok_or_else(|| "No system default output device is available".to_owned())?,
     };
     let label = selected_id
         .is_none()
