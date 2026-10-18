@@ -1747,13 +1747,9 @@ impl App {
                 // Typing again leaves suggestion browsing.
                 self.typed_query = None;
                 self.suggestion_index = None;
-                if let Some(token) = self.search_cancel.take() {
-                    token.cancel();
-                }
-                self.search_request_id = self.search_request_id.wrapping_add(1);
-                self.search_loading = false;
+                // The search sent last goes on: its results are for the query the page names, and
+                // only a new search, sent with Enter or a suggestion, replaces them.
                 self.search_committed = false;
-                self.search_error = None;
                 // Preserve previous results while typing; the new query only
                 // starts suggestions. Results are replaced on submit.
                 // Category reset would discard the user's filter context;
@@ -5649,6 +5645,47 @@ mod tests {
         assert_eq!(app.search_query, "chill music");
         assert!(app.search_loading);
         drop(task);
+    }
+
+    #[test]
+    fn typing_while_a_search_loads_lets_it_finish() {
+        use crate::music::{CatalogPage, HomeItem, HomeItemKind};
+        let mut app = App {
+            search_query: "Daft Punk".into(),
+            ..App::default()
+        };
+        drop(app.update(Message::SearchSubmitted));
+        let request_id = app.search_request_id;
+        let token = app.search_cancel.clone().expect("the search runs");
+        // A new word, then Escape clearing the field, before the results come.
+        drop(app.update(Message::SearchChanged("Daft Punk live".into())));
+        drop(app.update(Message::SearchChanged(String::new())));
+        assert!(!token.is_cancelled());
+        assert_eq!(app.search_request_id, request_id);
+        assert!(app.search_loading);
+        assert!(!app.home_on_screen(), "the page still says it is searching");
+
+        let item = HomeItem {
+            title: "One More Time".into(),
+            subtitle: "Daft Punk".into(),
+            thumbnail_url: None,
+            kind: HomeItemKind::Song,
+            browse_id: None,
+            browse_target: None,
+            track: Some(fixture_track("one-more-time")),
+            duration: None,
+        };
+        drop(app.update(Message::CatalogCompleted {
+            request_id,
+            result: Some(Ok(CatalogPage {
+                items: vec![item],
+                continuation: None,
+            })),
+        }));
+        assert!(!app.search_loading);
+        assert_eq!(app.catalog_results.len(), 1);
+        assert_eq!(app.committed_query, "Daft Punk");
+        assert_eq!(app.page, Page::Search);
     }
 
     #[test]

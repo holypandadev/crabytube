@@ -656,7 +656,9 @@ impl App {
     pub(super) fn home_on_screen(&self) -> bool {
         match self.page {
             super::Page::Home => true,
-            super::Page::Search => !self.search_committed && self.catalog_results.is_empty(),
+            super::Page::Search => {
+                !self.search_committed && !self.search_loading && self.catalog_results.is_empty()
+            }
             _ => false,
         }
     }
@@ -864,7 +866,7 @@ impl App {
     /// the top result, then the two sections as the page orders them. Empty while the page still
     /// shows Home.
     pub(super) fn search_row_order(&self) -> Vec<super::messages::RowMenu> {
-        if !self.search_committed && self.catalog_results.is_empty() {
+        if self.home_on_screen() {
             return Vec::new();
         }
         let songs = self.search_songs().len();
