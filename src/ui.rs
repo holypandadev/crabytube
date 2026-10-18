@@ -660,7 +660,7 @@ impl App {
         {
             return Task::none();
         }
-        self.window_hidden_to_tray = false;
+        let was_hidden = std::mem::replace(&mut self.window_hidden_to_tray, false);
         if !self.window_closed_to_tray
             && reopens_to_show(wayland, self.window_focused, self.window_minimized)
         {
@@ -689,7 +689,7 @@ impl App {
             self.window_opening_since = Some(std::time::Instant::now());
             return open.map(Message::WindowOpened);
         }
-        iced::window::latest().and_then(move |id| {
+        let show = iced::window::latest().and_then(move |id| {
             // Restore the window only when it is minimized. Wayland does not report that
             // state, so nothing is sent there.
             iced::window::set_mode(id, iced::window::Mode::Windowed)
@@ -701,7 +701,13 @@ impl App {
                     }
                 }))
                 .chain(iced::window::gain_focus(id))
-        })
+        });
+        // Hiding the window released the covers of the page; they come back with it.
+        if was_hidden {
+            Task::batch([show, self.preload_current_page_artwork()])
+        } else {
+            show
+        }
     }
 
     fn close_window_task(&mut self) -> Task<Message> {

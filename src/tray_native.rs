@@ -120,6 +120,10 @@ impl TrayRemote {
     /// Shows the icon, once. Must run on the main thread with its event loop running, which is
     /// the case when the first window has opened. `true` when the icon is shown.
     pub fn attach(&self) -> Result<bool, String> {
+        // Tests drive the interface from their own threads, where macOS forbids making a menu.
+        if cfg!(test) {
+            return Err("the tray icon is not made in tests".into());
+        }
         if NATIVE.with(|native| native.borrow().is_some()) {
             return Ok(true);
         }
