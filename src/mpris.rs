@@ -64,6 +64,9 @@ pub struct PlayerState {
     pub can_pause: bool,
     pub can_go_next: bool,
     pub can_go_previous: bool,
+    /// The track is loading. MPRIS has no state for it: clients see Playing, and the `Seeked` sent
+    /// when the position turns out not to have moved puts their progress bars right.
+    pub loading: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -614,6 +614,9 @@ impl App {
         let restored = self.playback_status.track.is_none();
         let track = self.shown_track();
         let position = self.playback_status.position;
+        let goes_on =
+            self.next_queue_index().is_some() || self.repeat != RepeatMode::Off || self.autoplay;
+        let state = self.playback_status.state;
         crate::mpris::PlayerState {
             track_id: track.map(|track| track.video_id.clone()),
             title: track.map(|track| super::shell::display_title(&track.title).to_owned()),
@@ -622,18 +625,12 @@ impl App {
             art_url: track.and_then(|track| track.thumbnail_url.clone()),
             // A track that loads, or the moment between two tracks, is still playing for the
             // system: reported as stopped, its controls would blink at every change of track.
-            playback_status: match self.playback_status.state {
+            playback_status: match state {
                 PlaybackState::Playing
                 | PlaybackState::Buffering
                 | PlaybackState::Seeking
                 | PlaybackState::Resolving => "Playing",
-                PlaybackState::Finished
-                    if self.next_queue_index().is_some()
-                        || self.repeat != RepeatMode::Off
-                        || self.autoplay =>
-                {
-                    "Playing"
-                }
+                PlaybackState::Finished if goes_on => "Playing",
                 PlaybackState::Paused => "Paused",
                 _ if restored && track.is_some() => "Paused",
                 _ => "Stopped",
@@ -668,6 +665,8 @@ impl App {
                 ),
             can_go_next: self.next_queue_index().is_some() || self.repeat == RepeatMode::All,
             can_go_previous: self.queue_index.is_some_and(|index| index > 0),
+            loading: matches!(state, PlaybackState::Resolving | PlaybackState::Buffering)
+                || (state == PlaybackState::Finished && goes_on),
         }
     }
 

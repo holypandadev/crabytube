@@ -405,7 +405,7 @@ impl Session {
                     set_controls(transport, &state)?;
                 }
                 if changes.playback || changes.track {
-                    transport.SetPlaybackStatus(status_for(playback(&state).kind))?;
+                    transport.SetPlaybackStatus(status_for(&state))?;
                     update_timeline(transport, track, &state)?;
                 }
                 transport.SetIsEnabled(true)?;
@@ -421,8 +421,11 @@ impl Session {
         Ok(())
     }
 }
-fn status_for(kind: PlaybackKind) -> MediaPlaybackStatus {
-    match kind {
+/// Windows moves the progress bar of a playing session by itself, from the moment its state last
+/// changed. A track that loads is Changing, so the bar starts when the music does.
+fn status_for(state: &PlayerState) -> MediaPlaybackStatus {
+    match playback(state).kind {
+        PlaybackKind::Playing if state.loading => MediaPlaybackStatus::Changing,
         PlaybackKind::Playing => MediaPlaybackStatus::Playing,
         PlaybackKind::Paused => MediaPlaybackStatus::Paused,
         PlaybackKind::Stopped => MediaPlaybackStatus::Stopped,

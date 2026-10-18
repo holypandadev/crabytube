@@ -36,6 +36,9 @@ pub struct PlayerState {
     pub can_pause: bool,
     pub can_go_next: bool,
     pub can_go_previous: bool,
+    /// The track is loading, or the next one is about to: playback was asked for, and the position
+    /// does not move yet.
+    pub loading: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,7 +116,7 @@ pub enum PlaybackKind {
 }
 
 /// Where playback is and how fast it moves. The system advances its progress bar by itself from
-/// these two, so the rate is 1 while playing and 0 otherwise.
+/// these two, so the rate is 1 while playing and 0 otherwise, a track that loads included.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Playback {
     pub kind: PlaybackKind,
@@ -130,7 +133,7 @@ pub fn playback(state: &PlayerState) -> Playback {
     Playback {
         kind,
         position_secs: state.position.as_secs_f64(),
-        rate: if kind == PlaybackKind::Playing {
+        rate: if kind == PlaybackKind::Playing && !state.loading {
             1.0
         } else {
             0.0
@@ -197,10 +200,11 @@ fn playback_changed(
     state: &PlayerState,
     now: Instant,
 ) -> bool {
-    if playback(before).kind != playback(state).kind {
+    // The end of loading is when the position starts to move, which the system must hear from.
+    if playback(before).kind != playback(state).kind || before.loading != state.loading {
         return true;
     }
-    let expected = if playback(before).kind == PlaybackKind::Playing {
+    let expected = if playback(before).rate > 0.0 {
         before.position + now.saturating_duration_since(before_at)
     } else {
         before.position
@@ -439,6 +443,26 @@ mod tests {
         cover.position += Duration::from_millis(250);
         cover.art_url = Some("https://example.invalid/other".into());
         assert!(!changes(Some(previous), &cover, now).any());
+    }
+
+    #[test]
+    fn a_track_that_loads_stands_still_until_it_plays() {
+        let start = Instant::now();
+        let loading = PlayerState {
+            loading: true,
+            ..playing(0)
+        };
+        assert_eq!(playback(&loading).kind, PlaybackKind::Playing);
+        assert_eq!(playback(&loading).rate, 0.0);
+        let previous = Previous {
+            state: &loading,
+            at: start,
+        };
+        // Three seconds of loading leave the position where it was, which is no news.
+        let now = start + Duration::from_secs(3);
+        assert!(!changes(Some(previous), &loading, now).any());
+        // The moment it plays is: the system takes its progress from then.
+        assert!(changes(Some(previous), &playing(0), now).playback);
     }
 
     #[test]
