@@ -48,16 +48,16 @@ done
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-# Joins the release binary of every target into one universal file in the bundle.
+# Joins the release binary of every target into one universal file in the bundle. The inputs are
+# collected as positional arguments, so a checkout path with spaces stays whole.
 join_binary() {
     source_name=$1
     bundle_name=$2
-    inputs=""
+    set --
     for target in $targets; do
-        inputs="$inputs $root/target/$target/release/$source_name"
+        set -- "$@" "$root/target/$target/release/$source_name"
     done
-    # shellcheck disable=SC2086
-    lipo -create -output "$app/Contents/MacOS/$bundle_name" $inputs
+    lipo -create -output "$app/Contents/MacOS/$bundle_name" "$@"
 }
 
 join_binary crabytube "$executable"

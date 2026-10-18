@@ -72,6 +72,9 @@ application menu.
 The Flatpak has no access to your Documents folder, so Settings → Export and Import use
 `~/.var/app/dev.holypanda.CrabyTube/data/crabytube-backup.json` instead.
 
+With Discord installed from your distribution rather than as a Flatpak, Discord Rich Presence works
+when Discord is already open as CrabyTube starts.
+
 ### Windows
 
 The installer is the easiest way, and the installed app updates itself:

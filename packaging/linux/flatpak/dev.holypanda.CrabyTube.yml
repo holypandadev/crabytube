@@ -17,9 +17,13 @@ finish-args:
   # reach (it may hand them to a backend the desktop does not show).
   - --talk-name=org.freedesktop.Notifications
   - --own-name=org.mpris.MediaPlayer2.crabytube
-  # Discord's rich presence: the native socket, and the socket of Discord's own Flatpak.
+  # Discord's rich presence: the native sockets (Discord takes the next one when the first is in
+  # use), and the folders of the Discord and Vesktop Flatpaks. A native socket is only seen when it
+  # exists as CrabyTube starts.
   - --filesystem=xdg-run/discord-ipc-0
+  - --filesystem=xdg-run/discord-ipc-1
   - --filesystem=xdg-run/app/com.discordapp.Discord
+  - --filesystem=xdg-run/app/dev.vencord.Vesktop
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   # The SDK's default CFLAGS end in -O2. aws-lc-sys compiles its CPU Jitter RNG at -O0 and stops
