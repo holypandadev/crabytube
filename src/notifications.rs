@@ -83,9 +83,13 @@ async fn session() -> zbus::Result<zbus::Connection> {
     Ok(connection)
 }
 
-/// Drops the cached connection after a failed call, so the next notification connects again.
+/// Drops the cached connection after a call failed on it, so the next notification connects again.
+/// An error the other side answered with leaves the connection as good as it was.
 #[cfg(target_os = "linux")]
-fn forget_session() {
+fn forget_session(error: &zbus::Error) {
+    if matches!(error, zbus::Error::MethodError(..)) {
+        return;
+    }
     if let Ok(mut slot) = SESSION.lock() {
         *slot = None;
     }
@@ -130,7 +134,7 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
             ),
         )
         .await
-        .inspect_err(|_| forget_session())?;
+        .inspect_err(forget_session)?;
     reply.body().deserialize::<u32>()
 }
 
@@ -174,7 +178,7 @@ async fn add_portal_notice(notice: &TrackNotice, cover: Option<Vec<u8>>) -> zbus
             &(PORTAL_NOTICE_ID, fields),
         )
         .await
-        .inspect_err(|_| forget_session())?;
+        .inspect_err(forget_session)?;
     Ok(())
 }
 

@@ -204,12 +204,11 @@ fn answer_reopen(sender: UnboundedSender<TrayCommand>) {
         _delegate: *mut AnyObject,
         _command: Sel,
         _application: *mut AnyObject,
-        has_visible_windows: Bool,
+        _has_visible_windows: Bool,
     ) -> Bool {
-        // Hidden and minimized windows do not count as visible.
-        if !has_visible_windows.as_bool()
-            && let Some(sender) = REOPEN.get()
-        {
+        // Whatever AppKit counts as visible, the menu bar icon included: showing a window that is
+        // already on screen only brings it to the front, as the click does anyway.
+        if let Some(sender) = REOPEN.get() {
             let _ = sender.send(TrayCommand::ShowWindow);
         }
         // AppKit then does what it does by default, such as bringing back a minimized window.

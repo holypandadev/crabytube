@@ -100,6 +100,8 @@ impl DiscordPresence {
                 let mut session: Option<Session> = None;
                 let mut client: Option<ipc::Connection> = None;
                 let mut last_sent: Option<Instant> = None;
+                // The failure last written to the log, so a retry every few seconds writes it once.
+                let mut logged: Option<ConnectionStatus> = None;
                 loop {
                     let received = match receiver.recv_timeout(Duration::from_secs(15)) {
                         Ok(update) => Some(update),
@@ -122,6 +124,8 @@ impl DiscordPresence {
                         Some(None) => {
                             last = None;
                             session = None;
+                            // Turned on again, a failure is worth a line in the log again.
+                            logged = None;
                             if let Some(connection) = client.as_mut() {
                                 last_sent = Some(Instant::now());
                                 if connection.set_activity(None).is_err() {
@@ -143,11 +147,19 @@ impl DiscordPresence {
                     // A connection that broke, as when Discord restarted, is opened again at once.
                     for _ in 0..2 {
                         if client.is_none() {
-                            set_status(&worker_status, ConnectionStatus::Connecting);
+                            // A retry keeps the failure on show rather than blinking "Connecting".
+                            if logged.is_none() {
+                                set_status(&worker_status, ConnectionStatus::Connecting);
+                            }
                             match ipc::Connection::open(APPLICATION_ID) {
                                 Ok(connection) => client = Some(connection),
                                 Err(error) => {
-                                    report(&worker_status, ConnectionStatus::Unavailable, &error);
+                                    report(
+                                        &worker_status,
+                                        &mut logged,
+                                        ConnectionStatus::Unavailable,
+                                        &error,
+                                    );
                                     break;
                                 }
                             }
@@ -158,14 +170,25 @@ impl DiscordPresence {
                         match connection.set_activity(Some(activity.clone())) {
                             Ok(()) => {
                                 set_status(&worker_status, ConnectionStatus::Connected);
+                                logged = None;
                                 break;
                             }
                             Err(ipc::Failure::Refused(reason)) => {
-                                report(&worker_status, ConnectionStatus::Rejected, &reason);
+                                report(
+                                    &worker_status,
+                                    &mut logged,
+                                    ConnectionStatus::Rejected,
+                                    &reason,
+                                );
                                 break;
                             }
                             Err(ipc::Failure::Broken(reason)) => {
-                                report(&worker_status, ConnectionStatus::Error, &reason);
+                                report(
+                                    &worker_status,
+                                    &mut logged,
+                                    ConnectionStatus::Error,
+                                    &reason,
+                                );
                                 client = None;
                             }
                         }
@@ -184,7 +207,8 @@ impl DiscordPresence {
     }
 
     pub fn update(&self, presence: Presence) {
-        if self.status() != ConnectionStatus::Connected {
+        // A failure stays on show until the worker knows better.
+        if self.status() == ConnectionStatus::Idle {
             set_status(&self.status, ConnectionStatus::Connecting);
         }
         if self.sender.send(Some(presence)).is_err() {
@@ -208,15 +232,22 @@ fn set_status(status: &AtomicU8, value: ConnectionStatus) {
     status.store(value as u8, Ordering::Release);
 }
 
-/// Sets a failed status, and writes why to the log when the status changes, so a retry every few
-/// seconds does not repeat it.
-fn report(status: &AtomicU8, value: ConnectionStatus, reason: &str) {
-    let previous = ConnectionStatus::from_raw(status.swap(value as u8, Ordering::AcqRel));
-    if previous != value {
-        match value {
-            ConnectionStatus::Unavailable => tracing::info!(reason, "Discord is not reachable"),
-            _ => tracing::warn!(reason, "Discord Rich Presence failed"),
-        }
+/// Sets a failed status, and writes why to the log when it is not the failure last written
+/// (`logged`), so a retry every few seconds does not repeat it.
+fn report(
+    status: &AtomicU8,
+    logged: &mut Option<ConnectionStatus>,
+    value: ConnectionStatus,
+    reason: &str,
+) {
+    set_status(status, value);
+    if *logged == Some(value) {
+        return;
+    }
+    *logged = Some(value);
+    match value {
+        ConnectionStatus::Unavailable => tracing::info!(reason, "Discord is not reachable"),
+        _ => tracing::warn!(reason, "Discord Rich Presence failed"),
     }
 }
 
