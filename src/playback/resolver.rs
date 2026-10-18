@@ -2101,7 +2101,7 @@ async fn run_js_helper_once(
     // A stuck helper is killed when the timed-out future drops the child (kill_on_drop).
     let output = tokio::select! {
         _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-        result = tokio::time::timeout(JS_HELPER_TIMEOUT, child.wait_with_output()) => result
+        result = tokio::time::timeout(JS_HELPER_TIMEOUT, super::process_job::bounded_output(&mut child)) => result
             .map_err(|_| StreamError::Decoder("JS helper timed out".into()))?
             .map_err(|error| StreamError::Decoder(error.to_string()))?,
     };

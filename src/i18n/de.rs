@@ -236,16 +236,6 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Serif", "Mit Serifen"),
         ("Monospace", "Festbreite"),
         ("Integrations", "Integrationen"),
-        ("System tray is starting.", "Infobereich wird gestartet."),
-        ("System tray is active.", "Der Infobereich ist aktiv."),
-        (
-            "Waiting for a compatible system tray host.",
-            "Warte auf einen kompatiblen Infobereich.",
-        ),
-        (
-            "System tray host is offline; closing the window will quit CrabyTube.",
-            "Der Infobereich ist nicht verfügbar; Schließen des Fensters beendet CrabyTube.",
-        ),
         (
             "System tray support is unavailable on this platform.",
             "Der Infobereich ist auf dieser Plattform nicht verfügbar.",
@@ -559,10 +549,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Die gespeicherten Einstellungen konnten nicht gelesen werden und wurden verschoben nach {0}",
         ),
         ("MPRIS unavailable: {}", "MPRIS nicht verfügbar: {0}"),
-        (
-            "System tray unavailable: {}",
-            "Infobereich nicht verfügbar: {0}",
-        ),
         ("{#} results for {}", "{0} {0:Ergebnis|Ergebnisse} für {1}"),
         (
             "{#} saved tracks",

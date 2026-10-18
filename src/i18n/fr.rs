@@ -231,22 +231,6 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Monospace", "Chasse fixe"),
         ("Integrations", "Intégrations"),
         (
-            "System tray is starting.",
-            "Démarrage de la zone de notification.",
-        ),
-        (
-            "System tray is active.",
-            "La zone de notification est active.",
-        ),
-        (
-            "Waiting for a compatible system tray host.",
-            "En attente d'une zone de notification compatible.",
-        ),
-        (
-            "System tray host is offline; closing the window will quit CrabyTube.",
-            "La zone de notification est indisponible ; fermer la fenêtre quittera CrabyTube.",
-        ),
-        (
             "System tray support is unavailable on this platform.",
             "La zone de notification n'est pas disponible sur cette plateforme.",
         ),
@@ -562,10 +546,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Impossible de lire les réglages enregistrés ; ils ont été déplacés vers {0}",
         ),
         ("MPRIS unavailable: {}", "MPRIS indisponible : {0}"),
-        (
-            "System tray unavailable: {}",
-            "Zone de notification indisponible : {0}",
-        ),
         ("{#} results for {}", "{0} {0:résultat|résultats} pour {1}"),
         (
             "{#} saved tracks",

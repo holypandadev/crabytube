@@ -1,6 +1,7 @@
 //! Helper processes join one job object on Windows. The job ends them when the app exits, even
 //! when the app is killed before its own cleanup runs. Elsewhere the helpers rely on their own
-//! deadline and on the parent-death signal (see the `helper-guard` crate).
+//! deadline and on the parent-death signal (see the `helper-guard` crate). What a helper prints is
+//! read here too, up to a limit.
 
 #[cfg(windows)]
 mod windows {
@@ -144,3 +145,47 @@ pub(super) fn hide_console_window(command: &mut tokio::process::Command) {
 
 #[cfg(not(windows))]
 pub(super) fn hide_console_window(_command: &mut tokio::process::Command) {}
+
+/// The largest answer read from a helper; a real one is a few kilobytes.
+const MAX_HELPER_OUTPUT_BYTES: u64 = 1024 * 1024;
+
+/// What a helper printed and how it ended. The scripts the helpers run come from the network, so
+/// their output is read up to `MAX_HELPER_OUTPUT_BYTES`; a helper that prints more is left to the
+/// caller's timeout.
+pub(super) async fn bounded_output(
+    child: &mut tokio::process::Child,
+) -> std::io::Result<std::process::Output> {
+    use tokio::io::AsyncReadExt;
+    let mut stdout = Vec::new();
+    if let Some(pipe) = child.stdout.take() {
+        pipe.take(MAX_HELPER_OUTPUT_BYTES)
+            .read_to_end(&mut stdout)
+            .await?;
+    }
+    let status = child.wait().await?;
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    #[tokio::test]
+    async fn a_helper_that_prints_too_much_is_read_up_to_the_limit() {
+        // A little over the limit, so the rest fits in the pipe and the process can end.
+        let mut child = tokio::process::Command::new("head")
+            .args([
+                "-c",
+                &(super::MAX_HELPER_OUTPUT_BYTES + 100).to_string(),
+                "/dev/zero",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let output = super::bounded_output(&mut child).await.unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len() as u64, super::MAX_HELPER_OUTPUT_BYTES);
+    }
+}

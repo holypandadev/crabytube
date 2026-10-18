@@ -209,16 +209,6 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Serif", "衬线"),
         ("Monospace", "等宽"),
         ("Integrations", "集成"),
-        ("System tray is starting.", "正在启动系统托盘。"),
-        ("System tray is active.", "系统托盘已启用。"),
-        (
-            "Waiting for a compatible system tray host.",
-            "正在等待兼容的系统托盘。",
-        ),
-        (
-            "System tray host is offline; closing the window will quit CrabyTube.",
-            "系统托盘不可用；关闭窗口将退出 CrabyTube。",
-        ),
         (
             "System tray support is unavailable on this platform.",
             "此平台不支持系统托盘。",
@@ -475,7 +465,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "无法读取已保存的设置，已移至 {0}",
         ),
         ("MPRIS unavailable: {}", "MPRIS 不可用：{0}"),
-        ("System tray unavailable: {}", "系统托盘不可用：{0}"),
         ("{#} results for {}", "“{1}”的搜索结果：{0} 项"),
         ("{#} saved tracks", "已收藏 {0} 首歌曲"),
         ("{#} songs", "{0} 首歌曲"),

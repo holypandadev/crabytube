@@ -162,7 +162,6 @@ struct App {
     mpris: crate::mpris::MprisRemote,
     tray: crate::tray::TrayRemote,
     tray_available: bool,
-    tray_status: String,
     window_hidden_to_tray: bool,
     /// The window was closed for the tray (Linux) and opens again from there.
     window_closed_to_tray: bool,
@@ -1694,15 +1693,10 @@ impl App {
             }
             Message::TrayServiceStarted(Ok(available)) => {
                 self.tray_available = available;
-                self.tray_status = if available {
-                    "System tray is active.".into()
-                } else {
-                    "Waiting for a compatible system tray host.".into()
-                };
             }
             Message::TrayServiceStarted(Err(error)) => {
                 self.tray_available = false;
-                self.tray_status = format!("System tray unavailable: {error}");
+                tracing::info!(%error, "system tray unavailable");
             }
             Message::TrayCommand(command) => match command {
                 crate::tray::TrayCommand::ShowWindow => {
@@ -1725,12 +1719,6 @@ impl App {
                 }
                 crate::tray::TrayCommand::AvailabilityChanged(available) => {
                     self.tray_available = available;
-                    self.tray_status = if available {
-                        "System tray is active.".into()
-                    } else {
-                        "System tray host is offline; closing the window will quit CrabyTube."
-                            .into()
-                    };
                     if !available && self.window_hidden_to_tray {
                         return self.show_window_from_tray_task();
                     }
@@ -2344,7 +2332,6 @@ impl App {
             mpris,
             tray,
             tray_available: false,
-            tray_status: "System tray is starting.".into(),
             window_hidden_to_tray: false,
             window_closed_to_tray: false,
             update_install: crate::updater::Install::Managed,

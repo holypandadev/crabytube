@@ -234,19 +234,6 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Monospace", "等幅"),
         ("Integrations", "連携"),
         (
-            "System tray is starting.",
-            "システムトレイを起動しています。",
-        ),
-        ("System tray is active.", "システムトレイは有効です。"),
-        (
-            "Waiting for a compatible system tray host.",
-            "対応するシステムトレイを待っています。",
-        ),
-        (
-            "System tray host is offline; closing the window will quit CrabyTube.",
-            "システムトレイを利用できません。ウィンドウを閉じると CrabyTube は終了します。",
-        ),
-        (
             "System tray support is unavailable on this platform.",
             "このプラットフォームではシステムトレイを利用できません。",
         ),
@@ -544,10 +531,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "保存された設定を読み込めなかったため、{0} に移動しました",
         ),
         ("MPRIS unavailable: {}", "MPRIS を利用できません：{0}"),
-        (
-            "System tray unavailable: {}",
-            "システムトレイを利用できません：{0}",
-        ),
         ("{#} results for {}", "「{1}」の検索結果：{0}件"),
         ("{#} saved tracks", "保存した曲：{0}曲"),
         ("{#} songs", "{0}曲"),

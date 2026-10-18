@@ -227,16 +227,6 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Serif", "С засечками"),
         ("Monospace", "Моноширинный"),
         ("Integrations", "Интеграции"),
-        ("System tray is starting.", "Запуск области уведомлений."),
-        ("System tray is active.", "Область уведомлений активна."),
-        (
-            "Waiting for a compatible system tray host.",
-            "Ожидание совместимой области уведомлений.",
-        ),
-        (
-            "System tray host is offline; closing the window will quit CrabyTube.",
-            "Область уведомлений недоступна; закрытие окна завершит CrabyTube.",
-        ),
         (
             "System tray support is unavailable on this platform.",
             "Область уведомлений недоступна на этой платформе.",
@@ -541,10 +531,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Не удалось прочитать сохранённые настройки; они перемещены в {0}",
         ),
         ("MPRIS unavailable: {}", "MPRIS недоступен: {0}"),
-        (
-            "System tray unavailable: {}",
-            "Область уведомлений недоступна: {0}",
-        ),
         (
             "{#} results for {}",
             "{0} {0:результат|результата|результатов} по запросу {1}",

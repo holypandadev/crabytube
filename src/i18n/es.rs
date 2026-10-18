@@ -228,22 +228,6 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Monospace", "Monoespaciada"),
         ("Integrations", "Integraciones"),
         (
-            "System tray is starting.",
-            "Iniciando la bandeja del sistema.",
-        ),
-        (
-            "System tray is active.",
-            "La bandeja del sistema está activa.",
-        ),
-        (
-            "Waiting for a compatible system tray host.",
-            "Esperando un host compatible para la bandeja del sistema.",
-        ),
-        (
-            "System tray host is offline; closing the window will quit CrabyTube.",
-            "El host de la bandeja no está disponible; al cerrar la ventana, CrabyTube saldrá.",
-        ),
-        (
             "System tray support is unavailable on this platform.",
             "La bandeja del sistema no está disponible en esta plataforma.",
         ),
@@ -556,10 +540,6 @@ pub(super) static CATALOG: Catalog = Catalog {
             "No se pudieron leer los ajustes; se movieron a {0}",
         ),
         ("MPRIS unavailable: {}", "MPRIS no está disponible: {0}"),
-        (
-            "System tray unavailable: {}",
-            "La bandeja del sistema no está disponible: {0}",
-        ),
         ("{#} results for {}", "{0} resultados para {1}"),
         (
             "{#} saved tracks",

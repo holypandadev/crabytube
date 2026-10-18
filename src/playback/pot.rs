@@ -421,7 +421,7 @@ impl BotguardHelper {
         // A stuck helper is killed when the timed-out future drops the child (kill_on_drop).
         let output = tokio::select! {
             _ = cancel.cancelled() => return Err(PoTokenError::Cancelled),
-            result = tokio::time::timeout(BOTGUARD_HELPER_TIMEOUT, bounded_output(&mut child)) => match result {
+            result = tokio::time::timeout(BOTGUARD_HELPER_TIMEOUT, super::process_job::bounded_output(&mut child)) => match result {
                 Ok(output) => output.map_err(|error| PoTokenError::Helper(error.to_string()))?,
                 Err(_) => {
                     // V8 can also hang on a damaged snapshot instead of dying. A single timeout is as
@@ -654,29 +654,6 @@ fn helper_command() -> Result<Command, PoTokenError> {
     Err(PoTokenError::HelperMissing(format!(
         "{name} is not installed next to the application executable"
     )))
-}
-
-/// The largest answer read from the helper; a real one is a few kilobytes.
-const MAX_HELPER_OUTPUT_BYTES: u64 = 1024 * 1024;
-
-/// What the helper printed and how it ended. The program it runs comes from the network, so its
-/// output is read up to `MAX_HELPER_OUTPUT_BYTES`; a helper that prints more is left to the timeout.
-async fn bounded_output(
-    child: &mut tokio::process::Child,
-) -> std::io::Result<std::process::Output> {
-    use tokio::io::AsyncReadExt;
-    let mut stdout = Vec::new();
-    if let Some(pipe) = child.stdout.take() {
-        pipe.take(MAX_HELPER_OUTPUT_BYTES)
-            .read_to_end(&mut stdout)
-            .await?;
-    }
-    let status = child.wait().await?;
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr: Vec::new(),
-    })
 }
 
 /// Whether the helper died the way a fatal V8 error ends a process: an abort or a fault, rather
