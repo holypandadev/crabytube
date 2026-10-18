@@ -1453,7 +1453,8 @@ impl YouTubeStreamResolver {
     /// Forgets the saved configuration, here and on disk, so the next fetch reads the pages again.
     async fn forget_player_config(&self) {
         *self.runtime.lock().await = None;
-        let _ = off_runtime(player_config::forget).await;
+        let name = self.profile.config().name;
+        let _ = off_runtime(move || player_config::forget(name)).await;
     }
 
     async fn ensure_signature_timestamp(

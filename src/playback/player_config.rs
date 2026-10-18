@@ -38,11 +38,25 @@ pub struct SavedPlayerConfig {
 /// Serializes read-modify-write cycles on the file within this process.
 static FILE_LOCK: Mutex<()> = Mutex::new(());
 
-fn path() -> Option<PathBuf> {
+/// The file of `profile`. Each profile has its own, so the one used for live broadcasts does not
+/// replace the music profile's. The music profile keeps the name the file has always had.
+fn path(profile: &str) -> Option<PathBuf> {
     let mut path = crate::app_dirs::cache_dir()?;
     path.push("crabytube");
-    path.push("player-config.json");
+    path.push(file_name(profile));
     Some(path)
+}
+
+fn file_name(profile: &str) -> String {
+    if profile == "WEB_REMIX" {
+        return "player-config.json".into();
+    }
+    let tag: String = profile
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    format!("player-config-{tag}.json")
 }
 
 fn now() -> u64 {
@@ -66,7 +80,7 @@ pub fn load(profile: &str) -> Option<SavedPlayerConfig> {
     let _guard = FILE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let bytes = std::fs::read(path()?).ok()?;
+    let bytes = std::fs::read(path(profile)?).ok()?;
     parse(&bytes).filter(|saved| saved.profile == profile && is_fresh(saved.saved_at, now()))
 }
 
@@ -76,7 +90,7 @@ pub fn store(saved: &SavedPlayerConfig) {
     let _guard = FILE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(path) = path() else {
+    let Some(path) = path(&saved.profile) else {
         return;
     };
     if let Some(parent) = path.parent() {
@@ -91,12 +105,12 @@ pub fn store(saved: &SavedPlayerConfig) {
     }
 }
 
-/// Removes the saved configuration, so the next start fetches the pages again.
-pub fn forget() {
+/// Removes the saved configuration of `profile`, so the next start fetches its pages again.
+pub fn forget(profile: &str) {
     let _guard = FILE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(path) = path() {
+    if let Some(path) = path(profile) {
         let _ = std::fs::remove_file(path);
     }
 }
@@ -151,13 +165,24 @@ mod tests {
     fn store_load_and_forget_keep_one_configuration_per_profile() {
         // The test cache root is a temporary folder, so the real files are never touched.
         let profile = "TEST_PROFILE_ONLY";
-        forget();
+        forget(profile);
         assert!(load(profile).is_none());
         store(&sample(profile, now()));
         let loaded = load(profile).expect("the fresh configuration is loaded");
         assert_eq!(loaded.profile, profile);
         assert!(load("ANOTHER_PROFILE").is_none());
-        forget();
+        // Another profile's configuration is kept apart and survives this one's forgetting.
+        store(&sample("TEST_OTHER_PROFILE", now()));
+        forget(profile);
         assert!(load(profile).is_none());
+        assert!(load("TEST_OTHER_PROFILE").is_some());
+        forget("TEST_OTHER_PROFILE");
+    }
+
+    #[test]
+    fn each_profile_has_its_own_file_and_the_music_one_keeps_its_name() {
+        assert_eq!(file_name("WEB_REMIX"), "player-config.json");
+        assert_eq!(file_name("MWEB"), "player-config-mweb.json");
+        assert_eq!(file_name("../X Y"), "player-config-xy.json");
     }
 }
