@@ -42,7 +42,10 @@ pub mod mpris;
 pub mod mpris;
 #[cfg(target_os = "linux")]
 pub mod tray;
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(windows, target_os = "macos"))]
+#[path = "tray_native.rs"]
+pub mod tray;
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[path = "tray_stub.rs"]
 pub mod tray;
 

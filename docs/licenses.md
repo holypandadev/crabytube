@@ -89,6 +89,7 @@ dependencies:
 | `image` 0.25, `zune-jpeg`, `png` | app (artwork) | MIT OR Apache-2.0 (`zune-jpeg` also Zlib) |
 | `zbus` 5 | app (MPRIS, notifications; Linux) | MIT |
 | `ksni` 0.3 | app (system tray; Linux) | Unlicense |
+| `tray-icon` 0.26, `muda` 0.21, `keyboard-types` 0.8 | app (tray icon and its menu; Windows and macOS) | MIT OR Apache-2.0 |
 | `objc2` 0.6, `block2` 0.6, `objc2-foundation` 0.3 | app (Now Playing and media keys; macOS) | MIT |
 | `objc2-app-kit` 0.3, `objc2-core-foundation` 0.3, `objc2-media-player` 0.3 | app (Now Playing and media keys; macOS) | Zlib OR Apache-2.0 OR MIT |
 | `libc` 0.2 | app (process memory and CPU readings; macOS) | MIT OR Apache-2.0 |

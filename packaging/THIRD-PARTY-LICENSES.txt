@@ -723,6 +723,7 @@ idna 1.1.0 (LICENSE-APACHE)
 idna_adapter 1.2.2 (LICENSE-APACHE)
 if_chain 1.0.3 (LICENSE-APACHE)
 indexmap 2.14.2 (LICENSE-APACHE)
+keyboard-types 0.8.3 (LICENSE-APACHE)
 khronos-egl 6.0.0 (LICENSE-APACHE)
 lazy_static 1.5.1 (LICENSE-APACHE)
 linux-raw-sys 0.12.1 (LICENSE-APACHE)
@@ -731,6 +732,7 @@ lock_api 0.4.14 (LICENSE-APACHE)
 log 0.4.34 (LICENSE-APACHE)
 metal 0.32.0 (LICENSE-APACHE)
 mime 0.3.17 (LICENSE-APACHE)
+muda 0.21.2 (LICENSE-APACHE)
 num-bigint 0.4.8 (LICENSE-APACHE)
 num-bigint 0.5.1 (LICENSE-APACHE)
 num-integer 0.1.47 (LICENSE-APACHE)
@@ -775,6 +777,7 @@ system-configuration 0.7.0 (LICENSE-APACHE)
 system-configuration-sys 0.6.0 (LICENSE-APACHE)
 tempfile 3.27.0 (LICENSE-APACHE)
 thread_local 1.1.10 (LICENSE-APACHE)
+tray-icon 0.26.1 (LICENSE-APACHE)
 ttf-parser 0.25.1 (LICENSE-APACHE)
 ucd-trie 0.1.7 (LICENSE-APACHE)
 unicode-bidi 0.3.18 (LICENSE-APACHE)
@@ -11064,6 +11067,30 @@ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
+keyboard-types 0.8.3 (LICENSE-MIT)
+------------------------------------------------------------------------------
+
+Copyright (c) 2017 Pyfisch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+------------------------------------------------------------------------------
 konst 0.2.20 (LICENSE-ZLIB.md)
 konst_macro_rules 0.2.19 (LICENSE-ZLIB.md)
 ------------------------------------------------------------------------------
@@ -12546,6 +12573,57 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+------------------------------------------------------------------------------
+muda 0.21.2 (LICENSE-MIT)
+tray-icon 0.26.1 (LICENSE-MIT)
+------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2022-2022 Tauri Programme within The Commons Conservancy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+muda 0.21.2 (LICENSE.spdx)
+------------------------------------------------------------------------------
+
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: muda
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2020-2022, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Menu Utilities for Desktop Applications.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2022-12-05T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/muda
+PackageDownloadLocation: git+https://github.com/tauri-apps/muda.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/muda.git
+Creator: Person: Daniel Thompson-Yvetot
 
 ------------------------------------------------------------------------------
 mutate_once 0.1.2 (LICENSE)
@@ -17623,6 +17701,30 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+tray-icon 0.26.1 (LICENSE.spdx)
+------------------------------------------------------------------------------
+
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: tray-icon
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2020-2022, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Create tray icons for desktop applications.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2022-12-05T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/tray-icon
+PackageDownloadLocation: git+https://github.com/tauri-apps/tray-icon.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/tray-icon.git
+Creator: Person: Daniel Thompson-Yvetot
 
 ------------------------------------------------------------------------------
 triomphe 0.1.16 (LICENSE-APACHE)

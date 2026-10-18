@@ -185,7 +185,7 @@ impl App {
                     Ok(()) => {
                         tracing::info!(version = %available.version, "installing the update; quitting");
                         self.update = UpdateState::Installing;
-                        iced::exit()
+                        self.exit_task()
                     }
                     Err(error) => {
                         tracing::warn!(%error, "the update was not installed");

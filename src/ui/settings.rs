@@ -596,24 +596,25 @@ impl App {
                 ),
                 width,
             ));
-            rows.push(self.setting(
-                "Close to tray",
-                Some(if self.tray_available {
-                    "Keep playing in the system tray.".into()
-                } else {
-                    "Needs a system tray host.".into()
-                }),
-                if self.tray_available {
-                    toggle(
-                        p.close_to_tray,
-                        Message::Preference(Preference::CloseToTray(!p.close_to_tray)),
-                    )
-                } else {
-                    label("—", TEXT_BODY).color(FADED).into()
-                },
-                width,
-            ));
         }
+        // Every system has a tray: the notification area on Windows and the menu bar on macOS.
+        rows.push(self.setting(
+            "Close to tray",
+            Some(if self.tray_available {
+                "Keep playing in the system tray.".into()
+            } else {
+                "Needs a system tray host.".into()
+            }),
+            if self.tray_available {
+                toggle(
+                    p.close_to_tray,
+                    Message::Preference(Preference::CloseToTray(!p.close_to_tray)),
+                )
+            } else {
+                label("—", TEXT_BODY).color(FADED).into()
+            },
+            width,
+        ));
         self.settings_box("General", width, rows)
     }
 

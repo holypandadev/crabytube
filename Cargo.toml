@@ -88,6 +88,11 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
 objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent", "objc2-app-kit", "objc2-core-foundation"] }
 
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+# The tray icon: the notification area on Windows and the menu bar on macOS. Linux keeps its own
+# StatusNotifier item (`ksni`).
+tray-icon = { version = "0.26", default-features = false }
+
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 iced = { version = "0.14", features = ["advanced", "image-without-codecs", "svg", "tokio"] }
 

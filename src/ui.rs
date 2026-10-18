@@ -708,8 +708,16 @@ impl App {
         if should_close_to_tray(self.preferences.close_to_tray, self.tray_available) {
             self.hide_window_to_tray_task()
         } else {
-            iced::exit()
+            self.exit_task()
         }
+    }
+
+    /// Ends the app. The tray icon of Windows and macOS goes first: Windows would leave the icon
+    /// of an ended process in the notification area.
+    fn exit_task(&mut self) -> Task<Message> {
+        #[cfg(any(windows, target_os = "macos"))]
+        self.tray.detach();
+        iced::exit()
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -767,7 +775,7 @@ impl App {
                 return self.close_window_task();
             }
             Message::QuitApp => {
-                return iced::exit();
+                return self.exit_task();
             }
             Message::WindowOpened(id) => {
                 // A new window is neither minimized nor hidden.
@@ -782,6 +790,13 @@ impl App {
                 });
                 let scale = iced::window::scale_factor(id).map(Message::DisplayScaleChanged);
                 let first = !std::mem::replace(&mut self.window_opened_before, true);
+                // The tray icon of Windows and macOS needs the main thread with its event loop
+                // running, which is where this runs once the first window is open.
+                #[cfg(any(windows, target_os = "macos"))]
+                if first {
+                    let attached = self.tray.attach();
+                    drop(self.update(Message::TrayServiceStarted(attached)));
+                }
                 let fit = if first && opens_at_default_size() {
                     iced::window::monitor_size(id).map(Message::MonitorMeasured)
                 } else {
@@ -2464,7 +2479,11 @@ impl App {
             tracing::debug!("loaded anonymous Home snapshot from disk");
         }
         let home_task = app.load_home_task();
+        // The tray of Windows and macOS is made with the first window instead (see WindowOpened).
+        #[cfg(not(any(windows, target_os = "macos")))]
         let tray_task = Task::perform(app.tray.start_service(), Message::TrayServiceStarted);
+        #[cfg(any(windows, target_os = "macos"))]
+        let tray_task = Task::none();
         app.update_install = crate::updater::current_install();
         let update_check = app.first_update_check_task();
         let artwork_task = if app.home_shelves.is_empty() {
