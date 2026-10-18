@@ -120,10 +120,12 @@ in-memory artwork budget (`memory.rs`).
 
 The UI is an Iced 0.14 daemon (`App` in `ui.rs`) using the message/update/view model and a custom
 Tokio executor (two worker threads by default, `TOKIO_WORKER_THREADS` overrides it). It opens its
-window with `window::open` and keeps running without one: close-to-tray, which needs the tray and so
-exists on Linux only, closes the window, because Wayland cannot hide one, and the tray opens it
-again. When the window is minimized or closed to the tray, cached covers other than the playing
-track's are dropped and the freed heap is returned.
+window with `window::open` and keeps running without one: close-to-tray, on by default, which needs
+the tray and so exists on Linux only, closes the window, because Wayland cannot hide one, and the
+tray opens it again. Wayland lets no client raise, focus or restore its own window either, so there
+a window that is behind others or minimized is closed and opened again when the tray, a second
+launch or MPRIS `Raise` asks for it. When the window is minimized or closed to the tray, cached
+covers other than the playing track's are dropped and the freed heap is returned.
 
 - `ui/shell.rs`: window chrome: title bar, tabs and the player bar. The window is undecorated on
   Linux and Windows; on macOS the system frame stays, with a transparent, untitled bar that the
@@ -179,7 +181,7 @@ individually.
 ## Platform integration
 
 - **Linux:** MPRIS (`org.mpris.MediaPlayer2.crabytube`) with metadata, the saved cover file and controls; a
-  StatusNotifier tray icon with optional close-to-tray; desktop notifications; launch on startup
+  StatusNotifier tray icon with close-to-tray (on by default); desktop notifications; launch on startup
   through `~/.config/autostart`, or the Background portal inside the Flatpak. The window's application ID is `dev.holypanda.CrabyTube`, matching
   `packaging/linux/dev.holypanda.CrabyTube.desktop`.
 - **Windows:** media keys and the system media panel (title, artist, cover, position) through the

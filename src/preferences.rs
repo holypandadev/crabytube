@@ -334,6 +334,9 @@ pub struct Preferences {
     pub ui_language: UiLanguage,
     pub ui_density: UiDensity,
     pub startup: bool,
+    /// Closing the window keeps the app in the system tray. Saved as `keep_in_tray`: copies
+    /// before 0.1.1 wrote `close_to_tray` with the old default, off, which no one had chosen.
+    #[serde(rename = "keep_in_tray")]
     pub close_to_tray: bool,
     pub discord_presence: bool,
     pub audio_output_device_id: Option<String>,
@@ -389,7 +392,7 @@ impl Default for Preferences {
             ui_language: UiLanguage::default(),
             ui_density: UiDensity::default(),
             startup: false,
-            close_to_tray: false,
+            close_to_tray: true,
             discord_presence: false,
             audio_output_device_id: None,
             volume: 0.8,
@@ -1470,9 +1473,17 @@ mod tests {
     }
 
     #[test]
-    fn older_preferences_keep_normal_close_behavior_by_default() {
+    fn the_window_closes_to_the_tray_unless_turned_off_since_0_1_1() {
         let preferences: Preferences = serde_json::from_str("{}").unwrap();
-        assert!(!preferences.close_to_tray);
+        assert!(preferences.close_to_tray);
+        // 0.1.0 saved its default, off, under the old name: it no longer counts.
+        let older: Preferences = serde_json::from_str(r#"{"close_to_tray": false}"#).unwrap();
+        assert!(older.close_to_tray);
+        let turned_off: Preferences = serde_json::from_str(r#"{"keep_in_tray": false}"#).unwrap();
+        assert!(!turned_off.close_to_tray);
+        let saved = serde_json::to_value(&turned_off).unwrap();
+        assert_eq!(saved["keep_in_tray"], false);
+        assert!(saved.get("close_to_tray").is_none());
     }
 
     #[test]

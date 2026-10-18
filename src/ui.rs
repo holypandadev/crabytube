@@ -379,6 +379,19 @@ fn should_close_to_tray(preference_enabled: bool, tray_available: bool) -> bool 
     preference_enabled && tray_available
 }
 
+/// Whether showing the open window takes closing it and opening it again. Wayland lets no client
+/// raise, focus or restore its own window, but the compositor puts a new window in front, so there
+/// a window that is not in front, behind others or minimized, is opened anew.
+fn reopens_to_show(wayland: bool, focused: Option<bool>, minimized: bool) -> bool {
+    wayland && (minimized || focused != Some(true))
+}
+
+/// Whether the window is on Wayland, which winit picks whenever the session offers it.
+fn wayland_session() -> bool {
+    let set = |name| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    cfg!(target_os = "linux") && (set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET"))
+}
+
 impl Default for App {
     fn default() -> Self {
         let session = YouTubeSession::default();
@@ -607,19 +620,37 @@ impl App {
             // Wayland cannot hide a window, so on Linux it is closed and opened again from the
             // tray. That also frees what drawing it holds.
             self.window_closed_to_tray = true;
-            self.scroll_before_tray = Some(ListScroll {
-                search: self.search_scroll,
-                library: self.library_scroll,
-                queue: self.queue_scroll,
-                collection: self.collection_scroll,
-            });
+            self.remember_list_scroll();
             return iced::window::latest().and_then(iced::window::close);
         }
         iced::window::latest().and_then(|id| iced::window::set_mode(id, iced::window::Mode::Hidden))
     }
 
+    /// Keeps where each list stood, for the window that opens next.
+    fn remember_list_scroll(&mut self) {
+        self.scroll_before_tray = Some(ListScroll {
+            search: self.search_scroll,
+            library: self.library_scroll,
+            queue: self.queue_scroll,
+            collection: self.collection_scroll,
+        });
+    }
+
+    /// Brings the window to the front: from the tray, a second launch or a media control.
     fn show_window_from_tray_task(&mut self) -> Task<Message> {
+        self.show_window_task(wayland_session())
+    }
+
+    fn show_window_task(&mut self, wayland: bool) -> Task<Message> {
         self.window_hidden_to_tray = false;
+        if !self.window_closed_to_tray
+            && reopens_to_show(wayland, self.window_focused, self.window_minimized)
+        {
+            self.window_closed_to_tray = true;
+            self.remember_list_scroll();
+            let close = iced::window::latest().and_then(iced::window::close);
+            return close.chain(self.show_window_task(wayland));
+        }
         if std::mem::take(&mut self.window_closed_to_tray) {
             let (width, height) = layout::clamped_window(
                 self.preferences.window_width,
@@ -3911,8 +3942,8 @@ mod tests {
     }
 
     use super::{
-        App, Message, Page, PlaybackState, Preference, bounded_queue_context, should_close_to_tray,
-        worker_thread_count,
+        App, Message, Page, PlaybackState, Preference, bounded_queue_context, reopens_to_show,
+        should_close_to_tray, worker_thread_count,
     };
     use std::sync::Arc;
     use std::time::Duration;
@@ -3930,6 +3961,48 @@ mod tests {
         assert!(should_close_to_tray(true, true));
         assert!(!should_close_to_tray(false, true));
         assert!(!should_close_to_tray(true, false));
+    }
+
+    #[test]
+    fn on_wayland_a_window_that_is_not_in_front_opens_anew_to_be_shown() {
+        // Behind other windows, minimized, or not yet told.
+        assert!(reopens_to_show(true, Some(false), false));
+        assert!(reopens_to_show(true, Some(true), true));
+        assert!(reopens_to_show(true, None, false));
+        // Already in front: nothing to do.
+        assert!(!reopens_to_show(true, Some(true), false));
+        // Elsewhere the window is raised and restored where it is.
+        assert!(!reopens_to_show(false, Some(false), true));
+    }
+
+    #[test]
+    fn showing_a_window_behind_others_on_wayland_closes_it_and_opens_a_new_one() {
+        use iced::widget::operation::AbsoluteOffset;
+        let mut app = App {
+            window_focused: Some(false),
+            library_scroll: AbsoluteOffset { x: 0.0, y: 640.0 },
+            ..App::default()
+        };
+        let task = app.show_window_task(true);
+        assert!(task.units() > 0);
+        // The new window is on its way, and its lists will stand where these stood.
+        assert!(!app.window_closed_to_tray);
+        assert_eq!(
+            app.scroll_before_tray
+                .as_ref()
+                .map(|scroll| scroll.library.y),
+            Some(640.0)
+        );
+        drop(app.update(Message::WindowOpened(iced::window::Id::unique())));
+        assert_eq!(app.library_scroll.y, 640.0);
+
+        // A window already in front stays as it is.
+        let mut front = App {
+            window_focused: Some(true),
+            ..App::default()
+        };
+        drop(front.show_window_task(true));
+        assert!(front.scroll_before_tray.is_none());
     }
 
     #[test]
