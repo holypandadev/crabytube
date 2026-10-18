@@ -73,6 +73,12 @@ pub(super) enum Message {
         total: u64,
     },
     UpdateDownloaded(Result<std::path::PathBuf, crate::updater::UpdateError>),
+    /// The window moved: its new top left corner, in the interface's units.
+    WindowMoved(iced::Point),
+    /// The window has not moved again since the move of this count.
+    WindowMoveSettled(u64),
+    /// Opens Settings at its Updates section, from the link on Home.
+    OpenUpdates,
     /// How far the Flatpak portal has got with the update.
     FlatpakUpdateProgress(crate::updater::FlatpakProgress),
     /// Starts the version the Flatpak portal installed, and quits.

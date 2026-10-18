@@ -35,6 +35,7 @@ impl App {
             Some(QueueSource {
                 title,
                 track_count,
+                more,
                 browse: Some(browse),
                 thumbnail_url,
                 album,
@@ -42,6 +43,7 @@ impl App {
                 title: title.clone(),
                 browse: browse.clone(),
                 track_count: *track_count,
+                more: *more,
                 thumbnail_url: thumbnail_url.clone(),
                 album: *album,
             }),

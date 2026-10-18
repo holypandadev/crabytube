@@ -109,6 +109,7 @@ const ENGLISH_COUNTS: &[(&str, &str)] = &[
     ("{#} results for {}", "{0} {0:result|results} for {1}"),
     ("{#} saved tracks", "{0} saved {0:track|tracks}"),
     ("{#} songs", "{0} {0:song|songs}"),
+    ("{#}+ songs", "{0}+ songs"),
     (
         "Brings {} favorites and {} queued songs, plus its settings.",
         "Brings {0} {0:favorite|favorites} and {1} queued {1:song|songs}, plus its settings.",
@@ -492,6 +493,12 @@ mod tests {
     fn a_count_takes_the_plural_form_of_the_language() {
         assert_eq!(translate(UiLanguage::Spanish, "1 songs"), "1 canción");
         assert_eq!(translate(UiLanguage::Spanish, "12 songs"), "12 canciones");
+        // A list with more tracks than the ones loaded.
+        assert_eq!(
+            translate(UiLanguage::Spanish, "100+ songs"),
+            "100+ canciones"
+        );
+        assert_eq!(translate(UiLanguage::English, "100+ songs"), "100+ songs");
         assert_eq!(
             [1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111].map(russian_plural),
             [0, 1, 1, 2, 2, 2, 2, 0, 1, 2, 0, 2]

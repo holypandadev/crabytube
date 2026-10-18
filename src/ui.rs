@@ -203,6 +203,8 @@ struct App {
     artwork_low_memory: bool,
     scroll_preload_pending: bool,
     resize_work_generation: u64,
+    /// Counts window moves, so the place is saved once the window stays still.
+    move_save_generation: u64,
     /// Set when the window opened at a saved size that has not been compared with the monitor yet.
     saved_window_unchecked: bool,
     scroll_preload_timer: bool,
@@ -330,6 +332,8 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::FlatpakUpdateProgress(_)
         | Message::RestartStarted(_)
         | Message::Resized { .. }
+        | Message::WindowMoved(_)
+        | Message::WindowMoveSettled(_)
         | Message::WindowGeometry { .. }
         | Message::MonitorMeasured(_)
         | Message::SavedWindowMeasured { .. }
@@ -1363,6 +1367,37 @@ impl App {
                     return Task::batch([navigation, storage_task, devices_task]);
                 }
                 return self.navigate(page);
+            }
+            Message::WindowMoved(position) => {
+                // A minimized window on Windows sits at -32000, and a maximized one at its edge:
+                // neither is the place to open at.
+                let placed = !self.window_minimized
+                    && !self.window_hidden_to_tray
+                    && !self.preferences.window_maximized
+                    && position.x > -10_000.0
+                    && position.y > -10_000.0;
+                if placed {
+                    // In the system's points, which the next window opens in.
+                    self.preferences.window_position =
+                        Some((position.x * self.ui_zoom, position.y * self.ui_zoom));
+                    // Saved once, when the window has stayed still for a moment.
+                    self.move_save_generation = self.move_save_generation.wrapping_add(1);
+                    let generation = self.move_save_generation;
+                    return Task::perform(
+                        async { tokio::time::sleep(Duration::from_secs(1)).await },
+                        move |()| Message::WindowMoveSettled(generation),
+                    );
+                }
+            }
+            Message::WindowMoveSettled(generation) => {
+                if generation == self.move_save_generation {
+                    self.persist();
+                }
+            }
+            Message::OpenUpdates => {
+                let open = self.update(Message::Navigate(Page::Settings));
+                // Updates is the last section but About, so the end of the page shows it.
+                return Task::batch([open, operation::snap_to_end("settings-content")]);
             }
             Message::OpenNowPlaying => {
                 if self.shown_track().is_some() {
@@ -2446,6 +2481,7 @@ impl App {
             artwork_low_memory: false,
             scroll_preload_pending: false,
             resize_work_generation: 0,
+            move_save_generation: 0,
             saved_window_unchecked: false,
             scroll_preload_timer: false,
             #[cfg(feature = "diagnostics")]
@@ -2625,6 +2661,17 @@ impl App {
 
     fn tr_static(&self, source: &'static str) -> &'static str {
         crate::i18n::translate_static(self.preferences.ui_language, source)
+    }
+
+    /// "12 songs", or "100+ songs" for a list with more tracks than the ones loaded.
+    fn song_count(&self, count: usize, more: bool) -> String {
+        if more {
+            self.tr_string(format!("{count}+ songs"))
+        } else if count == 1 {
+            self.tr_static("1 song").to_owned()
+        } else {
+            self.tr_string(format!("{count} songs"))
+        }
     }
 
     fn tr_string(&self, source: String) -> String {
@@ -3781,6 +3828,8 @@ pub(super) struct QueueSource {
     pub title: String,
     /// Full size of the source list, which can exceed the queue's capped length.
     pub track_count: usize,
+    /// The list has more tracks than the ones loaded, which `track_count` counts.
+    pub more: bool,
     /// Where the list opens from, when it is an album or playlist that can be opened again.
     pub browse: Option<crate::music::BrowseTarget>,
     pub thumbnail_url: Option<String>,
@@ -3878,13 +3927,26 @@ fn main_window_settings(
     maximized: bool,
     centered: bool,
 ) -> iced::window::Settings {
+    // Where the window was left, while that place is still on a screen. The width is the saved
+    // one, in the system's points, like the position.
+    let saved = startup_state().as_ref().ok().and_then(|snapshot| {
+        let preferences = &snapshot.preferences;
+        let (x, y) = preferences.window_position?;
+        crate::screens::reachable(
+            (f64::from(x), f64::from(y)),
+            f64::from(preferences.window_width),
+            &crate::screens::visible_areas(),
+        )
+    });
     iced::window::Settings {
         size,
         maximized,
-        position: if centered {
-            iced::window::Position::Centered
-        } else {
-            iced::window::Position::Default
+        position: match saved {
+            Some((x, y)) if !centered => {
+                iced::window::Position::Specific(iced::Point::new(x as f32, y as f32))
+            }
+            _ if centered => iced::window::Position::Centered,
+            _ => iced::window::Position::Default,
         },
         min_size: Some(iced::Size::new(layout::MIN_WIDTH, layout::MIN_HEIGHT)),
         icon: window_icon(),
@@ -4289,6 +4351,7 @@ mod tests {
             queue_source: Some(super::QueueSource {
                 title: "Long Mix".into(),
                 track_count: 5000,
+                more: false,
                 browse: None,
                 thumbnail_url: None,
                 album: false,
@@ -4312,6 +4375,7 @@ mod tests {
             queue_source: Some(super::QueueSource {
                 title: "Soundtrack".into(),
                 track_count: 64,
+                more: false,
                 browse: Some(crate::music::BrowseTarget {
                     browse_id: "VLPLsoundtrack".into(),
                     params: None,
@@ -4630,6 +4694,7 @@ mod tests {
             queue_source: Some(super::QueueSource {
                 title: "Old album".into(),
                 track_count: 9,
+                more: false,
                 browse: None,
                 thumbnail_url: None,
                 album: true,
@@ -6087,6 +6152,35 @@ mod tests {
                 .get_exact(last.unwrap_or_default(), side)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn the_window_place_is_kept_only_where_the_window_can_open_again() {
+        let mut app = App {
+            ui_zoom: 1.25,
+            ..App::default()
+        };
+        // Kept in the system's points: the interface's units times the zoom.
+        assert!(
+            app.update(Message::WindowMoved(iced::Point::new(80.0, 40.0)))
+                .units()
+                > 0
+        );
+        assert_eq!(app.preferences.window_position, Some((100.0, 50.0)));
+        // A minimized window on Windows sits at -32000; a maximized or minimized one is not where
+        // the window opens.
+        drop(app.update(Message::WindowMoved(iced::Point::new(-32000.0, -32000.0))));
+        app.window_minimized = true;
+        drop(app.update(Message::WindowMoved(iced::Point::new(0.0, 0.0))));
+        app.window_minimized = false;
+        app.preferences.window_maximized = true;
+        drop(app.update(Message::WindowMoved(iced::Point::new(-8.0, -8.0))));
+        assert_eq!(app.preferences.window_position, Some((100.0, 50.0)));
+        // Only the last move of a drag is saved.
+        let earlier = app.move_save_generation;
+        app.preferences.window_maximized = false;
+        drop(app.update(Message::WindowMoved(iced::Point::new(90.0, 40.0))));
+        assert_ne!(app.move_save_generation, earlier);
     }
 
     #[test]

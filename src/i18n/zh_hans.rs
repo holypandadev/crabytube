@@ -453,6 +453,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "将收藏、队列和设置以 JSON 保存到文档文件夹。",
         ),
         (
+            "Favorites, queue and settings as JSON in the app's data folder.",
+            "将收藏、队列和设置以 JSON 保存到应用的数据文件夹。",
+        ),
+        (
             "Sanitized report without tokens or URLs.",
             "不含令牌和网址的报告。",
         ),
@@ -504,6 +508,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("{#} results for {}", "“{1}”的搜索结果：{0} 项"),
         ("{#} saved tracks", "已收藏 {0} 首歌曲"),
         ("{#} songs", "{0} 首歌曲"),
+        ("{#}+ songs", "{0}+ 首歌曲"),
         ("{cache} is already empty.", "{0}：已为空。"),
         (
             "Cleared {cache} ({} MiB removed).",

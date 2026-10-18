@@ -720,17 +720,87 @@ pub fn run_scheduled_install() {
             .ok()
             .and_then(|mut scheduled| scheduled.take());
         if let Some(package) = package {
-            match std::process::Command::new(msiexec())
-                .arg("/i")
-                .arg(&package)
-                .args(["/passive", "/norestart"])
-                .spawn()
-            {
-                Ok(_) => tracing::info!("the installer of the update started"),
-                Err(error) => tracing::error!(%error, "the installer of the update did not start"),
+            match install_and_reopen_on_failure(&package) {
+                Ok(()) => tracing::info!("the installer of the update started"),
+                Err(error) => {
+                    tracing::warn!(%error, "the installer's watcher did not start; running it alone");
+                    match std::process::Command::new(msiexec())
+                        .arg("/i")
+                        .arg(&package)
+                        .args(["/passive", "/norestart"])
+                        .spawn()
+                    {
+                        Ok(_) => tracing::info!("the installer of the update started"),
+                        Err(error) => {
+                            tracing::error!(%error, "the installer of the update did not start")
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/// Waits for the Windows Installer and, when it did not finish the update (an error, or the
+/// user cancelled it), opens the version that was running, so that the app never just goes away.
+/// A finished install opens the new version itself (see `packaging/windows/crabytube.wxs`); 1641
+/// and 3010 are installs that finished and only ask for a restart of Windows. The paths reach the
+/// script through the environment, so no quoting of them is needed.
+#[cfg(any(windows, test))]
+const INSTALL_AND_REOPEN: &str = "$p = Start-Process -FilePath $env:CRABYTUBE_MSIEXEC \
+    -ArgumentList '/i', ('\"' + $env:CRABYTUBE_PACKAGE + '\"'), '/passive', '/norestart' \
+    -Wait -PassThru; \
+    if (@(0, 1641, 3010) -notcontains $p.ExitCode) { Start-Process -FilePath $env:CRABYTUBE_APP }";
+
+/// Runs the installer through Windows PowerShell, without a window of its own (`INSTALL_AND_REOPEN`).
+#[cfg(windows)]
+fn install_and_reopen_on_failure(package: &Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let powershell = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let app = std::env::current_exe()?;
+    // Encoded, the script reaches PowerShell as it is written, whatever quotes it holds.
+    std::process::Command::new(powershell)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            &encoded_command(INSTALL_AND_REOPEN),
+        ])
+        .env("CRABYTUBE_MSIEXEC", msiexec())
+        .env("CRABYTUBE_PACKAGE", package)
+        .env("CRABYTUBE_APP", app)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(drop)
+}
+
+/// A script as PowerShell's `-EncodedCommand` takes it: Base64 of its UTF-16LE text.
+#[cfg(any(windows, test))]
+fn encoded_command(script: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let group = (u32::from(chunk[0]) << 16)
+            | (u32::from(chunk.get(1).copied().unwrap_or(0)) << 8)
+            | u32::from(chunk.get(2).copied().unwrap_or(0));
+        for index in 0..4 {
+            if index <= chunk.len() {
+                encoded.push(char::from(
+                    ALPHABET[(group >> (18 - 6 * index)) as usize & 63],
+                ));
+            } else {
+                encoded.push('=');
+            }
+        }
+    }
+    encoded
 }
 
 /// Unpacks the new app beside the running one, swaps the two, and leaves a script that opens the
@@ -1085,6 +1155,41 @@ mod tests {
             error("org.freedesktop.DBus.Error.Failed", "No remote refs found"),
             FlatpakProgress::Failed("No remote refs found".into())
         );
+    }
+
+    #[test]
+    fn the_installer_script_reaches_powershell_encoded() {
+        // "Hi" in UTF-16LE is 48 00 69 00.
+        assert_eq!(encoded_command("Hi"), "SABpAA==");
+        assert_eq!(encoded_command("abc"), "YQBiAGMA");
+        // The script itself reads its paths from the environment and reopens the app only when
+        // the installer did not finish.
+        assert!(INSTALL_AND_REOPEN.contains("$env:CRABYTUBE_PACKAGE"));
+        assert!(INSTALL_AND_REOPEN.contains("@(0, 1641, 3010) -notcontains $p.ExitCode"));
+        let decoded: Vec<u16> = {
+            let text = encoded_command(INSTALL_AND_REOPEN);
+            let value = |c: u8| {
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+                    .iter()
+                    .position(|&a| a == c)
+                    .unwrap() as u32
+            };
+            let mut bytes = Vec::new();
+            for quad in text.as_bytes().chunks(4) {
+                let group = quad
+                    .iter()
+                    .filter(|&&c| c != b'=')
+                    .fold(0_u32, |group, &c| (group << 6) | value(c))
+                    << (6 * quad.iter().filter(|&&c| c == b'=').count());
+                let kept = 3 - quad.iter().filter(|&&c| c == b'=').count();
+                bytes.extend_from_slice(&group.to_be_bytes()[1..1 + kept]);
+            }
+            bytes
+                .chunks(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect()
+        };
+        assert_eq!(String::from_utf16(&decoded).unwrap(), INSTALL_AND_REOPEN);
     }
 
     #[test]

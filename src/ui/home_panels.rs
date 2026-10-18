@@ -337,11 +337,7 @@ impl App {
                     "Playlist"
                 })
                 .to_owned(),
-                if collection.track_count == 1 {
-                    self.tr_static("1 song").to_owned()
-                } else {
-                    self.tr_string(format!("{} songs", collection.track_count))
-                },
+                self.song_count(collection.track_count, collection.more),
                 Message::OpenCollection(collection.browse.clone()),
             ),
         };
@@ -400,7 +396,7 @@ impl App {
                     .size(TEXT_CAPTION)
                     .font(MONO),
             )
-            .on_press(Message::Navigate(super::Page::Settings))
+            .on_press(Message::OpenUpdates)
             .padding(0)
             .style(theme::text_link(theme::INK))
             .into()

@@ -188,6 +188,7 @@ impl App {
                 let source = QueueSource {
                     title: data.title.clone(),
                     track_count: data.tracks.len(),
+                    more: data.continuation.is_some(),
                     browse: Some(target.clone()),
                     thumbnail_url: data.thumbnail_url.clone(),
                     album: target.page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ALBUM"),

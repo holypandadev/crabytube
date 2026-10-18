@@ -25,6 +25,9 @@ const STACK_ROWS_BELOW: f32 = 520.0;
 /// the column choice; nothing is sized from them.
 const BOX_CHROME_ESTIMATE: f32 = 80.0;
 const ROW_ESTIMATE: f32 = 64.0;
+/// The language drop-down fits the longest name, "Português (Brasil)", at any window size:
+/// eighteen monospaced characters, the padding and the arrow.
+const LANGUAGE_PICKER_WIDTH: f32 = 204.0;
 
 /// A settings box with its row count, which estimates its height for the column layout.
 struct Section<'a> {
@@ -380,8 +383,10 @@ impl App {
         (box_width * 0.4).clamp(120.0, 220.0).floor()
     }
 
-    fn picker<'a, T>(
+    /// A drop-down that is never narrower than `minimum`, for options that must show in full.
+    fn picker_at_least<'a, T>(
         &self,
+        minimum: f32,
         options: Vec<T>,
         selected: Option<T>,
         on_select: impl Fn(T) -> Message + 'a,
@@ -393,7 +398,7 @@ impl App {
             .font(MONO)
             .text_size(TEXT_BODY)
             .padding([8, 12])
-            .width(self.picker_width())
+            .width(self.picker_width().max(minimum))
             .style(theme::pick_style)
             .menu_style(theme::menu_style)
             .into()
@@ -408,9 +413,12 @@ impl App {
                 self.setting(
                     "Language",
                     None,
-                    self.picker(UiLanguage::ALL.to_vec(), Some(p.ui_language), |value| {
-                        Message::Preference(Preference::UiLanguage(value))
-                    }),
+                    self.picker_at_least(
+                        LANGUAGE_PICKER_WIDTH,
+                        UiLanguage::ALL.to_vec(),
+                        Some(p.ui_language),
+                        |value| Message::Preference(Preference::UiLanguage(value)),
+                    ),
                     width,
                 ),
                 self.setting(
@@ -783,7 +791,16 @@ impl App {
                 ),
                 _ => self.setting(
                     "Local data",
-                    Some("Favorites, queue and settings as JSON in Documents.".into()),
+                    // The Flatpak cannot reach Documents and writes the file in its own data
+                    // folder, which the notice after an export names in full.
+                    Some(
+                        if crate::flatpak::in_flatpak() {
+                            "Favorites, queue and settings as JSON in the app's data folder."
+                        } else {
+                            "Favorites, queue and settings as JSON in Documents."
+                        }
+                        .into(),
+                    ),
                     row![
                         action("Export", Message::ExportLocalData),
                         action("Import", Message::ImportLocalData),

@@ -115,6 +115,10 @@ impl App {
             iced::window::events().filter_map(|(_, event)| match event {
                 iced::window::Event::Focused => Some(Message::WindowFocusChanged(true)),
                 iced::window::Event::Unfocused => Some(Message::WindowFocusChanged(false)),
+                // Linux compositors place windows themselves, so the place is kept elsewhere only.
+                iced::window::Event::Moved(position) if !cfg!(target_os = "linux") => {
+                    Some(Message::WindowMoved(position))
+                }
                 _ => None,
             }),
             iced::window::resize_events().map(|(_, size)| Message::Resized {

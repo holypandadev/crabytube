@@ -233,7 +233,7 @@ impl App {
         // radio queues have no meaningful source to show.
         if let Some(source) = &self.queue_source {
             meta.push(source.title.clone());
-            meta.push(self.tr_string(format!("{} songs", source.track_count)));
+            meta.push(self.song_count(source.track_count, source.more));
         }
         // A failed track says why here too: this page has no player bar to show it.
         let details = match self.playback_failure() {

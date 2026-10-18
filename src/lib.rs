@@ -20,6 +20,7 @@ pub mod memory;
 pub mod preferences;
 pub mod process_stats;
 pub mod runtime_cache;
+pub mod screens;
 pub mod single_instance;
 pub mod storage;
 pub mod system_language;

@@ -331,6 +331,10 @@ pub struct Preferences {
     pub window_height: f32,
     /// Whether the window was maximized when the app last ran.
     pub window_maximized: bool,
+    /// Where the window was last left, its top left corner in logical points, on Windows and
+    /// macOS. Linux compositors place windows themselves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_position: Option<(f32, f32)>,
     /// Obsolete: no longer read or written; kept so older state files still load.
     #[serde(skip_serializing)]
     pub ui_font_family: UiFontFamily,
@@ -391,6 +395,7 @@ impl Default for Preferences {
                 900.0
             },
             window_maximized: false,
+            window_position: None,
             ui_font_family: UiFontFamily::default(),
             ui_language: UiLanguage::default(),
             ui_density: UiDensity::default(),
@@ -486,6 +491,9 @@ pub struct RecentCollection {
     pub browse: BrowseTarget,
     /// Tracks in the collection when it started playing.
     pub track_count: usize,
+    /// The collection had more tracks than the ones loaded, which `track_count` counts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub more: bool,
     pub thumbnail_url: Option<String>,
     /// Albums are labelled as such; other collections are labelled as playlists.
     #[serde(default)]
@@ -543,6 +551,12 @@ impl Snapshot {
             .preferences
             .window_height
             .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
+        // A position no screen can have is no position: the system places the window.
+        if self.preferences.window_position.is_some_and(|(x, y)| {
+            !(x.is_finite() && y.is_finite() && x.abs() < 1e5 && y.abs() < 1e5)
+        }) {
+            self.preferences.window_position = None;
+        }
         self.preferences.lyrics_offset_ms = self.preferences.lyrics_offset_ms.clamp(-5000, 5000);
         self.preferences.lyrics_font_size = self.preferences.lyrics_font_size.clamp(12.0, 26.0);
         if self
@@ -1059,6 +1073,7 @@ mod tests {
                 page_type: None,
             },
             track_count: 3,
+            more: false,
             thumbnail_url: None,
             album: false,
         };

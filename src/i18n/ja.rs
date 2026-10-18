@@ -513,6 +513,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "お気に入り、キュー、設定を JSON として書類フォルダーに保存します。",
         ),
         (
+            "Favorites, queue and settings as JSON in the app's data folder.",
+            "お気に入り、キュー、設定を JSON としてアプリのデータフォルダーに保存します。",
+        ),
+        (
             "Sanitized report without tokens or URLs.",
             "トークンや URL を含まないレポートです。",
         ),
@@ -573,6 +577,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("{#} results for {}", "「{1}」の検索結果：{0}件"),
         ("{#} saved tracks", "保存した曲：{0}曲"),
         ("{#} songs", "{0}曲"),
+        ("{#}+ songs", "{0}+曲"),
         ("{cache} is already empty.", "{0}：すでに空です。"),
         (
             "Cleared {cache} ({} MiB removed).",

@@ -525,6 +525,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Preferiti, coda e impostazioni come JSON in Documenti.",
         ),
         (
+            "Favorites, queue and settings as JSON in the app's data folder.",
+            "Preferiti, coda e impostazioni come JSON nella cartella dei dati dell'app.",
+        ),
+        (
             "Sanitized report without tokens or URLs.",
             "Rapporto senza token né URL.",
         ),
@@ -585,6 +589,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("{#} results for {}", "{0} {0:risultato|risultati} per {1}"),
         ("{#} saved tracks", "{0} {0:brano salvato|brani salvati}"),
         ("{#} songs", "{0} {0:brano|brani}"),
+        ("{#}+ songs", "{0}+ brani"),
         ("{cache} is already empty.", "{0}: niente da cancellare."),
         (
             "Cleared {cache} ({} MiB removed).",

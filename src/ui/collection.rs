@@ -240,6 +240,7 @@ impl App {
         let queue_source = super::QueueSource {
             title: data.title.clone(),
             track_count: data.tracks.len(),
+            more: data.continuation.is_some(),
             browse,
             thumbnail_url: data.thumbnail_url.clone(),
             album,
