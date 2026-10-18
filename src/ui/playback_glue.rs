@@ -617,8 +617,18 @@ impl App {
             artist: track.map(|track| track.artist.clone()),
             album: track.and_then(|track| track.album.clone()),
             art_url: track.and_then(|track| track.thumbnail_url.clone()),
+            // A track that loads, or the moment between two tracks, is still playing for the
+            // system: reported as stopped, its controls would blink at every change of track.
             playback_status: match self.playback_status.state {
-                PlaybackState::Playing | PlaybackState::Buffering | PlaybackState::Seeking => {
+                PlaybackState::Playing
+                | PlaybackState::Buffering
+                | PlaybackState::Seeking
+                | PlaybackState::Resolving => "Playing",
+                PlaybackState::Finished
+                    if self.next_queue_index().is_some()
+                        || self.repeat != RepeatMode::Off
+                        || self.autoplay =>
+                {
                     "Playing"
                 }
                 PlaybackState::Paused => "Paused",
@@ -712,7 +722,8 @@ impl App {
                 Task::none()
             }
             RemoteCommand::SeekBy(offset) => {
-                let current = self.playback_status.position.as_micros() as i128;
+                // From where playback is now: out of sight the shown position moves only slowly.
+                let current = self.playback.status().position.as_micros() as i128;
                 let mut target = (current + offset as i128).max(0) as u128;
                 if let Some(duration) = self.playback_status.duration {
                     target = target.min(duration.as_micros());
@@ -954,8 +965,9 @@ impl App {
             }
             Message::PrevTrack => {
                 if let Some(prev) = self.prev_queue_index() {
-                    // If more than 3s into the song, restart it instead of going back.
-                    if self.playback_status.position.as_secs() > 3 && self.queue_index.is_some() {
+                    // If more than 3s into the song, restart it instead of going back. The position
+                    // is read from playback, since out of sight the shown one moves only slowly.
+                    if self.playback.status().position.as_secs() > 3 && self.queue_index.is_some() {
                         self.seek_playback(Duration::ZERO);
                         self.seek_preview = None;
                     } else {
