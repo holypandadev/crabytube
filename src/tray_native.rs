@@ -127,6 +127,8 @@ impl TrayRemote {
         if NATIVE.with(|native| native.borrow().is_some()) {
             return Ok(true);
         }
+        #[cfg(target_os = "macos")]
+        answer_reopen(self.sender.clone());
         let language = crate::i18n::current_language();
         let menu = Menu::new();
         let mut items = Vec::new();
@@ -183,6 +185,67 @@ impl TrayRemote {
     pub fn detach(&self) {
         if let Some(native) = NATIVE.with(|native| native.borrow_mut().take()) {
             let _ = native.icon.set_visible(false);
+        }
+    }
+}
+
+/// A click on the Dock icon, or opening the app again from the Finder or Spotlight, asks the app
+/// delegate to reopen. The delegate winit sets does not answer, so a window hidden to the menu bar
+/// would stay hidden: the answer is added to its class, and shows the window.
+#[cfg(target_os = "macos")]
+fn answer_reopen(sender: UnboundedSender<TrayCommand>) {
+    use objc2::{
+        Encode, class, ffi, msg_send,
+        runtime::{AnyObject, Bool, Imp, Sel},
+        sel,
+    };
+    static REOPEN: std::sync::OnceLock<UnboundedSender<TrayCommand>> = std::sync::OnceLock::new();
+    extern "C-unwind" fn reopen(
+        _delegate: *mut AnyObject,
+        _command: Sel,
+        _application: *mut AnyObject,
+        has_visible_windows: Bool,
+    ) -> Bool {
+        // Hidden and minimized windows do not count as visible.
+        if !has_visible_windows.as_bool()
+            && let Some(sender) = REOPEN.get()
+        {
+            let _ = sender.send(TrayCommand::ShowWindow);
+        }
+        // AppKit then does what it does by default, such as bringing back a minimized window.
+        Bool::YES
+    }
+    if REOPEN.set(sender).is_err() {
+        return;
+    }
+    let Ok(types) = std::ffi::CString::new(format!("{}@:@{}", Bool::ENCODING, Bool::ENCODING))
+    else {
+        return;
+    };
+    // SAFETY: this runs on the main thread once the application has started. The function has the
+    // signature `types` names, which is the one AppKit calls
+    // `applicationShouldHandleReopen:hasVisibleWindows:` with.
+    unsafe {
+        let application: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let delegate: *mut AnyObject = msg_send![application, delegate];
+        if delegate.is_null() {
+            return;
+        }
+        let reopen: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, Bool) -> Bool =
+            reopen;
+        let imp = std::mem::transmute::<
+            extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, Bool) -> Bool,
+            Imp,
+        >(reopen);
+        let added = ffi::class_addMethod(
+            ffi::object_getClass(delegate).cast_mut(),
+            sel!(applicationShouldHandleReopen:hasVisibleWindows:),
+            imp,
+            types.as_ptr(),
+        );
+        if added.as_bool() {
+            // AppKit notes which questions a delegate answers when the delegate is set.
+            let _: () = msg_send![application, setDelegate: delegate];
         }
     }
 }

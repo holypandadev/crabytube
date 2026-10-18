@@ -129,8 +129,9 @@ there.
 - **The Windows zip** does not update itself: **Download page** opens the release page. Extract the
   new zip over the old folder.
 - **Linux (Flatpak)**: **Update now** downloads the new `.flatpak`, checks it and opens it in your
-  software center (Discover, GNOME Software), where you install it; then open CrabyTube again. The
-  Flatpak has no way to install a package itself. Versions before 0.1.2 do not check: install 0.1.2
+  software center (Discover, GNOME Software), where you install it. Then quit CrabyTube (**Quit** in
+  the tray menu) and open it again: until then the old version keeps running. The Flatpak has no way
+  to install a package itself. Versions before 0.1.2 do not check: install 0.1.2
   the same way as the first one.
 
 Settings, favorites, the queue and the history are kept apart from the app, so an update leaves

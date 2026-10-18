@@ -23,8 +23,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Installing the update…", "Instalando la actualización…"),
         (
-            "Install version {} in the window that opened, then open CrabyTube again.",
-            "Instala la versión {} en la ventana que se abrió y luego vuelve a abrir CrabyTube.",
+            "Install version {} in the window that opened, then quit CrabyTube and open it again.",
+            "Instala la versión {} en la ventana que se abrió; luego sal de CrabyTube y vuelve a abrirlo.",
         ),
         ("Update available", "Actualización disponible"),
         (

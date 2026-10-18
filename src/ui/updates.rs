@@ -280,7 +280,7 @@ impl App {
             // The page stays at hand in case no software center opened the package.
             UpdateState::HandedOver(available) => (
                 self.tr_static(
-                    "Install version {} in the window that opened, then open CrabyTube again.",
+                    "Install version {} in the window that opened, then quit CrabyTube and open it again.",
                 )
                 .replacen("{}", &available.version, 1),
                 Some((self.tr_static("Download page"), Message::OpenUpdatePage)),

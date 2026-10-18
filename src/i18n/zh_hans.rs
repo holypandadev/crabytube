@@ -20,8 +20,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Downloading version {}… {}%", "正在下载版本 {}… {}%"),
         ("Installing the update…", "正在安装更新…"),
         (
-            "Install version {} in the window that opened, then open CrabyTube again.",
-            "请在打开的窗口中安装版本 {}，然后重新打开 CrabyTube。",
+            "Install version {} in the window that opened, then quit CrabyTube and open it again.",
+            "请在打开的窗口中安装版本 {}，然后退出 CrabyTube 并重新打开。",
         ),
         ("Update available", "有可用更新"),
         (

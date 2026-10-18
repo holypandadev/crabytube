@@ -29,8 +29,8 @@ pub(super) static CATALOG: Catalog = Catalog {
             "アップデートをインストールしています…",
         ),
         (
-            "Install version {} in the window that opened, then open CrabyTube again.",
-            "開いたウィンドウでバージョン {} をインストールしてから、CrabyTube を開き直してください。",
+            "Install version {} in the window that opened, then quit CrabyTube and open it again.",
+            "開いたウィンドウでバージョン {} をインストールしてから、CrabyTube を終了して開き直してください。",
         ),
         ("Update available", "アップデートがあります"),
         (

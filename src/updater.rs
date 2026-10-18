@@ -393,6 +393,12 @@ fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
+/// The name of a downloaded Flatpak, which the software center installs from.
+const FLATPAK_DOWNLOAD: &str = "CrabyTube-update.flatpak";
+
+/// How long a downloaded Flatpak is kept for the software center.
+const HANDED_OVER_KEPT: Duration = Duration::from_secs(24 * 3600);
+
 /// The folder downloads go to before they are installed. It is emptied before each download.
 fn download_folder() -> Result<PathBuf, UpdateError> {
     crate::app_dirs::cache_dir()
@@ -402,10 +408,18 @@ fn download_folder() -> Result<PathBuf, UpdateError> {
 
 /// Removes what an earlier update downloaded. By the time the new version starts, the installer has
 /// its own copy, so the download only takes room. A file still open is left for the next start.
+/// A `.flatpak` waits a day: the software center reads it when its Install is clicked, which may
+/// come after CrabyTube was opened again.
 pub fn remove_old_downloads() {
     let Ok(folder) = download_folder() else {
         return;
     };
+    let handed_over = std::fs::metadata(folder.join(FLATPAK_DOWNLOAD))
+        .and_then(|metadata| metadata.modified())
+        .is_ok_and(|modified| modified.elapsed().unwrap_or_default() < HANDED_OVER_KEPT);
+    if handed_over {
+        return;
+    }
     if folder.exists() {
         match std::fs::remove_dir_all(&folder) {
             Ok(()) => tracing::info!("removed the download of an installed update"),
@@ -428,7 +442,7 @@ pub async fn download(
         .map_err(|error| UpdateError::Storage(error.to_string()))?;
     let name = match package.kind.as_str() {
         "windows-msi" => "CrabyTube-update.msi",
-        "linux-flatpak" => "CrabyTube-update.flatpak",
+        "linux-flatpak" => FLATPAK_DOWNLOAD,
         _ => "CrabyTube-update.zip",
     };
     let path = folder.join(name);

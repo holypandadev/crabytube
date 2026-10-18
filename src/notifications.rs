@@ -136,16 +136,29 @@ async fn send(notice: &TrackNotice) -> zbus::Result<u32> {
 
 /// Sends the notice through the notification portal. The portal shows plain text, so the title and
 /// the artist go as written. The cover goes as bytes, because the portal cannot open a path inside
-/// the sandbox's cache.
+/// the sandbox's cache. A portal that turns the cover down, as newer ones do with an image larger
+/// than they take, gets the notice again with the app icon.
 #[cfg(target_os = "linux")]
 async fn send_portal(notice: &TrackNotice) -> zbus::Result<()> {
-    use std::collections::HashMap;
-    use zbus::zvariant::Value;
-
     let cover = notice
         .cover
         .as_ref()
         .and_then(|path| std::fs::read(path).ok());
+    let with_cover = cover.is_some();
+    match add_portal_notice(notice, cover).await {
+        Err(error) if with_cover => {
+            tracing::debug!(%error, "the portal turned the notice down; sending it without the cover");
+            add_portal_notice(notice, None).await
+        }
+        sent => sent,
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn add_portal_notice(notice: &TrackNotice, cover: Option<Vec<u8>>) -> zbus::Result<()> {
+    use std::collections::HashMap;
+    use zbus::zvariant::Value;
+
     let connection = session().await?;
     let mut fields: HashMap<&str, Value<'_>> = HashMap::new();
     fields.insert("title", Value::from(notice.title.as_str()));

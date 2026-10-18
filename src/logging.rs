@@ -1,16 +1,17 @@
 //! Where the app's log lines go. On Linux they go to stdout, as they always have. Windows and
 //! macOS windowed builds have no terminal to show them, so their lines go to `crabytube.log` in the
 //! local data folder, with URLs redacted. A log that has grown past `MAX_LOG_BYTES` is moved to
-//! `crabytube.log.1` when the app starts, which keeps one earlier copy.
+//! `crabytube.log.1`, which keeps one earlier copy, when the app starts and while it runs: kept in
+//! the tray, it may run for weeks.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tracing_subscriber::EnvFilter;
 
-/// A log file larger than this is moved aside when the app starts.
+/// A log file larger than this is moved aside.
 pub const MAX_LOG_BYTES: u64 = 1024 * 1024;
 
 /// Installs the global subscriber. Call it once, first thing in `main`.
@@ -24,7 +25,7 @@ pub fn init() {
         Some(file) => tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_ansi(false)
-            .with_writer(Mutex::new(RedactingFile::new(file)))
+            .with_writer(Mutex::new(file))
             .init(),
         None => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
@@ -32,7 +33,7 @@ pub fn init() {
 
 /// The log file for this run. `None` on Linux, in diagnostics builds (whose output is read from the
 /// console) and when the file cannot be opened. The lines then go to stdout, the default of `fmt()`.
-fn open_log_file() -> Option<File> {
+fn open_log_file() -> Option<RedactingFile> {
     if cfg!(any(target_os = "linux", feature = "diagnostics")) {
         return None;
     }
@@ -40,9 +41,7 @@ fn open_log_file() -> Option<File> {
         .join("CrabyTube")
         .join("logs");
     fs::create_dir_all(&directory).ok()?;
-    let path = directory.join("crabytube.log");
-    rotate_if_larger(&path, MAX_LOG_BYTES);
-    OpenOptions::new().create(true).append(true).open(path).ok()
+    RedactingFile::open(directory.join("crabytube.log"), MAX_LOG_BYTES)
 }
 
 /// Moves `path` to `path.1` when it is larger than `max_bytes`, replacing the copy there. A failed
@@ -60,18 +59,48 @@ fn rotate_if_larger(path: &Path, max_bytes: u64) {
 }
 
 /// Writes whole lines with their URLs redacted. A line is redacted before it is written, so a URL
-/// that arrives in two pieces is still caught.
+/// that arrives in two pieces is still caught. Past `max_bytes` the file is moved aside and a new
+/// one started.
 struct RedactingFile {
     file: File,
+    path: PathBuf,
+    max_bytes: u64,
+    /// The length of the file, as far as this writer knows.
+    written: u64,
     pending: Vec<u8>,
 }
 
 impl RedactingFile {
-    fn new(file: File) -> Self {
-        Self {
+    fn open(path: PathBuf, max_bytes: u64) -> Option<Self> {
+        rotate_if_larger(&path, max_bytes);
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .ok()?;
+        let written = file.metadata().map_or(0, |metadata| metadata.len());
+        Some(Self {
             file,
+            path,
+            max_bytes,
+            written,
             pending: Vec::new(),
+        })
+    }
+
+    /// Moves the full file aside and goes on in a new one. When the move fails, the same file goes
+    /// on growing until the next attempt, `max_bytes` later.
+    fn start_again(&mut self) {
+        let _ = self.file.flush();
+        rotate_if_larger(&self.path, self.max_bytes);
+        if let Ok(file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
+            self.file = file;
         }
+        self.written = 0;
     }
 }
 
@@ -80,7 +109,12 @@ impl Write for RedactingFile {
         self.pending.extend_from_slice(buf);
         while let Some(end) = self.pending.iter().position(|&byte| byte == b'\n') {
             let line: Vec<u8> = self.pending.drain(..=end).collect();
-            self.file.write_all(redact(&line).as_bytes())?;
+            let line = redact(&line);
+            self.file.write_all(line.as_bytes())?;
+            self.written += line.len() as u64;
+            if self.written > self.max_bytes {
+                self.start_again();
+            }
         }
         Ok(buf.len())
     }
@@ -156,12 +190,7 @@ mod tests {
     fn urls_are_redacted_even_when_a_line_arrives_in_pieces() {
         let dir = scratch("redact");
         let path = dir.join("crabytube.log");
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .unwrap();
-        let mut writer = RedactingFile::new(file);
+        let mut writer = RedactingFile::open(path.clone(), MAX_LOG_BYTES).unwrap();
         writer
             .write_all(b"WARN stream failed: https://rr1.googlevideo.com/videoplayback?")
             .unwrap();
@@ -172,5 +201,21 @@ mod tests {
         assert!(!text.contains("SECRET"), "{text}");
         assert!(text.contains("stream failed: <url>\n"), "{text}");
         assert!(text.ends_with("INFO next line"), "{text}");
+    }
+
+    #[test]
+    fn a_log_that_grows_past_the_limit_while_the_app_runs_starts_again() {
+        let dir = scratch("running");
+        let path = dir.join("crabytube.log");
+        let mut writer = RedactingFile::open(path.clone(), 100).unwrap();
+        for line in 0..30 {
+            writeln!(writer, "INFO line {line}").unwrap();
+        }
+        writer.flush().unwrap();
+        let current = fs::read_to_string(&path).unwrap();
+        let earlier = fs::read_to_string(dir.join("crabytube.log.1")).unwrap();
+        assert!(current.len() <= 100 + 20, "{current}");
+        assert!(earlier.len() <= 100 + 20, "{earlier}");
+        assert!(current.ends_with("INFO line 29\n"), "{current}");
     }
 }
