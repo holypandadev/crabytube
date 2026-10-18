@@ -123,6 +123,7 @@ impl App {
             }),
             iced::keyboard::listen().map(Message::KeyPressed),
             iced::event::listen_with(mouse_navigation),
+            iced::event::listen_with(pointer_held),
             iced::event::listen_with(search_field_escape),
         ])
     }
@@ -160,6 +161,24 @@ fn mouse_navigation(
         }
         iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Forward)) => {
             Some(Message::Forward)
+        }
+        _ => None,
+    }
+}
+
+/// Whether the main mouse button is down, which tells a drag of the seek bar from a change made
+/// with the keys or the wheel.
+fn pointer_held(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    match event {
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
+            Some(Message::PointerHeld(true))
+        }
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+            Some(Message::PointerHeld(false))
         }
         _ => None,
     }

@@ -192,6 +192,10 @@ struct App {
     discord_presence_enabled_last: bool,
     playback_status: PlaybackStatus,
     seek_preview: Option<f32>,
+    /// Counts seek bar changes, so only the last of a series is applied when it settles.
+    seek_change: u64,
+    /// Whether the main mouse button is down, as during a drag of the seek bar.
+    pointer_held: bool,
     artwork: Option<image::Handle>,
     artwork_cache: crate::artwork::ArtworkCache,
     artwork_low_memory: bool,
@@ -314,6 +318,8 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ShowWindowRequested
         | Message::ClockTick
         | Message::SaveStatusCheck
+        | Message::SeekSettled(_)
+        | Message::PointerHeld(_)
         | Message::StatusReading(_)
         | Message::CheckForUpdates { manual: false }
         | Message::UpdateChecked { .. }
@@ -845,6 +851,8 @@ impl App {
             | Message::SetVolume(..)
             | Message::SeekChanged(..)
             | Message::SeekReleased
+            | Message::SeekSettled(..)
+            | Message::PointerHeld(..)
             | Message::PrewarmPlayback
             | Message::PlaybackTick
             | Message::PlaybackStatusChanged(..)
@@ -2397,6 +2405,8 @@ impl App {
             discord_presence_enabled_last: false,
             playback_status: PlaybackStatus::default(),
             seek_preview: None,
+            seek_change: 0,
+            pointer_held: false,
             artwork: None,
             artwork_cache: crate::artwork::ArtworkCache::default(),
             artwork_low_memory: false,
@@ -5794,6 +5804,30 @@ mod tests {
             }));
             assert!(!app.home_on_screen());
         }
+    }
+
+    #[test]
+    fn a_seek_bar_change_without_the_mouse_button_applies_once_it_settles() {
+        let mut app = App::default();
+        // The arrow keys over the bar: no release follows.
+        let task = app.update(Message::SeekChanged(30.0));
+        assert!(task.units() > 0, "a settle is scheduled");
+        drop(app.update(Message::SeekChanged(35.0)));
+        // The first change settles late: a newer one came, so nothing applies yet.
+        drop(app.update(Message::SeekSettled(app.seek_change - 1)));
+        assert_eq!(app.seek_preview, Some(35.0));
+        drop(app.update(Message::SeekSettled(app.seek_change)));
+        assert_eq!(app.seek_preview, None);
+
+        // During a drag the release applies the position, not a settle.
+        drop(app.update(Message::PointerHeld(true)));
+        let task = app.update(Message::SeekChanged(50.0));
+        assert_eq!(task.units(), 0);
+        drop(app.update(Message::SeekSettled(app.seek_change)));
+        assert_eq!(app.seek_preview, Some(50.0));
+        drop(app.update(Message::SeekReleased));
+        drop(app.update(Message::PointerHeld(false)));
+        assert_eq!(app.seek_preview, None);
     }
 
     #[test]

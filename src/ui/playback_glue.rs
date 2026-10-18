@@ -10,6 +10,9 @@ const KARAOKE_MAX_WAIT: Duration = Duration::from_millis(1000);
 /// How long the notice about a seek that failed stays in the player bar.
 const SEEK_NOTICE_TIME: Duration = Duration::from_secs(3);
 
+/// How long a seek bar change made with the keys or the wheel waits for the next before it applies.
+const SEEK_SETTLES_AFTER: Duration = Duration::from_millis(600);
+
 impl App {
     /// Adds the track that just started playing to "Jump back in", once per start. A track that
     /// plays from an album or playlist records that collection instead. Returns whether "Jump
@@ -1042,12 +1045,33 @@ impl App {
                 }
                 self.playback.set_volume(volume);
             }
-            Message::SeekChanged(position) => self.seek_preview = Some(position),
+            Message::SeekChanged(position) => {
+                self.seek_preview = Some(position);
+                self.seek_change = self.seek_change.wrapping_add(1);
+                // A drag ends with its release. A change made without the button, by the arrow keys
+                // or the wheel over the bar, sends none: it is applied once it settles.
+                if !self.pointer_held {
+                    let change = self.seek_change;
+                    return Task::perform(
+                        async { tokio::time::sleep(SEEK_SETTLES_AFTER).await },
+                        move |()| Message::SeekSettled(change),
+                    );
+                }
+            }
             Message::SeekReleased => {
                 if let Some(position) = self.seek_preview.take() {
                     self.seek_playback(Duration::from_secs_f32(position.max(0.0)));
                 }
             }
+            Message::SeekSettled(change) => {
+                if change == self.seek_change
+                    && !self.pointer_held
+                    && let Some(position) = self.seek_preview.take()
+                {
+                    self.seek_playback(Duration::from_secs_f32(position.max(0.0)));
+                }
+            }
+            Message::PointerHeld(held) => self.pointer_held = held,
             Message::PrewarmPlayback => self.playback.prewarm(),
             Message::PlaybackTick => {
                 self.karaoke_tick_pending = false;
@@ -1106,9 +1130,10 @@ impl App {
             Message::StartRadioLoaded {
                 track,
                 generation,
+                request,
                 result,
             } => {
-                return self.start_radio_loaded(track, generation, result);
+                return self.start_radio_loaded(track, generation, request, result);
             }
             _ => unreachable!("update_inner routes only this group here"),
         }

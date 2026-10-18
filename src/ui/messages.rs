@@ -192,6 +192,11 @@ pub(super) enum Message {
     VolumeSaveDue(u64),
     SeekChanged(f32),
     SeekReleased,
+    /// A while after a seek bar change made without the mouse button held, as with the arrow keys
+    /// or the wheel, which send no release: that change is applied unless a newer one came.
+    SeekSettled(u64),
+    /// The main mouse button went down or up, anywhere in the window.
+    PointerHeld(bool),
     PlaybackTick,
     /// The cover of the restored track, read from disk at startup. `None` when no file was saved.
     RestoredCoverLoaded {
@@ -336,6 +341,9 @@ pub(super) enum Message {
         track: Track,
         /// The queue generation when the radio was asked for; a queue changed since then wins.
         generation: u64,
+        /// The radio generation when it was asked for: a track picked or a radio asked for since
+        /// then wins too.
+        request: u64,
         result: Result<Vec<Track>, String>,
     },
     /// Likes or unlikes a track that may not be in the queue or results.
