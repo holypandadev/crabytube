@@ -63,6 +63,8 @@ struct App {
     lyrics_error: Option<String>,
     lyrics_loading: bool,
     lyrics_waiting_for_duration: bool,
+    /// The track whose length the lyrics wait for: a late status of another track does not count.
+    lyrics_waiting_track: Option<String>,
     lyrics_generation: u64,
     lyrics_cancel: Option<CancellationToken>,
     lyric_active: Option<usize>,
@@ -747,9 +749,15 @@ impl App {
         #[cfg(feature = "diagnostics")]
         let (name, started) = (timing::message_name(&message), std::time::Instant::now());
         let queue_before = self.queue_generation;
+        // Held while the message runs, so a change to either list makes a new one to compare.
+        let favorites_before = Arc::clone(&self.favorites);
+        let recent_before = Arc::clone(&self.recent);
         let task = self.update_inner(message);
         // Rows are numbered within their list: a menu for a row that moved or went is closed.
-        if self.queue_generation != queue_before {
+        if self.queue_generation != queue_before
+            || !Arc::ptr_eq(&self.favorites, &favorites_before)
+            || !Arc::ptr_eq(&self.recent, &recent_before)
+        {
             self.row_menu = None;
         }
         // While synced lyrics are on screen the progress tick is off and their wake-ups drive the
@@ -869,6 +877,8 @@ impl App {
                 }
                 self.search_cancel = None;
                 self.search_loading = false;
+                // The rows the cursor stood on are gone.
+                self.row_cursor = None;
                 // The page shows what this search found, none or an error included, even when the
                 // field was edited while it ran.
                 if result.is_some() {
@@ -992,6 +1002,11 @@ impl App {
                 });
             }
             Message::Resized { width, height } => {
+                // Windows reports a minimized window as 0 by 0. That is no size to lay out at: the
+                // zoom and the covers stay as they were for the window that comes back.
+                if width < 1.0 || height < 1.0 {
+                    return Task::none();
+                }
                 // Sizes arrive divided by the zoom Iced had when it read them. A burst of these
                 // events, as a resize by hand or the animation of the zoom button makes, is read
                 // with one zoom, so each is undone with it: `ui_zoom` changes with every event,
@@ -1323,7 +1338,13 @@ impl App {
 
             Message::Navigate(page) => {
                 if matches!(&page, Page::Settings) {
-                    let storage_task = self.refresh_storage_cache_usage_task();
+                    // A clear or an export under way reports the sizes itself; measuring again now
+                    // would make its answer look stale and leave its notice on screen.
+                    let storage_task = if self.storage_loading {
+                        Task::none()
+                    } else {
+                        self.refresh_storage_cache_usage_task()
+                    };
                     let devices_task = if self.output_devices_loading {
                         Task::none()
                     } else {
@@ -1951,7 +1972,7 @@ impl App {
                                     iced::keyboard::key::Code::Comma,
                                 )
                         {
-                            return self.navigate(Page::Settings);
+                            return self.update(Message::Navigate(Page::Settings));
                         }
                     }
                     // Alt+← and Alt+→ move through the history, as the mouse side buttons do.
@@ -2300,6 +2321,7 @@ impl App {
             lyrics_error: None,
             lyrics_loading: false,
             lyrics_waiting_for_duration: false,
+            lyrics_waiting_track: None,
             lyrics_generation: 0,
             lyrics_cancel: None,
             lyric_active: None,
@@ -3333,6 +3355,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|current| current.video_id == track.video_id);
             self.lyrics_waiting_for_duration = playing;
+            self.lyrics_waiting_track = playing.then(|| track.video_id.clone());
             self.lyrics_loading = playing;
             if !playing {
                 self.lyrics_error = Some(self.tr("Press play to load the lyrics.").into_owned());
@@ -3370,7 +3393,11 @@ impl App {
     pub(super) fn lyrics_retry_due(&self) -> bool {
         self.lyrics_waiting_for_duration
             && self.playback_status.duration.is_some()
-            && self.playback_status.track.is_some()
+            && self
+                .playback_status
+                .track
+                .as_ref()
+                .is_some_and(|track| self.lyrics_waiting_track.as_deref() == Some(&track.video_id))
     }
 
     fn lyrics_layout_width(&self) -> f32 {

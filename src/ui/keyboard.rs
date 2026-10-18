@@ -117,10 +117,10 @@ impl App {
         };
         match &self.page {
             Page::Home => home(),
-            Page::Search => {
-                let rows = self.search_row_order();
-                if rows.is_empty() { home() } else { (rows, 1) }
-            }
+            // Home's rows only while the search page draws Home: under "Searching…", or results
+            // without songs, there is no row to move to.
+            Page::Search if self.home_on_screen() => home(),
+            Page::Search => (self.search_row_order(), 1),
             Page::Library => (
                 (0..self.favorites.len())
                     .map(|index| row("favorites", index))

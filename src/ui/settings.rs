@@ -716,8 +716,9 @@ impl App {
         if cfg!(target_os = "linux") {
             rows.push(self.setting(
                 "Media controls (MPRIS)",
+                // Translated before it is cut to the width: a cut text has no translation.
                 Some(fit(
-                    &self.mpris.status(),
+                    &self.tr_string(self.mpris.status()),
                     width - 2.0 * BOX_PADDING - 40.0,
                     TEXT_CAPTION,
                 )),

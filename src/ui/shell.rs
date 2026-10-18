@@ -399,7 +399,9 @@ impl App {
     /// Transport buttons; `full` adds shuffle and repeat.
     pub(super) fn transport_controls(&self, size: f32, full: bool) -> Element<'_, Message> {
         let can_prev = self.prev_queue_index().is_some() || self.playback_status.track.is_some();
-        let can_next = self.next_queue_index().is_some();
+        // With Repeat All the last track goes on to the first, as Next does.
+        let can_next = self.next_queue_index().is_some()
+            || (self.repeat == RepeatMode::All && !self.queue.is_empty());
         let small = (size * 0.8).round();
         let control =
             |name: &'static str, icon_size: f32, color: Color, message: Option<Message>| {
