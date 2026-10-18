@@ -80,7 +80,8 @@ struct Session {
 /// A report for the thread of the controls, with what it changes.
 enum Job {
     Update {
-        state: PlayerState,
+        /// Boxed, so a stop does not carry the room of a whole state.
+        state: Box<PlayerState>,
         at: Instant,
         changes: Changes,
     },
@@ -181,7 +182,7 @@ impl MprisRemote {
             return;
         }
         let job = Job::Update {
-            state: state.clone(),
+            state: Box::new(state.clone()),
             at: now,
             changes,
         };
@@ -261,7 +262,7 @@ fn run(
         if !changes.any() && !cover_changed {
             continue;
         }
-        if let Err(error) = session.publish(state, at, changes, cover_changed) {
+        if let Err(error) = session.publish(*state, at, changes, cover_changed) {
             tracing::warn!(%error, "The system media controls were not updated");
         }
     }
