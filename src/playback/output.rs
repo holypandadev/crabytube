@@ -133,7 +133,8 @@ fn list_devices_of(host: &cpal::Host) -> Result<Vec<OutputDeviceChoice>, String>
 /// the sound server routes to its default sink and moves along when the user picks another one. The
 /// sound server's own host would pin the stream to the sink that was the default when it opened.
 fn system_default_host() -> Option<cpal::HostId> {
-    if cfg!(target_os = "linux") && cpal::available_hosts().contains(&cpal::HostId::Alsa) {
+    #[cfg(target_os = "linux")]
+    if cpal::available_hosts().contains(&cpal::HostId::Alsa) {
         return Some(cpal::HostId::Alsa);
     }
     None
