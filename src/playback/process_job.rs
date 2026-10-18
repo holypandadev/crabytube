@@ -174,18 +174,19 @@ pub(super) async fn bounded_output(
 mod tests {
     #[tokio::test]
     async fn a_helper_that_prints_too_much_is_read_up_to_the_limit() {
-        // A little over the limit, so the rest fits in the pipe and the process can end.
+        // Twice the limit. The pipe is closed once the limit is read, so the process ends either
+        // way: it finishes writing first or it is stopped by the closed pipe, depending on the
+        // system and the timing. How it ended is not what is tested.
         let mut child = tokio::process::Command::new("head")
             .args([
                 "-c",
-                &(super::MAX_HELPER_OUTPUT_BYTES + 100).to_string(),
+                &(super::MAX_HELPER_OUTPUT_BYTES * 2).to_string(),
                 "/dev/zero",
             ])
             .stdout(std::process::Stdio::piped())
             .spawn()
             .unwrap();
         let output = super::bounded_output(&mut child).await.unwrap();
-        assert!(output.status.success());
         assert_eq!(output.stdout.len() as u64, super::MAX_HELPER_OUTPUT_BYTES);
     }
 }
