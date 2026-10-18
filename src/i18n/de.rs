@@ -320,6 +320,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Änderungen werden automatisch gespeichert",
         ),
         (
+            "Changes could not be saved",
+            "Änderungen konnten nicht gespeichert werden",
+        ),
+        (
             "Choose a song from Home or Favorite songs.",
             "Wähle einen Titel unter Start oder Lieblingstitel.",
         ),

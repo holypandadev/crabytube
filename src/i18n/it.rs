@@ -317,6 +317,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Le modifiche si salvano da sole",
         ),
         (
+            "Changes could not be saved",
+            "Impossibile salvare le modifiche",
+        ),
+        (
             "Choose a song from Home or Favorite songs.",
             "Scegli un brano dalla Home o dai Preferiti.",
         ),

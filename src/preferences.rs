@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -744,6 +747,8 @@ fn cap_string(value: &mut String, max_bytes: usize) {
 /// A single writer coalesces rapid UI edits and preserves ordering.
 pub struct Persistence {
     pending: SharedPending,
+    /// Whether the last write failed. A later write that succeeds clears it.
+    failing: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 /// Wait before a save that failed is tried again.
@@ -760,6 +765,8 @@ impl Persistence {
     pub fn start(path: PathBuf) -> Self {
         let pending = Arc::new((Mutex::new(PendingSnapshot::default()), Condvar::new()));
         let worker_pending = Arc::clone(&pending);
+        let failing = Arc::new(AtomicBool::new(false));
+        let worker_failing = Arc::clone(&failing);
         let worker = std::thread::spawn(move || {
             loop {
                 let (lock, wake) = &*worker_pending;
@@ -799,7 +806,9 @@ impl Persistence {
                 let closing = state.closed;
                 drop(state);
                 snapshot.normalize();
-                if let Err(error) = write(&path, &snapshot) {
+                let written = write(&path, &snapshot);
+                worker_failing.store(written.is_err(), Ordering::Release);
+                if let Err(error) = written {
                     tracing::warn!(%error,"Could not save local settings");
                     // A full disk or a folder without permission may clear up: the snapshot is kept
                     // for another attempt, unless a newer one came in or the app is closing.
@@ -819,8 +828,13 @@ impl Persistence {
         flush_at_exit(&pending);
         Self {
             pending,
+            failing,
             worker: Some(worker),
         }
+    }
+    /// Whether the last write failed, so the interface does not say changes are saved.
+    pub fn failing(&self) -> bool {
+        self.failing.load(Ordering::Acquire)
     }
     pub fn save(&self, snapshot: Snapshot) {
         let (lock, wake) = &*self.pending;
@@ -1534,9 +1548,14 @@ mod tests {
         ));
         std::fs::write(&blocker, b"not a folder").unwrap();
         let persistence = Persistence::start(blocker.join("state.json"));
+        assert!(!persistence.failing());
         persistence.save(Snapshot::default());
         // Past the debounce, the first write has failed and the writer waits to try again.
         std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            persistence.failing(),
+            "the interface is told that saving fails"
+        );
         let closing = std::time::Instant::now();
         drop(persistence);
         assert!(
@@ -1560,6 +1579,7 @@ mod tests {
         });
         close_and_wait(&persistence.pending, Duration::from_secs(5));
         assert_eq!(*load(&path).unwrap().history, vec!["last"]);
+        assert!(!persistence.failing());
         drop(persistence);
         let _ = std::fs::remove_file(path);
     }

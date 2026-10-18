@@ -2513,6 +2513,11 @@ impl App {
         }
     }
 
+    /// Whether the last save of the state failed.
+    fn save_failing(&self) -> bool {
+        self.persistence.as_ref().is_some_and(Persistence::failing)
+    }
+
     fn tr<'a>(&self, source: &'a str) -> std::borrow::Cow<'a, str> {
         crate::i18n::translate(self.preferences.ui_language, source)
     }

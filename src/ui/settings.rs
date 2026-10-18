@@ -97,19 +97,33 @@ impl App {
         .style(theme::outline_button);
         // On a narrow page the button goes under the title: beside it, a long word such as
         // "Einstellungen" ran under "Zurücksetzen".
+        // A failed save is said at every width; the usual note only where there is room for it.
+        let failing = self.save_failing();
+        let save_note = || {
+            if failing {
+                label(
+                    self.tr("Changes could not be saved").into_owned(),
+                    TEXT_CAPTION,
+                )
+            } else {
+                label(
+                    self.tr("Changes save automatically").into_owned(),
+                    TEXT_CAPTION,
+                )
+                .color(FADED)
+            }
+        };
         let header: Element<'_, Message> = if narrow {
-            column![title, reset].spacing(16).into()
+            let mut header = column![title, reset].spacing(16);
+            if failing {
+                header = header.push(save_note());
+            }
+            header.into()
         } else {
             row![
                 title,
-                if width >= 760.0 {
-                    Element::from(
-                        label(
-                            self.tr("Changes save automatically").into_owned(),
-                            TEXT_CAPTION,
-                        )
-                        .color(FADED),
-                    )
+                if width >= 760.0 || failing {
+                    Element::from(save_note())
                 } else {
                     Space::new().width(0).into()
                 },

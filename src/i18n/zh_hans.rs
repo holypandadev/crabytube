@@ -277,6 +277,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Artwork cache", "封面缓存"),
         ("Audio", "音频"),
         ("Changes save automatically", "更改会自动保存"),
+        ("Changes could not be saved", "无法保存更改"),
         (
             "Choose a song from Home or Favorite songs.",
             "从首页或收藏的歌曲中选择一首。",

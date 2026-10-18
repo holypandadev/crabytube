@@ -313,6 +313,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Artwork cache", "アートワークのキャッシュ"),
         ("Audio", "オーディオ"),
         ("Changes save automatically", "変更は自動で保存されます"),
+        ("Changes could not be saved", "変更を保存できませんでした"),
         (
             "Choose a song from Home or Favorite songs.",
             "ホームかお気に入りの曲から選んでください。",
