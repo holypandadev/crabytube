@@ -36,7 +36,7 @@
   <tr>
     <td valign="top">Synced lyrics, plus word-by-word karaoke and translations for many popular songs.</td>
     <td valign="top">Pure black, monospaced type and one-pixel outlines. Scales from phone size to 4K.</td>
-    <td valign="top">Media keys everywhere, a Linux tray icon, Discord Rich Presence and nine languages.</td>
+    <td valign="top">Media keys and a tray icon everywhere, Discord Rich Presence and nine languages.</td>
   </tr>
 </table>
 
@@ -116,8 +116,9 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
 
 ## Updates
 
-On Windows and macOS, CrabyTube looks once a day for a newer version, and **Settings → Updates**
-shows what it found and has **Check now**. The daily check can be turned off there.
+On Windows, on macOS and in the Flatpak, CrabyTube looks once a day for a newer version, and
+**Settings → Updates** shows what it found and has **Check now**. The daily check can be turned off
+there.
 
 - **Windows, installed with the `.msi`**: **Update now** downloads the new installer, closes
   CrabyTube, installs it and opens CrabyTube again.
@@ -127,18 +128,21 @@ shows what it found and has **Check now**. The daily check can be turned off the
   release page.
 - **The Windows zip** does not update itself: **Download page** opens the release page. Extract the
   new zip over the old folder.
-- **Linux**: the Flatpak does not check for updates. Install the new `.flatpak` the same way as the
-  first one.
+- **Linux (Flatpak)**: **Update now** downloads the new `.flatpak`, checks it and opens it in your
+  software center (Discover, GNOME Software), where you install it; then open CrabyTube again. The
+  Flatpak has no way to install a package itself. Versions before 0.1.2 do not check: install 0.1.2
+  the same way as the first one.
 
 Settings, favorites, the queue and the history are kept apart from the app, so an update leaves
 them as they are.
 
 Every release carries `update.json`, which names the version and the size and SHA-256 of the
-`.msi`, the Windows zip and the macOS zip, and its Ed25519 signature by the release key. CrabyTube
+`.msi`, the Windows zip, the macOS zip and the `.flatpak`, and its Ed25519 signature by the release
+key. CrabyTube
 uses it only when the signature is right, and installs a download only when its size and SHA-256
 match it, so a file that was changed, or a release someone else made, is never installed.
-`SHA256SUMS` lists the SHA-256 of every package, the `.flatpak` and the `.dmg` included, for
-checking a download by hand.
+`SHA256SUMS` lists the SHA-256 of every package, the `.dmg` included, for checking a download by
+hand.
 
 ## Privacy
 
@@ -149,10 +153,9 @@ checking a download by hand.
   YouTube and Google servers (catalog, artwork, audio and the BotGuard challenge), and the lyrics
   services LRCLIB and Better Lyrics (see below).
   Discord Rich Presence (off by default) talks only to the Discord client running on your computer.
-- On Windows and macOS, the update check (on by default, Settings → Updates) downloads
-  `update.json` and its signature from the latest release on GitHub once a day, and the new
-  package when you choose to update. The requests carry the app's version in their user agent
-  and nothing about you. The Flatpak makes no update requests.
+- The update check (on by default, Settings → Updates) downloads `update.json` and its signature
+  from the latest release on GitHub once a day, and the new package when you choose to update. The
+  requests carry the app's version in their user agent and nothing about you.
 - Lyrics come from two services. LRCLIB (lrclib.net) receives the track's title and artist. Better
   Lyrics (api.betterlyrics.org) receives the title, the artist and the duration when they are
   known, and the YouTube video ID; its QQ Music and Kugou lookups go through the same service.

@@ -30,11 +30,12 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `storage.rs`, `temp_cleanup.rs` | Cache usage reporting and selective clearing; removal of leftover temporary files. |
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
 | `i18n/` | Interface translations: English, Spanish, Brazilian Portuguese, French, German, Italian, Russian, Japanese and Simplified Chinese. English is the key; each language has a file of exact entries and templates for text with numbers or names. |
-| `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). Other platforms use `tray_stub.rs`. |
+| `mpris.rs`, `tray.rs`, `notifications.rs` | Linux MPRIS, StatusNotifier tray and desktop notifications over D-Bus (`zbus`, `ksni`). |
+| `tray_native.rs` | The tray icon of Windows (notification area) and macOS (menu bar), through `tray-icon`, made on the main thread once the first window opens and removed before the app exits. Other platforms use `tray_stub.rs`. |
 | `mpris_macos.rs`, `media_session.rs` | The macOS media keys and Now Playing through the MediaPlayer framework (`objc2-media-player`). `media_session.rs` holds what the macOS and Windows backends share: the player state, the commands, and the rules for what to tell the system and when. |
 | `mpris_windows.rs` | The Windows media keys and media panel through the System Media Transport Controls (`windows`). Other platforms use `mpris_stub.rs`. |
 | `discord.rs` | Optional Discord Rich Presence over the local Discord IPC socket. |
-| `updater.rs`, `ui/updates.rs` | Daily check of the latest release's `update.json`, used only with a valid Ed25519 signature; downloads the package and checks its size and SHA-256. On Windows the `.msi` installs after the app has exited; on macOS the `.app` bundle is swapped; other copies open the release page. The Flatpak and other Linux builds do not check. |
+| `updater.rs`, `ui/updates.rs` | Daily check of the latest release's `update.json`, used only with a valid Ed25519 signature; downloads the package and checks its size and SHA-256. On Windows the `.msi` installs after the app has exited; on macOS the `.app` bundle is swapped; the Flatpak hands the `.flatpak` to the software center through the OpenURI portal; other copies open the release page. Linux builds outside the Flatpak do not check. |
 | `single_instance.rs` | One running copy: a second launch asks the first to show its window and exits. |
 | `app_dirs.rs`, `flatpak.rs`, `background_portal.rs` | Data folders, Flatpak detection, and launch on startup through the Background portal inside the Flatpak. |
 | `playback/live.rs` | Live broadcasts, which have no length and cannot be sought. |
@@ -120,9 +121,9 @@ in-memory artwork budget (`memory.rs`).
 
 The UI is an Iced 0.14 daemon (`App` in `ui.rs`) using the message/update/view model and a custom
 Tokio executor (two worker threads by default, `TOKIO_WORKER_THREADS` overrides it). It opens its
-window with `window::open` and keeps running without one: close-to-tray, on by default, which needs
-the tray and so exists on Linux only, closes the window, because Wayland cannot hide one, and the
-tray opens it again. Wayland lets no client raise, focus or restore its own window either, so there
+window with `window::open` and keeps running without one: close-to-tray, on by default, hides the
+window on Windows and macOS and, on Linux, closes it, because Wayland cannot hide one; the tray
+opens it again. Wayland lets no client raise, focus or restore its own window either, so there
 a window that is behind others or minimized is closed and opened again when the tray, a second
 launch or MPRIS `Raise` asks for it. When the window is minimized or closed to the tray, cached
 covers other than the playing track's are dropped and the freed heap is returned.
@@ -181,7 +182,7 @@ individually.
 ## Platform integration
 
 - **Linux:** MPRIS (`org.mpris.MediaPlayer2.crabytube`) with metadata, the saved cover file and controls; a
-  StatusNotifier tray icon with close-to-tray (on by default); desktop notifications; launch on startup
+  StatusNotifier tray icon; desktop notifications; launch on startup
   through `~/.config/autostart`, or the Background portal inside the Flatpak. The window's application ID is `dev.holypanda.CrabyTube`, matching
   `packaging/linux/dev.holypanda.CrabyTube.desktop`.
 - **Windows:** media keys and the system media panel (title, artist, cover, position) through the
@@ -189,7 +190,7 @@ individually.
   `packaging/windows/build-zip.ps1` builds the portable zip, and `build-msi.ps1` a per-user `.msi`
   from `crabytube.wxs`, whose Start menu entry carries the app id the installed copy gives itself.
 - **macOS:** media keys, headphone buttons and Control Center through `MPRemoteCommandCenter`, and Now Playing (title, artist, album, cover, position and a progress bar that advances by itself) through `MPNowPlayingInfoCenter`. The cover is read from the file the app already saved, never from a URL the system downloads. `packaging/macos/build-app.sh` builds the universal app bundle (macOS 11 or later, ad hoc signature) and the release zip and disk image.
-- **All platforms:** optional Discord Rich Presence.
+- **All platforms:** a tray icon (the StatusNotifier item on Linux, the notification area on Windows, the menu bar on macOS) with close-to-tray, on by default; optional Discord Rich Presence.
 
 ## Development tools
 

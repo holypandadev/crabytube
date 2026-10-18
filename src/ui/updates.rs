@@ -25,6 +25,9 @@ pub(super) enum UpdateState {
     },
     /// The installer has started; the app quits.
     Installing,
+    /// The Flatpak's update was handed to the software center, where the user installs it. The
+    /// app goes on running until it is opened again.
+    HandedOver(Available),
     /// What went wrong, in English (the key of its translation), and the update it concerned.
     Failed {
         reason: &'static str,
@@ -38,6 +41,7 @@ impl UpdateState {
         match self {
             UpdateState::Available(available)
             | UpdateState::Downloading { available, .. }
+            | UpdateState::HandedOver(available)
             | UpdateState::Failed {
                 available: Some(available),
                 ..
@@ -97,10 +101,13 @@ impl App {
                 )
             }
             Message::UpdateChecked { manual, result } => {
-                // A late answer does not interrupt a download or an install under way.
+                // A late answer does not interrupt a download or an install under way, nor the
+                // instructions for an update handed to the software center.
                 if matches!(
                     self.update,
-                    UpdateState::Downloading { .. } | UpdateState::Installing
+                    UpdateState::Downloading { .. }
+                        | UpdateState::Installing
+                        | UpdateState::HandedOver(_)
                 ) {
                     return Task::none();
                 }
@@ -182,6 +189,11 @@ impl App {
                     return Task::none();
                 };
                 match result.and_then(|path| crate::updater::install(&path, &self.update_install)) {
+                    Ok(()) if self.update_install == crate::updater::Install::Flatpak => {
+                        tracing::info!(version = %available.version, "the update was handed to the software center");
+                        self.update = UpdateState::HandedOver(available);
+                        Task::none()
+                    }
                     Ok(()) => {
                         tracing::info!(version = %available.version, "installing the update; quitting");
                         self.update = UpdateState::Installing;
@@ -265,6 +277,14 @@ impl App {
                 None,
             ),
             UpdateState::Installing => (self.tr("Installing the update…").into_owned(), None),
+            // The page stays at hand in case no software center opened the package.
+            UpdateState::HandedOver(available) => (
+                self.tr_static(
+                    "Install version {} in the window that opened, then open CrabyTube again.",
+                )
+                .replacen("{}", &available.version, 1),
+                Some((self.tr_static("Download page"), Message::OpenUpdatePage)),
+            ),
             UpdateState::Failed { reason, available } => (
                 self.tr(reason).into_owned(),
                 match available {

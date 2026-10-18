@@ -123,7 +123,7 @@ It talks to them at runtime; no code from them is distributed with CrabyTube.
 | LRCLIB (`lrclib.net`) | Lyrics, when the Lyrics tab is open, and for the next track in the queue during the last 30 seconds of a track. |
 | Better Lyrics (`api.betterlyrics.org`) | Timed lyrics, at the same moments as LRCLIB. |
 | Discord | Rich Presence through the local Discord client's IPC socket, only when enabled in Settings. |
-| GitHub (`github.com`) | On Windows and macOS, the update check: `update.json` and its signature from the latest release once a day, and the new package when you choose to update. It can be turned off in Settings → Updates. |
+| GitHub (`github.com`) | The update check: `update.json` and its signature from the latest release once a day, and the new package when you choose to update. It can be turned off in Settings → Updates. |
 
 YouTube and YouTube Music are trademarks of Google LLC. Discord is a trademark of Discord Inc.
 GitHub is a trademark of GitHub, Inc.

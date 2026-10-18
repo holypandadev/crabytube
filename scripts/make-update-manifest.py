@@ -69,6 +69,7 @@ def main():
         "windows-msi": f"CrabyTube-{version}-windows-x64.msi",
         "windows-zip": "CrabyTube-windows-x64.zip",
         "macos-zip": f"CrabyTube-{version}-macos-universal.zip",
+        "linux-flatpak": "CrabyTube.flatpak",
     }
     missing = [name for name in kinds.values() if not (folder / name).is_file()]
     if missing:

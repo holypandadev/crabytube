@@ -46,7 +46,11 @@ pub enum Install {
     MacBundle(PathBuf),
     /// A copy the app cannot replace itself: a newer version is offered as its release page.
     Manual,
-    /// A package manager updates the app (Flatpak, or a Linux build): nothing is checked.
+    /// The Flatpak. The sandbox cannot install a package, so the update is downloaded, checked
+    /// and handed to the desktop's software center, where the user installs it.
+    Flatpak,
+    /// A Linux build outside the Flatpak, which its package manager or its builder updates:
+    /// nothing is checked.
     Managed,
 }
 
@@ -56,9 +60,12 @@ impl Install {
         *self != Install::Managed
     }
 
-    /// Whether the app can install an update itself.
+    /// Whether the app downloads an update and installs it, or for the Flatpak hands it on.
     pub fn installs(&self) -> bool {
-        matches!(self, Install::WindowsMsi | Install::MacBundle(_))
+        matches!(
+            self,
+            Install::WindowsMsi | Install::MacBundle(_) | Install::Flatpak
+        )
     }
 
     /// The package of a release this copy installs, by its name in `update.json`.
@@ -66,6 +73,7 @@ impl Install {
         match self {
             Install::WindowsMsi => Some("windows-msi"),
             Install::MacBundle(_) => Some("macos-zip"),
+            Install::Flatpak => Some("linux-flatpak"),
             Install::Manual | Install::Managed => None,
         }
     }
@@ -98,7 +106,11 @@ pub fn current_install() -> Install {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        Install::Managed
+        if crate::flatpak::in_flatpak() {
+            Install::Flatpak
+        } else {
+            Install::Managed
+        }
     }
 }
 
@@ -416,6 +428,7 @@ pub async fn download(
         .map_err(|error| UpdateError::Storage(error.to_string()))?;
     let name = match package.kind.as_str() {
         "windows-msi" => "CrabyTube-update.msi",
+        "linux-flatpak" => "CrabyTube-update.flatpak",
         _ => "CrabyTube-update.zip",
     };
     let path = folder.join(name);
@@ -481,6 +494,8 @@ pub fn install(downloaded: &Path, install: &Install) -> Result<(), UpdateError> 
         Install::WindowsMsi => install_msi(downloaded),
         #[cfg(target_os = "macos")]
         Install::MacBundle(bundle) => install_mac_bundle(downloaded, bundle),
+        #[cfg(target_os = "linux")]
+        Install::Flatpak => open_in_software_center(downloaded),
         _ => {
             let _ = downloaded;
             Err(UpdateError::Install(
@@ -488,6 +503,29 @@ pub fn install(downloaded: &Path, install: &Install) -> Result<(), UpdateError> 
             ))
         }
     }
+}
+
+/// Hands a downloaded Flatpak bundle to the desktop, which opens it in its software center (Discover,
+/// GNOME Software) for the user to install. The OpenURI portal receives the open file, so the
+/// sandbox needs no access to anything outside it.
+#[cfg(target_os = "linux")]
+fn open_in_software_center(bundle: &Path) -> Result<(), UpdateError> {
+    use std::collections::HashMap;
+    use zbus::zvariant::{Fd, Value};
+    let failed = |error: &dyn std::fmt::Display| UpdateError::Install(error.to_string());
+    let file = std::fs::File::open(bundle).map_err(|error| failed(&error))?;
+    let connection = zbus::blocking::Connection::session().map_err(|error| failed(&error))?;
+    let options: HashMap<&str, Value<'_>> = HashMap::new();
+    connection
+        .call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.OpenURI"),
+            "OpenFile",
+            &("", Fd::from(&file), options),
+        )
+        .map_err(|error| failed(&error))?;
+    Ok(())
 }
 
 /// The Windows Installer package that `run_scheduled_install` runs once the app has shut down.
@@ -813,6 +851,25 @@ mod tests {
         assert!(!Install::Managed.checks());
         assert!(Install::Manual.checks() && !Install::Manual.installs());
         assert!(Install::WindowsMsi.installs());
+        assert!(Install::Flatpak.checks() && Install::Flatpak.installs());
+    }
+
+    #[test]
+    fn the_flatpak_is_offered_its_own_package() {
+        let json = format!(
+            r#"{{"version":"9.9.9","notes_url":"https://github.com/holypandadev/crabytube/releases/tag/v9.9.9","packages":[{{"kind":"windows-msi","url":"https://example.invalid/a.msi","size":10,"sha256":"{a}"}},{{"kind":"linux-flatpak","url":"https://example.invalid/CrabyTube.flatpak","size":20,"sha256":"{b}"}}]}}"#,
+            a = "a".repeat(64),
+            b = "b".repeat(64)
+        );
+        let manifest: Manifest = serde_json::from_str(&json).unwrap();
+        let offer = newer(manifest.clone(), (0, 1, 1), &Install::Flatpak).unwrap();
+        let package = offer.package.unwrap();
+        assert_eq!(package.kind, "linux-flatpak");
+        assert_eq!(package.size, 20);
+        // A build outside the Flatpak asks nothing; the Windows installer keeps its own package.
+        assert!(!Install::Managed.checks());
+        let msi = newer(manifest, (0, 1, 1), &Install::WindowsMsi).unwrap();
+        assert_eq!(msi.package.unwrap().kind, "windows-msi");
     }
 
     #[test]

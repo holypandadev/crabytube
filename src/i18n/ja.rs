@@ -28,6 +28,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Installing the update…",
             "アップデートをインストールしています…",
         ),
+        (
+            "Install version {} in the window that opened, then open CrabyTube again.",
+            "開いたウィンドウでバージョン {} をインストールしてから、CrabyTube を開き直してください。",
+        ),
         ("Update available", "アップデートがあります"),
         (
             "Could not reach GitHub. Try again later.",

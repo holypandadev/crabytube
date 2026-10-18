@@ -94,8 +94,8 @@ zips the result into `target/macos/CrabyTube-<version>-macos-universal.zip`. The
 `target/macos/CrabyTube-<version>-macos-universal.dmg`, holds the same files and a link to
 Applications. Set `TARGETS=aarch64-apple-darwin` for a quick build of one architecture.
 
-The MPRIS controls, tray icon, track notifications and launch-on-startup option are only available
-on Linux. On macOS the media keys and Now Playing work from the application bundle. On Windows the
+The MPRIS controls, track notifications and launch-on-startup option are only available on Linux;
+the tray icon is in the notification area on Windows and in the menu bar on macOS. On macOS the media keys and Now Playing work from the application bundle. On Windows the
 media keys and the media panel of the system flyout work from the executable, with no setup.
 
 ## Release builds on GitHub

@@ -25,6 +25,10 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Version {} wird heruntergeladen… {} %",
         ),
         ("Installing the update…", "Aktualisierung wird installiert…"),
+        (
+            "Install version {} in the window that opened, then open CrabyTube again.",
+            "Installiere Version {} im geöffneten Fenster und öffne CrabyTube dann erneut.",
+        ),
         ("Update available", "Aktualisierung verfügbar"),
         (
             "Could not reach GitHub. Try again later.",
