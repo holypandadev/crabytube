@@ -229,6 +229,12 @@ pub trait MusicService: Send + Sync {
     async fn radio(&self, _video_id: &str) -> Result<Vec<Track>, MusicError> {
         Ok(Vec::new())
     }
+    /// The title and artist of a track as the catalog names them in English. In Japanese,
+    /// Chinese or Russian the catalog writes a Western artist in that script ("ザ・ウィークエンド"),
+    /// which lyrics services do not know.
+    async fn english_names(&self, _video_id: &str) -> Result<Option<(String, String)>, MusicError> {
+        Ok(None)
+    }
 
     async fn home(&self) -> Result<Vec<HomeShelf>, MusicError>;
     async fn home_more(&self) -> Result<Vec<HomeShelf>, MusicError> {
@@ -467,8 +473,26 @@ impl YouTubeMusicService {
             visitor_data,
         })
     }
-    async fn catalog_payload(&self, endpoint: &str, mut body: Value) -> Result<Value, MusicError> {
-        let config = self.live_web_music_config().await?;
+    async fn catalog_payload(&self, endpoint: &str, body: Value) -> Result<Value, MusicError> {
+        self.catalog_payload_in(endpoint, body, None).await
+    }
+
+    /// `catalog_payload`, in `language` rather than the interface's.
+    async fn catalog_payload_in(
+        &self,
+        endpoint: &str,
+        mut body: Value,
+        language: Option<&str>,
+    ) -> Result<Value, MusicError> {
+        let mut config = self.live_web_music_config().await?;
+        if let Some(language) = language
+            && let Some(client) = config
+                .context
+                .get_mut("client")
+                .and_then(Value::as_object_mut)
+        {
+            client.insert("hl".into(), Value::String(language.into()));
+        }
         body["context"] = config.context;
         let mut request = self
             .client()?
@@ -613,6 +637,20 @@ impl MusicService for YouTubeMusicService {
         let mut seen = std::collections::HashSet::new();
         tracks.retain(|t| t.video_id != video_id && seen.insert(t.video_id.clone()));
         Ok(tracks)
+    }
+    async fn english_names(&self, video_id: &str) -> Result<Option<(String, String)>, MusicError> {
+        let payload = self
+            .catalog_payload_in(
+                "next",
+                json!({"videoId":video_id,"isAudioOnly":true}),
+                Some("en"),
+            )
+            .await?;
+        Ok(parse_radio(&payload)
+            .into_iter()
+            .find(|track| track.video_id == video_id)
+            .filter(|track| !track.title.trim().is_empty() && !track.artist.trim().is_empty())
+            .map(|track| (track.title, track.artist)))
     }
     async fn home(&self) -> Result<Vec<HomeShelf>, MusicError> {
         let target = BrowseTarget {
@@ -1008,6 +1046,18 @@ mod live_feed_probe {
 
     /// Opt-in catalog contract check: the public browse IDs Explore uses still
     /// return real shelves.
+    #[tokio::test]
+    #[ignore = "requires live anonymous YouTube Music; run explicitly"]
+    async fn english_names_are_the_catalog_names_in_english() {
+        // In Japanese the catalog writes this artist in katakana; in English it does not.
+        crate::i18n::set_current_language(crate::preferences::UiLanguage::Japanese);
+        let service = YouTubeMusicService::new();
+        let names = service.english_names("4NRXx6U8ABQ").await.unwrap();
+        let (title, artist) = names.expect("names");
+        assert!(title.contains("Blinding Lights"), "{title}");
+        assert!(artist.contains("The Weeknd"), "{artist}");
+    }
+
     #[tokio::test]
     #[ignore = "requires live anonymous YouTube Music; run explicitly"]
     async fn known_public_music_browse_ids_return_shelves() {

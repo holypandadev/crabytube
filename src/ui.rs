@@ -65,6 +65,12 @@ struct App {
     lyrics_waiting_for_duration: bool,
     /// The track whose length the lyrics wait for: a late status of another track does not count.
     lyrics_waiting_track: Option<String>,
+    /// The track the running lyrics lookup searches for, under the names it searches.
+    lyrics_lookup: Option<Track>,
+    /// The video whose lyrics were searched again under its English names, so that is done once.
+    lyrics_english_tried: Option<String>,
+    /// The "not found" shown if the English names find nothing either.
+    lyrics_pending_error: Option<String>,
     lyrics_generation: u64,
     lyrics_cancel: Option<CancellationToken>,
     lyric_active: Option<usize>,
@@ -353,6 +359,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::VolumeRailIdle
         | Message::FadeFrame(_)
         | Message::LyricsLoaded { .. }
+        | Message::LyricsEnglishNames { .. }
         | Message::LyricsProgress { .. }
         | Message::CollectionLoaded { .. }
         | Message::CollectionMoreLoaded { .. }
@@ -1144,8 +1151,25 @@ impl App {
                 if generation != self.lyrics_generation {
                     return Task::none();
                 }
-                self.lyrics_loading = false;
                 self.lyrics_cancel = None;
+                // In Japanese, Chinese or Russian the catalog may write a Western artist in its
+                // script, which lyrics services do not know: the search runs once more under the
+                // catalog's English names.
+                if let Err(error) = &result
+                    && crate::lyrics::is_not_found(error)
+                    && let Some(track) = self.lyrics_lookup.clone()
+                    && crate::lyrics::names_outside_latin(&track)
+                    && self.lyrics_english_tried.as_deref() != Some(track.video_id.as_str())
+                {
+                    self.lyrics_english_tried = Some(track.video_id.clone());
+                    self.lyrics_pending_error = Some(error.clone());
+                    let service = Arc::clone(&self.music_service);
+                    return Task::perform(
+                        async move { service.english_names(&track.video_id).await.ok().flatten() },
+                        move |names| Message::LyricsEnglishNames { generation, names },
+                    );
+                }
+                self.lyrics_loading = false;
                 match result {
                     Ok(lyrics) => {
                         self.lyrics_error = None;
@@ -1153,6 +1177,33 @@ impl App {
                         self.rebuild_lyrics_heights();
                     }
                     Err(error) => self.lyrics_error = Some(error),
+                }
+            }
+            Message::LyricsEnglishNames { generation, names } => {
+                if generation != self.lyrics_generation {
+                    return Task::none();
+                }
+                let pending = self.lyrics_pending_error.take();
+                let english =
+                    names
+                        .zip(self.lyrics_lookup.clone())
+                        .and_then(|((title, artist), track)| {
+                            let renamed = Track {
+                                title,
+                                artist,
+                                ..track.clone()
+                            };
+                            // Names still outside the Latin script, or the same ones, find nothing new.
+                            (!crate::lyrics::names_outside_latin(&renamed)
+                                && (renamed.title != track.title || renamed.artist != track.artist))
+                                .then_some(renamed)
+                        });
+                match english {
+                    Some(renamed) => return self.lookup_lyrics(renamed, false),
+                    None => {
+                        self.lyrics_loading = false;
+                        self.lyrics_error = pending;
+                    }
                 }
             }
             Message::LyricsProgress { generation, lyrics } => {
@@ -2369,6 +2420,9 @@ impl App {
             lyrics_loading: false,
             lyrics_waiting_for_duration: false,
             lyrics_waiting_track: None,
+            lyrics_lookup: None,
+            lyrics_english_tried: None,
+            lyrics_pending_error: None,
             lyrics_generation: 0,
             lyrics_cancel: None,
             lyric_active: None,
@@ -3400,6 +3454,11 @@ impl App {
         self.lyrics_generation = self.lyrics_generation.wrapping_add(1);
         self.lyrics = None;
         self.lyrics_error = None;
+        self.lyrics_pending_error = None;
+        // Retry may try the English names again.
+        if again {
+            self.lyrics_english_tried = None;
+        }
         self.lyric_active = None;
         self.lyrics_scroll = AbsoluteOffset::default();
         self.lyrics_heights.clear();
@@ -3429,6 +3488,7 @@ impl App {
         };
         self.lyrics_waiting_for_duration = false;
         self.lyrics_loading = true;
+        self.lyrics_lookup = Some(track.clone());
         let token = CancellationToken::new();
         self.lyrics_cancel = Some(token.clone());
         let generation = self.lyrics_generation;
@@ -5709,6 +5769,62 @@ mod tests {
 
         assert_eq!(app.home_shelves.len(), 1);
         assert_eq!(app.home_shelves[0].title, "Current shelf");
+    }
+
+    #[test]
+    fn lyrics_not_found_under_katakana_names_are_searched_under_the_english_ones() {
+        let mut app = App::default();
+        let track = crate::music::Track {
+            title: "ブラインディング・ライツ".into(),
+            artist: "ザ・ウィークエンド".into(),
+            duration_secs: Some(200),
+            ..lyrics_test_track("4NRXx6U8ABQ")
+        };
+        app.playback_status.track = Some(track.clone());
+        app.playback_status.duration = Some(Duration::from_secs(200));
+        drop(app.load_lyrics(track.clone()));
+        let generation = app.lyrics_generation;
+        assert_eq!(app.lyrics_lookup.as_ref(), Some(&track));
+        // Nothing under the catalog's names: the English ones are asked for, and the page
+        // keeps loading.
+        let ask = app.update(Message::LyricsLoaded {
+            generation,
+            result: Err(crate::lyrics::NOT_FOUND.into()),
+        });
+        assert!(ask.units() > 0);
+        assert!(app.lyrics_loading && app.lyrics_error.is_none());
+        // The English names start a new search under them.
+        let search = app.update(Message::LyricsEnglishNames {
+            generation,
+            names: Some(("Blinding Lights".into(), "The Weeknd".into())),
+        });
+        assert!(search.units() > 0);
+        let renamed = app.lyrics_lookup.clone().unwrap();
+        assert_eq!(
+            (renamed.title.as_str(), renamed.artist.as_str()),
+            ("Blinding Lights", "The Weeknd")
+        );
+        // Not found under those either: the miss is shown, and not searched a third time.
+        let shown = app.update(Message::LyricsLoaded {
+            generation: app.lyrics_generation,
+            result: Err(crate::lyrics::NOT_FOUND.into()),
+        });
+        assert_eq!(shown.units(), 0);
+        assert!(!app.lyrics_loading);
+        assert_eq!(app.lyrics_error.as_deref(), Some(crate::lyrics::NOT_FOUND));
+
+        // Latin names are not searched again, and no English names leave the miss on screen.
+        let mut app = App::default();
+        let latin = lyrics_test_track("abc");
+        app.playback_status.track = Some(latin.clone());
+        app.playback_status.duration = Some(Duration::from_secs(200));
+        drop(app.load_lyrics(latin));
+        let none = app.update(Message::LyricsLoaded {
+            generation: app.lyrics_generation,
+            result: Err(crate::lyrics::NOT_FOUND.into()),
+        });
+        assert_eq!(none.units(), 0);
+        assert!(app.lyrics_error.is_some());
     }
 
     fn lyrics_test_track(video_id: &str) -> crate::music::Track {

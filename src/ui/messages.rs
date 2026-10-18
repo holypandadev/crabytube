@@ -116,6 +116,11 @@ pub(super) enum Message {
         generation: u64,
         lyrics: crate::lyrics::Lyrics,
     },
+    /// The catalog's English names of the track whose lyrics were not found under its own.
+    LyricsEnglishNames {
+        generation: u64,
+        names: Option<(String, String)>,
+    },
     RetryLyrics,
     SeekTo(f64),
     Preference(Preference),

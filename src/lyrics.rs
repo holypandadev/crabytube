@@ -25,7 +25,8 @@ const STALE_TEMPORARY: Duration = Duration::from_secs(3600);
 const LINE_GRACE: Duration = Duration::from_millis(1500);
 /// A result from a source that does not name its track waits this long for LRCLIB, which wins if it answers.
 const UNVERIFIED_GRACE: Duration = Duration::from_millis(1500);
-const NOT_FOUND: &str = "No matching lyrics available from the enabled sources. Try again later.";
+pub(crate) const NOT_FOUND: &str =
+    "No matching lyrics available from the enabled sources. Try again later.";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Word {
@@ -1168,6 +1169,21 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
         None if by_title_unreachable => Found::Unreachable,
         None => Found::Missing,
     }
+}
+
+/// Whether the track's title or artist has letters outside the Latin script, as the catalog writes
+/// them in Japanese, Chinese or Russian.
+pub fn names_outside_latin(track: &Track) -> bool {
+    track
+        .title
+        .chars()
+        .chain(track.artist.chars())
+        .any(|c| c.is_alphabetic() && !is_latin(c))
+}
+
+/// Whether a lookup found nothing, as opposed to failing: only then can other names be tried.
+pub fn is_not_found(error: &str) -> bool {
+    error == NOT_FOUND
 }
 
 /// Whether a letter is written in the Latin script, accents included: "é" in "Beyoncé" is, "ダ" is
