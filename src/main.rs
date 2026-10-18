@@ -127,10 +127,16 @@ fn main() {
     #[cfg(target_os = "linux")]
     crabytube::playback::output::provide_sound_server_cookie();
 
-    // Diagnostics runs use their own throwaway profile and may start beside a running app.
+    // Diagnostics runs use their own throwaway profile and may start beside a running app. A copy
+    // started after a Flatpak update gives the one it replaces time to quit.
     #[cfg(not(feature = "diagnostics"))]
-    if !crabytube::single_instance::claim() {
-        return;
+    {
+        let after_update =
+            std::env::args().any(|argument| argument == crabytube::updater::AFTER_UPDATE_ARG);
+        let wait = std::time::Duration::from_secs(if after_update { 30 } else { 0 });
+        if !crabytube::single_instance::claim(wait) {
+            return;
+        }
     }
 
     #[cfg(all(target_os = "linux", target_env = "gnu"))]

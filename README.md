@@ -60,14 +60,27 @@ with a paid certificate, so your system asks you to confirm the first start once
 
 ### Linux
 
-Download the `.flatpak` file and install it for your user:
+Install it from CrabyTube's Flatpak repository, which also brings its updates:
 
 ```bash
-flatpak install --user CrabyTube.flatpak
+flatpak install --user https://holypandadev.github.io/crabytube-flatpak/crabytube.flatpakref
 ```
 
-If Flatpak asks for a runtime, allow it; it comes from Flathub. Then start CrabyTube from your
-application menu.
+Or download the `.flatpak` file of a release and install it the same way
+(`flatpak install --user CrabyTube.flatpak`), or open either file in your software center. Both
+add the repository, so later versions arrive as updates. If Flatpak asks for a runtime, allow it;
+it comes from Flathub. Then start CrabyTube from your application menu.
+
+A Flatpak of version 0.1.0 or 0.1.1 was installed without the repository. Remove it once and
+install the new one; your settings, favorites and queue stay:
+
+```bash
+flatpak uninstall dev.holypanda.CrabyTube
+flatpak install --user https://holypandadev.github.io/crabytube-flatpak/crabytube.flatpakref
+```
+
+Installed over the old one instead, it gets updates, but Flatpak keeps the old setting that skips
+checking the repository's signature.
 
 The Flatpak has no access to your Documents folder, so Settings → Export and Import use
 `~/.var/app/dev.holypanda.CrabyTube/data/crabytube-backup.json` instead.
@@ -128,22 +141,22 @@ there.
   release page.
 - **The Windows zip** does not update itself: **Download page** opens the release page. Extract the
   new zip over the old folder.
-- **Linux (Flatpak)**: **Update now** downloads the new `.flatpak`, checks it and opens it in your
-  software center (Discover, GNOME Software), where you install it. Then quit CrabyTube (**Quit** in
-  the tray menu) and open it again: until then the old version keeps running. The Flatpak has no way
-  to install a package itself. Versions before 0.1.2 do not check: install 0.1.2
-  the same way as the first one.
+- **Linux (Flatpak)**: **Update now** has Flatpak install the new version from CrabyTube's Flatpak
+  repository; the first time, the system asks whether CrabyTube may update itself. **Restart** then
+  opens the new version. Updates also appear in your software center (Discover, GNOME Software) and
+  with `flatpak update`, like those of any Flatpak. Versions before 0.1.2 do not check: install 0.1.2
+  as described under [Linux](#linux).
 
 Settings, favorites, the queue and the history are kept apart from the app, so an update leaves
 them as they are.
 
 Every release carries `update.json`, which names the version and the size and SHA-256 of the
-`.msi`, the Windows zip, the macOS zip and the `.flatpak`, and its Ed25519 signature by the release
-key. CrabyTube
+`.msi`, the Windows zip and the macOS zip, and its Ed25519 signature by the release key. CrabyTube
 uses it only when the signature is right, and installs a download only when its size and SHA-256
-match it, so a file that was changed, or a release someone else made, is never installed.
-`SHA256SUMS` lists the SHA-256 of every package, the `.dmg` included, for checking a download by
-hand.
+match it, so a file that was changed, or a release someone else made, is never installed. In the
+Flatpak repository every version and the list of versions are signed with the repository's GnuPG
+key, which Flatpak checks before it installs anything. `SHA256SUMS` lists the SHA-256 of every
+package, the `.dmg` included, for checking a download by hand.
 
 ## Discord
 
@@ -164,7 +177,9 @@ open before CrabyTube starts; the Discord and Vesktop Flatpaks are found at any 
   Discord Rich Presence (off by default) talks only to the Discord client running on your computer.
 - The update check (on by default, Settings → Updates) downloads `update.json` and its signature
   from the latest release on GitHub once a day, and the new package when you choose to update. The
-  requests carry the app's version in their user agent and nothing about you.
+  requests carry the app's version in their user agent and nothing about you. The Flatpak gets the
+  new version from CrabyTube's Flatpak repository on GitHub Pages, through Flatpak itself, which
+  also checks it for updates as it does every Flatpak repository you have.
 - Lyrics come from two services. LRCLIB (lrclib.net) receives the track's title and artist. Better
   Lyrics (api.betterlyrics.org) receives the title, the artist and the duration when they are
   known, and the YouTube video ID; its QQ Music and Kugou lookups go through the same service.

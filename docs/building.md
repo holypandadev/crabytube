@@ -107,11 +107,21 @@ Flatpak bundle (`packaging/linux/flatpak`), the Windows zip and installer
 workflow**, or `gh workflow run release.yml`) and keeps the packages as artifacts of the run. It
 publishes nothing, needs no secrets and only reads the repository.
 
+The Flatpak is also published to CrabyTube's Flatpak repository, which GitHub Pages serves from
+the repository `holypandadev/crabytube-flatpak` at `https://holypandadev.github.io/crabytube-flatpak/`.
+`scripts/flatpak-repo.py` takes the workflow's bundle into the repository in a checkout of that
+site, signs the commit and the summary with the repository's GnuPG key, and writes the bundle the
+release carries again, with the repository's address and public key: a copy installed from it gets
+its updates from the repository, as one installed with `crabytube.flatpakref` does. The site keeps
+only the current version, so its checkout is committed as a single commit and pushed with
+`--force`, which keeps the site repository small. The site goes up before the release is published:
+the app learns of a version from `update.json` and then asks the repository for it.
+
 A release also carries `update.json`, `update.json.sig` and `SHA256SUMS`, which
-`scripts/make-update-manifest.py` writes from the five packages and signs with the release key on
-the release machine. The key never goes into the repository or the workflow. Every
-third-party action and the Flatpak container image are pinned by commit or digest; update them
-deliberately and keep the version in the comment beside each one.
+`scripts/make-update-manifest.py` writes from the packages and signs with the release key on the
+release machine. Neither key goes into a repository or the workflow. Every third-party action and
+the Flatpak container image are pinned by commit or digest; update them deliberately and keep the
+version in the comment beside each one.
 
 ## Local data
 

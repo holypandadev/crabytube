@@ -6,8 +6,10 @@
 //!
 //! What an update does depends on how the app was installed: the Windows Installer package installs
 //! the new package, a Mac app replaces its own bundle, and a copy the app cannot replace (the
-//! Windows zip, an app outside a writable folder) points to the release page. A Flatpak, or any
-//! other Linux build, is updated by its package manager, so nothing is checked there.
+//! Windows zip, an app outside a writable folder) points to the release page. The Flatpak asks the
+//! Flatpak portal to update it from CrabyTube's Flatpak repository, which checks the repository's
+//! own signature, and starts the new version again. Other Linux builds are updated by their package
+//! manager, so nothing is checked there.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -46,8 +48,8 @@ pub enum Install {
     MacBundle(PathBuf),
     /// A copy the app cannot replace itself: a newer version is offered as its release page.
     Manual,
-    /// The Flatpak. The sandbox cannot install a package, so the update is downloaded, checked
-    /// and handed to the desktop's software center, where the user installs it.
+    /// The Flatpak. The Flatpak portal installs the update from the repository the app came from
+    /// (see `flatpak_update`); nothing is downloaded by the app.
     Flatpak,
     /// A Linux build outside the Flatpak, which its package manager or its builder updates:
     /// nothing is checked.
@@ -60,7 +62,8 @@ impl Install {
         *self != Install::Managed
     }
 
-    /// Whether the app downloads an update and installs it, or for the Flatpak hands it on.
+    /// Whether the app installs an update itself: it downloads the package, or for the Flatpak has
+    /// the portal install it.
     pub fn installs(&self) -> bool {
         matches!(
             self,
@@ -73,8 +76,7 @@ impl Install {
         match self {
             Install::WindowsMsi => Some("windows-msi"),
             Install::MacBundle(_) => Some("macos-zip"),
-            Install::Flatpak => Some("linux-flatpak"),
-            Install::Manual | Install::Managed => None,
+            Install::Manual | Install::Managed | Install::Flatpak => None,
         }
     }
 }
@@ -393,12 +395,6 @@ fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-/// The name of a downloaded Flatpak, which the software center installs from.
-const FLATPAK_DOWNLOAD: &str = "CrabyTube-update.flatpak";
-
-/// How long a downloaded Flatpak is kept for the software center.
-const HANDED_OVER_KEPT: Duration = Duration::from_secs(24 * 3600);
-
 /// The folder downloads go to before they are installed. It is emptied before each download.
 fn download_folder() -> Result<PathBuf, UpdateError> {
     crate::app_dirs::cache_dir()
@@ -408,18 +404,10 @@ fn download_folder() -> Result<PathBuf, UpdateError> {
 
 /// Removes what an earlier update downloaded. By the time the new version starts, the installer has
 /// its own copy, so the download only takes room. A file still open is left for the next start.
-/// A `.flatpak` waits a day: the software center reads it when its Install is clicked, which may
-/// come after CrabyTube was opened again.
 pub fn remove_old_downloads() {
     let Ok(folder) = download_folder() else {
         return;
     };
-    let handed_over = std::fs::metadata(folder.join(FLATPAK_DOWNLOAD))
-        .and_then(|metadata| metadata.modified())
-        .is_ok_and(|modified| modified.elapsed().unwrap_or_default() < HANDED_OVER_KEPT);
-    if handed_over {
-        return;
-    }
     if folder.exists() {
         match std::fs::remove_dir_all(&folder) {
             Ok(()) => tracing::info!("removed the download of an installed update"),
@@ -442,7 +430,6 @@ pub async fn download(
         .map_err(|error| UpdateError::Storage(error.to_string()))?;
     let name = match package.kind.as_str() {
         "windows-msi" => "CrabyTube-update.msi",
-        "linux-flatpak" => FLATPAK_DOWNLOAD,
         _ => "CrabyTube-update.zip",
     };
     let path = folder.join(name);
@@ -508,8 +495,6 @@ pub fn install(downloaded: &Path, install: &Install) -> Result<(), UpdateError> 
         Install::WindowsMsi => install_msi(downloaded),
         #[cfg(target_os = "macos")]
         Install::MacBundle(bundle) => install_mac_bundle(downloaded, bundle),
-        #[cfg(target_os = "linux")]
-        Install::Flatpak => open_in_software_center(downloaded),
         _ => {
             let _ = downloaded;
             Err(UpdateError::Install(
@@ -519,26 +504,181 @@ pub fn install(downloaded: &Path, install: &Install) -> Result<(), UpdateError> 
     }
 }
 
-/// Hands a downloaded Flatpak bundle to the desktop, which opens it in its software center (Discover,
-/// GNOME Software) for the user to install. The OpenURI portal receives the open file, so the
-/// sandbox needs no access to anything outside it.
+/// The argument of a CrabyTube started by the one it replaces after a Flatpak update: it waits for
+/// that copy to end instead of asking it to show its window.
+pub const AFTER_UPDATE_ARG: &str = "--after-update";
+
+/// How far the Flatpak portal has got with an update.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FlatpakProgress {
+    /// Under way, with the share done from 0 to 100.
+    Running(u32),
+    /// Installed: the new version starts the next time the app does.
+    Done,
+    /// The repository holds no newer version than the installed one.
+    NothingNew,
+    /// The new version asks for permissions the installed one does not have, which the portal does
+    /// not grant by itself: the software center or `flatpak update` installs it.
+    NewPermissions,
+    /// Updates of the app are turned off, by the answer to the system's question or in its privacy
+    /// settings.
+    NotAllowed,
+    /// Anything else, with the portal's explanation.
+    Failed(String),
+}
+
+/// What a `Progress` signal of the portal says.
 #[cfg(target_os = "linux")]
-fn open_in_software_center(bundle: &Path) -> Result<(), UpdateError> {
+fn flatpak_progress(
+    info: &std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+) -> FlatpakProgress {
+    let number = |key: &str| {
+        info.get(key)
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or_default()
+    };
+    let text = |key: &str| {
+        info.get(key)
+            .and_then(|value| String::try_from(value.clone()).ok())
+            .unwrap_or_default()
+    };
+    match number("status") {
+        0 => {
+            // Each operation (the app, and a runtime it needs) runs from 0 to 100.
+            let operations = number("n_ops").max(1);
+            let done = number("op").min(operations - 1);
+            FlatpakProgress::Running((done * 100 + number("progress").min(100)) / operations)
+        }
+        1 => FlatpakProgress::NothingNew,
+        2 => FlatpakProgress::Done,
+        _ => {
+            let (name, message) = (text("error"), text("error_message"));
+            if name.ends_with("AccessDenied") {
+                FlatpakProgress::NotAllowed
+            } else if name.ends_with("NotSupported") && message.contains("permissions") {
+                FlatpakProgress::NewPermissions
+            } else {
+                FlatpakProgress::Failed(if message.is_empty() { name } else { message })
+            }
+        }
+    }
+}
+
+/// Asks the Flatpak portal to install the newest version of the app from the repository it was
+/// installed from, and follows the installation. The portal checks the repository's signature,
+/// asks the user the first time whether the app may update itself, and refuses a version that
+/// needs new permissions. The stream ends with the outcome.
+#[cfg(target_os = "linux")]
+pub fn flatpak_update() -> futures_util::stream::BoxStream<'static, FlatpakProgress> {
+    use futures_util::StreamExt;
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    // The update starts when the stream is first read, on the app's runtime.
+    let start = futures_util::stream::once(async move {
+        tokio::spawn(async move {
+            if let Err(error) = follow_flatpak_update(&sender).await {
+                let _ = sender.send(FlatpakProgress::Failed(error.to_string()));
+            }
+        });
+    })
+    .filter_map(|()| async { None });
+    start
+        .chain(futures_util::stream::unfold(
+            receiver,
+            |mut receiver| async { receiver.recv().await.map(|progress| (progress, receiver)) },
+        ))
+        .boxed()
+}
+
+#[cfg(target_os = "linux")]
+async fn follow_flatpak_update(
+    sender: &tokio::sync::mpsc::UnboundedSender<FlatpakProgress>,
+) -> zbus::Result<()> {
+    use futures_util::StreamExt;
+    use std::collections::HashMap;
+    use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
+    /// A portal that falls silent this long has stopped; the update is given up.
+    const SILENCE: Duration = Duration::from_secs(10 * 60);
+    const PORTAL: &str = "org.freedesktop.portal.Flatpak";
+    let connection = zbus::Connection::session().await?;
+    let portal = zbus::Proxy::new(
+        &connection,
+        PORTAL,
+        "/org/freedesktop/portal/Flatpak",
+        PORTAL,
+    )
+    .await?;
+    let monitor: OwnedObjectPath = portal
+        .call("CreateUpdateMonitor", &(HashMap::<&str, Value<'_>>::new(),))
+        .await?;
+    let monitor = zbus::Proxy::new(
+        &connection,
+        PORTAL,
+        monitor,
+        "org.freedesktop.portal.Flatpak.UpdateMonitor",
+    )
+    .await?;
+    let mut signals = monitor.receive_signal("Progress").await?;
+    monitor
+        .call::<_, _, ()>("Update", &("", HashMap::<&str, Value<'_>>::new()))
+        .await?;
+    loop {
+        let Ok(Some(signal)) = tokio::time::timeout(SILENCE, signals.next()).await else {
+            let _ = sender.send(FlatpakProgress::Failed(
+                "the Flatpak portal stopped answering".into(),
+            ));
+            break;
+        };
+        let (info,): (HashMap<String, OwnedValue>,) = signal.body().deserialize()?;
+        let progress = flatpak_progress(&info);
+        let finished = !matches!(progress, FlatpakProgress::Running(_));
+        if sender.send(progress).is_err() || finished {
+            break;
+        }
+    }
+    let _ = monitor.call::<_, _, ()>("Close", &()).await;
+    Ok(())
+}
+
+/// Starts the newest installed version of the app through the Flatpak portal, which the app then
+/// gives way to by quitting. The new process waits for this one to end (`AFTER_UPDATE_ARG`).
+#[cfg(target_os = "linux")]
+pub async fn start_latest_flatpak() -> Result<(), UpdateError> {
     use std::collections::HashMap;
     use zbus::zvariant::{Fd, Value};
-    let failed = |error: &dyn std::fmt::Display| UpdateError::Install(error.to_string());
-    let file = std::fs::File::open(bundle).map_err(|error| failed(&error))?;
-    let connection = zbus::blocking::Connection::session().map_err(|error| failed(&error))?;
-    let options: HashMap<&str, Value<'_>> = HashMap::new();
-    connection
-        .call_method(
-            Some("org.freedesktop.portal.Desktop"),
-            "/org/freedesktop/portal/desktop",
-            Some("org.freedesktop.portal.OpenURI"),
-            "OpenFile",
-            &("", Fd::from(&file), options),
+    /// `FLATPAK_SPAWN_FLAGS_LATEST_VERSION`: the newest version installed, not the running one.
+    const LATEST_VERSION: u32 = 2;
+    const PORTAL: &str = "org.freedesktop.portal.Flatpak";
+    let failed = |error: zbus::Error| UpdateError::Install(error.to_string());
+    // The portal takes paths and arguments as C strings.
+    let c_string = |text: &str| {
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.push(0);
+        bytes
+    };
+    let connection = zbus::Connection::session().await.map_err(failed)?;
+    let portal = zbus::Proxy::new(
+        &connection,
+        PORTAL,
+        "/org/freedesktop/portal/Flatpak",
+        PORTAL,
+    )
+    .await
+    .map_err(failed)?;
+    let argv = vec![c_string("crabytube"), c_string(AFTER_UPDATE_ARG)];
+    let _pid: u32 = portal
+        .call(
+            "Spawn",
+            &(
+                c_string("/"),
+                argv,
+                HashMap::<u32, Fd<'_>>::new(),
+                HashMap::<&str, &str>::new(),
+                LATEST_VERSION,
+                HashMap::<&str, Value<'_>>::new(),
+            ),
         )
-        .map_err(|error| failed(&error))?;
+        .await
+        .map_err(failed)?;
     Ok(())
 }
 
@@ -869,21 +1009,82 @@ mod tests {
     }
 
     #[test]
-    fn the_flatpak_is_offered_its_own_package() {
+    fn the_flatpak_is_offered_the_version_and_downloads_nothing() {
         let json = format!(
-            r#"{{"version":"9.9.9","notes_url":"https://github.com/holypandadev/crabytube/releases/tag/v9.9.9","packages":[{{"kind":"windows-msi","url":"https://example.invalid/a.msi","size":10,"sha256":"{a}"}},{{"kind":"linux-flatpak","url":"https://example.invalid/CrabyTube.flatpak","size":20,"sha256":"{b}"}}]}}"#,
+            r#"{{"version":"9.9.9","notes_url":"https://github.com/holypandadev/crabytube/releases/tag/v9.9.9","packages":[{{"kind":"windows-msi","url":"https://example.invalid/a.msi","size":10,"sha256":"{a}"}}]}}"#,
             a = "a".repeat(64),
-            b = "b".repeat(64)
         );
         let manifest: Manifest = serde_json::from_str(&json).unwrap();
         let offer = newer(manifest.clone(), (0, 1, 1), &Install::Flatpak).unwrap();
-        let package = offer.package.unwrap();
-        assert_eq!(package.kind, "linux-flatpak");
-        assert_eq!(package.size, 20);
+        assert_eq!(offer.version, "9.9.9");
+        assert!(offer.package.is_none());
         // A build outside the Flatpak asks nothing; the Windows installer keeps its own package.
         assert!(!Install::Managed.checks());
         let msi = newer(manifest, (0, 1, 1), &Install::WindowsMsi).unwrap();
         assert_eq!(msi.package.unwrap().kind, "windows-msi");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_portal_progress_reads_as_the_app_shows_it() {
+        use zbus::zvariant::{OwnedValue, Value};
+        let info = |pairs: &[(&str, Value<'static>)]| {
+            pairs
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        (*key).to_owned(),
+                        OwnedValue::try_from(value.clone()).unwrap(),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        // The second of two operations, half done.
+        let running = info(&[
+            ("status", Value::U32(0)),
+            ("op", Value::U32(1)),
+            ("n_ops", Value::U32(2)),
+            ("progress", Value::U32(50)),
+        ]);
+        assert_eq!(flatpak_progress(&running), FlatpakProgress::Running(75));
+        // The first report, before any operation is known.
+        assert_eq!(
+            flatpak_progress(&info(&[("status", Value::U32(0))])),
+            FlatpakProgress::Running(0)
+        );
+        assert_eq!(
+            flatpak_progress(&info(&[("status", Value::U32(1))])),
+            FlatpakProgress::NothingNew
+        );
+        assert_eq!(
+            flatpak_progress(&info(&[("status", Value::U32(2))])),
+            FlatpakProgress::Done
+        );
+        let error = |name: &'static str, message: &'static str| {
+            flatpak_progress(&info(&[
+                ("status", Value::U32(3)),
+                ("error", Value::from(name)),
+                ("error_message", Value::from(message)),
+            ]))
+        };
+        assert_eq!(
+            error(
+                "org.freedesktop.DBus.Error.AccessDenied",
+                "Application update not allowed"
+            ),
+            FlatpakProgress::NotAllowed
+        );
+        assert_eq!(
+            error(
+                "org.freedesktop.DBus.Error.NotSupported",
+                "Self update not supported, new version requires new permissions"
+            ),
+            FlatpakProgress::NewPermissions
+        );
+        assert_eq!(
+            error("org.freedesktop.DBus.Error.Failed", "No remote refs found"),
+            FlatpakProgress::Failed("No remote refs found".into())
+        );
     }
 
     #[test]

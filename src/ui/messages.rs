@@ -73,6 +73,11 @@ pub(super) enum Message {
         total: u64,
     },
     UpdateDownloaded(Result<std::path::PathBuf, crate::updater::UpdateError>),
+    /// How far the Flatpak portal has got with the update.
+    FlatpakUpdateProgress(crate::updater::FlatpakProgress),
+    /// Starts the version the Flatpak portal installed, and quits.
+    RestartForUpdate,
+    RestartStarted(Result<(), crate::updater::UpdateError>),
     OpenUpdatePage,
     /// The main window exists: at start, or opened again from the tray.
     WindowOpened(iced::window::Id),

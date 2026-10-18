@@ -19,9 +19,32 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Version {} is available.", "新版本 {} 已发布。"),
         ("Downloading version {}… {}%", "正在下载版本 {}… {}%"),
         ("Installing the update…", "正在安装更新…"),
+        ("Updating to version {}… {}%", "正在更新到版本 {}… {}%"),
         (
-            "Install version {} in the window that opened, then quit CrabyTube and open it again.",
-            "请在打开的窗口中安装版本 {}，然后退出 CrabyTube 并重新打开。",
+            "Version {} is installed. Restart CrabyTube to use it.",
+            "版本 {} 已安装。重新启动 CrabyTube 即可使用。",
+        ),
+        ("Restart", "重新启动"),
+        ("Restarting…", "正在重新启动…"),
+        (
+            "Quit CrabyTube and open it again to use the new version.",
+            "退出 CrabyTube 并重新打开以使用新版本。",
+        ),
+        (
+            "The Flatpak repository has no newer version yet. Try again later.",
+            "Flatpak 仓库中还没有更新的版本。请稍后再试。",
+        ),
+        (
+            "The new version asks for new permissions. Update CrabyTube in your software center.",
+            "新版本需要新的权限。请在软件中心更新 CrabyTube。",
+        ),
+        (
+            "Updates of CrabyTube are turned off in the system's privacy settings.",
+            "CrabyTube 的更新已在系统隐私设置中关闭。",
+        ),
+        (
+            "The update could not be installed. If CrabyTube was installed from a file before version 0.1.2, install the new version once from the download page.",
+            "无法安装更新。如果 CrabyTube 是从 0.1.2 之前版本的文件安装的，请从下载页面安装一次新版本。",
         ),
         ("Update available", "有可用更新"),
         (

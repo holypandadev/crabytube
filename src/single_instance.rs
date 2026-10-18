@@ -28,11 +28,14 @@ static HELD: OnceLock<Mutex<Held>> = OnceLock::new();
 /// Returns whether this process should go on starting. `false` means another instance is running
 /// and has been asked to show its window. Any problem with the lock lets the app start: a failure
 /// here must never keep the app from opening.
-pub fn claim() -> bool {
+///
+/// `wait` is how long a running instance is given to end first, as the one that started this
+/// process after an update does: it quits once it has started it.
+pub fn claim(wait: std::time::Duration) -> bool {
     let Some(folder) = folder() else {
         return true;
     };
-    match claim_in(&folder) {
+    match claim_waiting(&folder, wait) {
         Claim::Duplicate => {
             notify_running(&folder);
             false
@@ -71,6 +74,17 @@ fn folder() -> Option<PathBuf> {
     crate::preferences::state_path()
         .parent()
         .map(Path::to_path_buf)
+}
+
+/// `claim_in`, asked again for as long as `wait` while another instance holds the lock.
+fn claim_waiting(folder: &Path, wait: std::time::Duration) -> Claim {
+    let started = std::time::Instant::now();
+    let mut claim = claim_in(folder);
+    while matches!(claim, Claim::Duplicate) && started.elapsed() < wait {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        claim = claim_in(folder);
+    }
+    claim
 }
 
 fn claim_in(folder: &Path) -> Claim {
@@ -213,6 +227,29 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cti-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn a_claim_that_waits_gets_the_lock_once_the_first_instance_ends() {
+        let dir = scratch("waiting");
+        let first = claim_in(&dir);
+        assert!(matches!(first, Claim::First(_)));
+        // Without waiting, the second launch is a duplicate.
+        assert!(matches!(
+            claim_waiting(&dir, std::time::Duration::ZERO),
+            Claim::Duplicate
+        ));
+        // The first one ends while the second waits.
+        let ending = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(first);
+        });
+        assert!(matches!(
+            claim_waiting(&dir, std::time::Duration::from_secs(10)),
+            Claim::First(_)
+        ));
+        ending.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

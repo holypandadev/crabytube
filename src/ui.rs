@@ -327,6 +327,8 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::UpdateChecked { .. }
         | Message::UpdateProgress { .. }
         | Message::UpdateDownloaded(_)
+        | Message::FlatpakUpdateProgress(_)
+        | Message::RestartStarted(_)
         | Message::Resized { .. }
         | Message::WindowGeometry { .. }
         | Message::MonitorMeasured(_)
@@ -643,6 +645,9 @@ impl App {
             self.remember_list_scroll();
             return iced::window::latest().and_then(iced::window::close);
         }
+        // Hidden in the menu bar, the app leaves the Dock as a hidden window leaves the taskbar.
+        #[cfg(target_os = "macos")]
+        crate::tray::show_in_dock(false);
         iced::window::latest().and_then(|id| iced::window::set_mode(id, iced::window::Mode::Hidden))
     }
 
@@ -671,6 +676,10 @@ impl App {
             return Task::none();
         }
         let was_hidden = std::mem::replace(&mut self.window_hidden_to_tray, false);
+        #[cfg(target_os = "macos")]
+        if was_hidden {
+            crate::tray::show_in_dock(true);
+        }
         if !self.window_closed_to_tray
             && reopens_to_show(wayland, self.window_focused, self.window_minimized)
         {
@@ -1765,6 +1774,9 @@ impl App {
             | Message::InstallUpdate
             | Message::UpdateProgress { .. }
             | Message::UpdateDownloaded(_)
+            | Message::FlatpakUpdateProgress(_)
+            | Message::RestartForUpdate
+            | Message::RestartStarted(_)
             | Message::OpenUpdatePage => return self.update_updates(message),
             Message::ShowWindowRequested => {
                 return self.show_window_from_tray_task();

@@ -189,6 +189,35 @@ impl TrayRemote {
     }
 }
 
+/// Puts the app in the Dock and the app switcher, or takes it out while its window is hidden in
+/// the menu bar, as a window closed to the tray leaves the taskbar on Linux and Windows. Must run
+/// on the main thread.
+#[cfg(target_os = "macos")]
+pub fn show_in_dock(shown: bool) {
+    use objc2::{
+        class, msg_send,
+        runtime::{AnyObject, Bool},
+    };
+    /// `NSApplicationActivationPolicyRegular` and `NSApplicationActivationPolicyAccessory`.
+    const REGULAR: isize = 0;
+    const ACCESSORY: isize = 1;
+    // Tests drive the interface from their own threads, where AppKit must not be touched.
+    if cfg!(test) {
+        return;
+    }
+    // SAFETY: called from the interface, which runs on the main thread once the application has
+    // started; both messages take and return plain values.
+    unsafe {
+        let application: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let _: Bool =
+            msg_send![application, setActivationPolicy: if shown { REGULAR } else { ACCESSORY }];
+        if shown {
+            // Back in the Dock, the app comes forward with its window.
+            let _: () = msg_send![application, activateIgnoringOtherApps: Bool::YES];
+        }
+    }
+}
+
 /// A click on the Dock icon, or opening the app again from the Finder or Spotlight, asks the app
 /// delegate to reopen. The delegate winit sets does not answer, so a window hidden to the menu bar
 /// would stay hidden: the answer is added to its class, and shows the window.

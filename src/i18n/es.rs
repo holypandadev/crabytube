@@ -23,8 +23,34 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Installing the update…", "Instalando la actualización…"),
         (
-            "Install version {} in the window that opened, then quit CrabyTube and open it again.",
-            "Instala la versión {} en la ventana que se abrió; luego sal de CrabyTube y vuelve a abrirlo.",
+            "Updating to version {}… {}%",
+            "Actualizando a la versión {}… {}%",
+        ),
+        (
+            "Version {} is installed. Restart CrabyTube to use it.",
+            "La versión {} está instalada. Reinicia CrabyTube para usarla.",
+        ),
+        ("Restart", "Reiniciar"),
+        ("Restarting…", "Reiniciando…"),
+        (
+            "Quit CrabyTube and open it again to use the new version.",
+            "Sal de CrabyTube y vuelve a abrirlo para usar la nueva versión.",
+        ),
+        (
+            "The Flatpak repository has no newer version yet. Try again later.",
+            "El repositorio Flatpak aún no tiene una versión más nueva. Inténtalo más tarde.",
+        ),
+        (
+            "The new version asks for new permissions. Update CrabyTube in your software center.",
+            "La nueva versión pide permisos nuevos. Actualiza CrabyTube en tu centro de software.",
+        ),
+        (
+            "Updates of CrabyTube are turned off in the system's privacy settings.",
+            "Las actualizaciones de CrabyTube están desactivadas en los ajustes de privacidad del sistema.",
+        ),
+        (
+            "The update could not be installed. If CrabyTube was installed from a file before version 0.1.2, install the new version once from the download page.",
+            "No se pudo instalar la actualización. Si CrabyTube se instaló desde un archivo anterior a la versión 0.1.2, instala la nueva versión una vez desde la página de descarga.",
         ),
         ("Update available", "Actualización disponible"),
         (

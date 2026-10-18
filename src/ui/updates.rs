@@ -2,7 +2,7 @@
 //! version, and the download and install of one. The work itself is in `crate::updater`.
 
 use super::*;
-use crate::updater::{Available, UpdateError};
+use crate::updater::{Available, FlatpakProgress, Install, UpdateError};
 
 /// The first automatic check waits this long after the start, so it never competes with Home.
 pub(super) const FIRST_CHECK_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
@@ -23,11 +23,21 @@ pub(super) enum UpdateState {
         received: u64,
         total: u64,
     },
-    /// The installer has started; the app quits.
+    /// The installer has started, or the new Flatpak version: the app quits.
     Installing,
-    /// The Flatpak's update was handed to the software center, where the user installs it. The
-    /// app goes on running until it is opened again.
-    HandedOver(Available),
+    /// The Flatpak portal installs the update, this far from 0 to 100.
+    UpdatingFlatpak {
+        available: Available,
+        percent: u32,
+    },
+    /// The Flatpak portal installed the update, which starts with the app. `restart_failed` when
+    /// the app could not start it itself.
+    Updated {
+        available: Available,
+        restart_failed: bool,
+    },
+    /// The new Flatpak version is being started; the app quits once it is.
+    Restarting(Available),
     /// What went wrong, in English (the key of its translation), and the update it concerned.
     Failed {
         reason: &'static str,
@@ -41,7 +51,9 @@ impl UpdateState {
         match self {
             UpdateState::Available(available)
             | UpdateState::Downloading { available, .. }
-            | UpdateState::HandedOver(available)
+            | UpdateState::UpdatingFlatpak { available, .. }
+            | UpdateState::Updated { available, .. }
+            | UpdateState::Restarting(available)
             | UpdateState::Failed {
                 available: Some(available),
                 ..
@@ -54,8 +66,36 @@ impl UpdateState {
     fn busy(&self) -> bool {
         matches!(
             self,
-            UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Installing
+            UpdateState::Checking
+                | UpdateState::Downloading { .. }
+                | UpdateState::UpdatingFlatpak { .. }
+                | UpdateState::Restarting(_)
+                | UpdateState::Installing
         )
+    }
+}
+
+/// The repository answered that it has nothing newer than the installed version.
+const FLATPAK_NOTHING_NEW: &str =
+    "The Flatpak repository has no newer version yet. Try again later.";
+/// The portal does not install a version that asks for new permissions.
+const FLATPAK_NEW_PERMISSIONS: &str =
+    "The new version asks for new permissions. Update CrabyTube in your software center.";
+/// The user turned the update down, now or in the system's privacy settings.
+const FLATPAK_NOT_ALLOWED: &str =
+    "Updates of CrabyTube are turned off in the system's privacy settings.";
+/// Most likely a copy installed from a file of an older version, which names no repository.
+const FLATPAK_FAILED: &str = "The update could not be installed. If CrabyTube was installed from a file before version 0.1.2, install the new version once from the download page.";
+
+/// The sentence Settings shows for an update the Flatpak portal did not install.
+fn flatpak_reason(progress: &FlatpakProgress) -> &'static str {
+    match progress {
+        FlatpakProgress::NothingNew => FLATPAK_NOTHING_NEW,
+        FlatpakProgress::NewPermissions => FLATPAK_NEW_PERMISSIONS,
+        FlatpakProgress::NotAllowed => FLATPAK_NOT_ALLOWED,
+        FlatpakProgress::Running(_) | FlatpakProgress::Done | FlatpakProgress::Failed(_) => {
+            FLATPAK_FAILED
+        }
     }
 }
 
@@ -101,13 +141,15 @@ impl App {
                 )
             }
             Message::UpdateChecked { manual, result } => {
-                // A late answer does not interrupt a download or an install under way, nor the
-                // instructions for an update handed to the software center.
+                // A late answer does not interrupt a download or an install under way, nor take
+                // away the restart of an installed update.
                 if matches!(
                     self.update,
                     UpdateState::Downloading { .. }
                         | UpdateState::Installing
-                        | UpdateState::HandedOver(_)
+                        | UpdateState::UpdatingFlatpak { .. }
+                        | UpdateState::Updated { .. }
+                        | UpdateState::Restarting(_)
                 ) {
                     return Task::none();
                 }
@@ -137,6 +179,9 @@ impl App {
                 };
                 if self.update.busy() {
                     return Task::none();
+                }
+                if self.update_install == Install::Flatpak {
+                    return self.start_flatpak_update(available);
                 }
                 let Some(package) = available
                     .package
@@ -189,11 +234,6 @@ impl App {
                     return Task::none();
                 };
                 match result.and_then(|path| crate::updater::install(&path, &self.update_install)) {
-                    Ok(()) if self.update_install == crate::updater::Install::Flatpak => {
-                        tracing::info!(version = %available.version, "the update was handed to the software center");
-                        self.update = UpdateState::HandedOver(available);
-                        Task::none()
-                    }
                     Ok(()) => {
                         tracing::info!(version = %available.version, "installing the update; quitting");
                         self.update = UpdateState::Installing;
@@ -209,6 +249,68 @@ impl App {
                     }
                 }
             }
+            Message::FlatpakUpdateProgress(progress) => {
+                let UpdateState::UpdatingFlatpak { available, percent } = &mut self.update else {
+                    return Task::none();
+                };
+                match progress {
+                    FlatpakProgress::Running(done) => *percent = done,
+                    FlatpakProgress::Done => {
+                        tracing::info!(version = %available.version, "the Flatpak portal installed the update");
+                        self.update = UpdateState::Updated {
+                            available: available.clone(),
+                            restart_failed: false,
+                        };
+                    }
+                    other => {
+                        tracing::warn!(outcome = ?other, "the Flatpak portal did not install the update");
+                        self.update = UpdateState::Failed {
+                            reason: flatpak_reason(&other),
+                            available: Some(available.clone()),
+                        };
+                    }
+                }
+                Task::none()
+            }
+            Message::RestartForUpdate => {
+                let UpdateState::Updated { available, .. } = &self.update else {
+                    return Task::none();
+                };
+                self.update = UpdateState::Restarting(available.clone());
+                #[cfg(target_os = "linux")]
+                {
+                    Task::perform(
+                        crate::updater::start_latest_flatpak(),
+                        Message::RestartStarted,
+                    )
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    Task::done(Message::RestartStarted(Err(UpdateError::Install(
+                        "only the Flatpak restarts this way".into(),
+                    ))))
+                }
+            }
+            Message::RestartStarted(result) => {
+                let UpdateState::Restarting(available) = &self.update else {
+                    return Task::none();
+                };
+                match result {
+                    Ok(()) => {
+                        tracing::info!("the new version started; quitting");
+                        self.exit_task()
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "the new version could not be started");
+                        // The update stays installed, with how to start it by hand.
+                        self.update = UpdateState::Updated {
+                            available: available.clone(),
+                            restart_failed: true,
+                        };
+                        Task::none()
+                    }
+                }
+            }
             Message::OpenUpdatePage => {
                 if let Some(available) = self.update.available() {
                     crate::updater::open_page(&available.notes_url);
@@ -216,6 +318,25 @@ impl App {
                 Task::none()
             }
             _ => unreachable!("update_inner routes only this group here"),
+        }
+    }
+
+    /// Has the Flatpak portal install the update, and follows it.
+    fn start_flatpak_update(&mut self, available: Available) -> Task<Message> {
+        self.update = UpdateState::UpdatingFlatpak {
+            available,
+            percent: 0,
+        };
+        #[cfg(target_os = "linux")]
+        {
+            Task::run(
+                crate::updater::flatpak_update(),
+                Message::FlatpakUpdateProgress,
+            )
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Task::none()
         }
     }
 
@@ -277,12 +398,36 @@ impl App {
                 None,
             ),
             UpdateState::Installing => (self.tr("Installing the update…").into_owned(), None),
-            // The page stays at hand in case no software center opened the package.
-            UpdateState::HandedOver(available) => (
-                self.tr_static(
-                    "Install version {} in the window that opened, then quit CrabyTube and open it again.",
-                )
-                .replacen("{}", &available.version, 1),
+            UpdateState::UpdatingFlatpak { available, percent } => (
+                self.tr_static("Updating to version {}… {}%")
+                    .replacen("{}", &available.version, 1)
+                    .replacen("{}", &percent.to_string(), 1),
+                None,
+            ),
+            UpdateState::Updated {
+                available,
+                restart_failed: false,
+            } => (
+                self.tr_static("Version {} is installed. Restart CrabyTube to use it.")
+                    .replacen("{}", &available.version, 1),
+                Some((self.tr_static("Restart"), Message::RestartForUpdate)),
+            ),
+            UpdateState::Updated {
+                restart_failed: true,
+                ..
+            } => (
+                self.tr("Quit CrabyTube and open it again to use the new version.")
+                    .into_owned(),
+                None,
+            ),
+            UpdateState::Restarting(_) => (self.tr("Restarting…").into_owned(), None),
+            // A copy installed from an old file, or a version that needs new permissions, is
+            // updated by hand: the release page has the package and the steps.
+            UpdateState::Failed {
+                reason,
+                available: Some(_),
+            } if [FLATPAK_FAILED, FLATPAK_NEW_PERMISSIONS].contains(reason) => (
+                self.tr(reason).into_owned(),
                 Some((self.tr_static("Download page"), Message::OpenUpdatePage)),
             ),
             UpdateState::Failed { reason, available } => (
@@ -297,7 +442,10 @@ impl App {
 
     /// Update now where the app installs it, the release page elsewhere.
     fn update_action(&self, available: &Available) -> (&'static str, Message) {
-        if available.package.is_some() && self.update_install.installs() {
+        // The Flatpak portal needs no package: it installs from the app's repository.
+        if self.update_install == Install::Flatpak
+            || (available.package.is_some() && self.update_install.installs())
+        {
             (self.tr_static("Update now"), Message::InstallUpdate)
         } else {
             (self.tr_static("Download page"), Message::OpenUpdatePage)
@@ -320,6 +468,105 @@ mod tests {
                 size: 10,
                 sha256: "a".repeat(64),
             }),
+        }
+    }
+
+    #[test]
+    fn the_flatpak_is_updated_by_the_portal_and_restarts_into_the_new_version() {
+        let mut app = App {
+            update_install: Install::Flatpak,
+            ..App::default()
+        };
+        app.update = UpdateState::Available(available(false));
+        assert!(matches!(
+            app.update_status().1,
+            Some(("Update now", Message::InstallUpdate))
+        ));
+        drop(app.update(Message::InstallUpdate));
+        assert!(matches!(
+            app.update,
+            UpdateState::UpdatingFlatpak { percent: 0, .. }
+        ));
+        drop(app.update(Message::FlatpakUpdateProgress(FlatpakProgress::Running(42))));
+        assert_eq!(app.update_status().0, "Updating to version 9.9.9… 42%");
+        // A check that answers meanwhile changes nothing.
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Ok(None),
+        }));
+        drop(app.update(Message::FlatpakUpdateProgress(FlatpakProgress::Done)));
+        let (status, action) = app.update_status();
+        assert_eq!(
+            status,
+            "Version 9.9.9 is installed. Restart CrabyTube to use it."
+        );
+        assert!(matches!(
+            action,
+            Some(("Restart", Message::RestartForUpdate))
+        ));
+        drop(app.update(Message::RestartForUpdate));
+        assert!(matches!(app.update, UpdateState::Restarting(_)));
+        // When the new version cannot be started, the app says how to start it by hand.
+        drop(app.update(Message::RestartStarted(Err(UpdateError::Install(
+            "no portal".into(),
+        )))));
+        assert_eq!(
+            app.update_status().0,
+            "Quit CrabyTube and open it again to use the new version."
+        );
+    }
+
+    #[test]
+    fn a_flatpak_update_the_portal_turns_down_says_why() {
+        let mut app = App {
+            update_install: Install::Flatpak,
+            ..App::default()
+        };
+        for (outcome, reason, page) in [
+            (FlatpakProgress::NothingNew, FLATPAK_NOTHING_NEW, false),
+            (
+                FlatpakProgress::NewPermissions,
+                FLATPAK_NEW_PERMISSIONS,
+                true,
+            ),
+            (FlatpakProgress::NotAllowed, FLATPAK_NOT_ALLOWED, false),
+            (
+                FlatpakProgress::Failed("No remote refs found".into()),
+                FLATPAK_FAILED,
+                true,
+            ),
+        ] {
+            app.update = UpdateState::UpdatingFlatpak {
+                available: available(false),
+                percent: 10,
+            };
+            drop(app.update(Message::FlatpakUpdateProgress(outcome)));
+            let (status, action) = app.update_status();
+            assert_eq!(status, reason);
+            let (label, _) = action.unwrap();
+            assert_eq!(label, if page { "Download page" } else { "Update now" });
+        }
+        for language in crate::preferences::UiLanguage::ALL {
+            if language == crate::preferences::UiLanguage::English {
+                continue;
+            }
+            for text in [
+                FLATPAK_NOTHING_NEW,
+                FLATPAK_NEW_PERMISSIONS,
+                FLATPAK_NOT_ALLOWED,
+                FLATPAK_FAILED,
+                "Updating to version {}… {}%",
+                "Version {} is installed. Restart CrabyTube to use it.",
+                "Restart",
+                "Restarting…",
+                "Quit CrabyTube and open it again to use the new version.",
+            ] {
+                assert_ne!(
+                    crate::i18n::translate(language, text),
+                    text,
+                    "{language:?}: {text}"
+                );
+            }
         }
     }
 
