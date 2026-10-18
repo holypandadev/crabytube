@@ -94,7 +94,10 @@ pub fn virtual_range(
     if total == 0 || row_pitch <= 0.0 {
         return 0..0;
     }
-    let first = (scroll_y.max(0.0) / row_pitch).floor() as usize;
+    // A list that got shorter keeps the offset it was scrolled to, and the scrollable reports no new
+    // one once its content fits: past the end the offset would show no row at all.
+    let furthest = (total as f32 * row_pitch - viewport_height.max(0.0)).max(0.0);
+    let first = (scroll_y.clamp(0.0, furthest) / row_pitch).floor() as usize;
     let visible = (viewport_height.max(0.0) / row_pitch).ceil() as usize;
     first.saturating_sub(overscan).min(total)
         ..first
@@ -243,7 +246,9 @@ mod tests {
             assert!(range.len() <= 27);
         }
         assert_eq!(virtual_range(0, 0.0, 700.0, 72.0, 8), 0..0);
-        assert_eq!(virtual_range(12, 10_000.0, 700.0, 72.0, 8), 12..12);
+        // An offset left from a longer list shows the end of this one, never nothing.
+        assert_eq!(virtual_range(12, 10_000.0, 700.0, 72.0, 8), 0..12);
+        assert_eq!(virtual_range(3, 10_000.0, 700.0, 72.0, 0), 0..3);
         assert_eq!(virtual_range(20, 0.0, 100.0, 72.0, 0), 0..2);
     }
 
