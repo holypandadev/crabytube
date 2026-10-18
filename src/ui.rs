@@ -1124,7 +1124,7 @@ impl App {
             }
             Message::RetryLyrics => {
                 if let Some(t) = self.playback_status.track.clone() {
-                    return self.load_lyrics(t);
+                    return self.lookup_lyrics(t, true);
                 }
             }
             Message::LyricsLoaded { generation, result } => {
@@ -3325,6 +3325,12 @@ impl App {
     }
 
     fn load_lyrics(&mut self, track: Track) -> Task<Message> {
+        self.lookup_lyrics(track, false)
+    }
+
+    /// Looks up the lyrics of `track`. `again` is a Retry, which asks the sources even when they
+    /// had nothing for the track a short while ago.
+    fn lookup_lyrics(&mut self, track: Track, again: bool) -> Task<Message> {
         // A track still named by its video ID has nothing to search for; its metadata reloads the lyrics.
         if metadata_pending(&track) {
             return Task::none();
@@ -3377,6 +3383,9 @@ impl App {
         });
         let load = Task::perform(
             async move {
+                if again {
+                    crate::lyrics::forget_miss(&track, duration).await;
+                }
                 tokio::select! {
                     _ = token.cancelled() => Err("Cancelled".into()),
                     result = crate::lyrics::load_with_progress(track, duration, move |lyrics| {

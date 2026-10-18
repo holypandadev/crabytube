@@ -16,8 +16,9 @@ pub const MAX_LYRICS_BYTES: u64 = 2 * 1024 * 1024;
 pub const LYRICS_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 /// Global deadline for the whole provider chain; the providers run concurrently.
 pub const LYRICS_DEADLINE: Duration = Duration::from_secs(10);
-/// Time-to-live for "no lyrics found", so a missing track is not searched again every time.
-const NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
+/// Time-to-live for "no lyrics found", so a missing track is not searched again every time, and for
+/// provisional lyrics (see `Provisional`).
+const SHORT_TTL: Duration = Duration::from_secs(24 * 3600);
 /// Age past which a temporary file in the lyrics cache is a leftover, not a write in progress.
 const STALE_TEMPORARY: Duration = Duration::from_secs(3600);
 /// After a line-timed result, word-timed sources get this long to answer.
@@ -79,12 +80,15 @@ impl Lyrics {
         next_word.chain(next_line).reduce(f64::min)
     }
 
+    /// Whether a text only says the track has no words: "Instrumental", "[Instrumental]". A song's
+    /// text can name an instrumental part between its verses, and it still has words.
     pub fn is_instrumental_text(text: &str) -> bool {
         let lower = text.trim().to_lowercase();
-        lower == "instrumental"
-            || lower.starts_with("instrumental ")
-            || lower.contains("[instrumental]")
-            || lower.contains("(instrumental)")
+        if lower.lines().count() > 1 || lower.chars().count() > 40 {
+            return false;
+        }
+        let bare = lower.trim_matches(|c: char| "[]() .♪".contains(c));
+        bare == "instrumental" || bare.starts_with("instrumental ")
     }
 }
 
@@ -287,6 +291,22 @@ fn timestamp(raw: &str) -> Option<f64> {
     }
     total.is_finite().then_some(total)
 }
+/// A time in an LRC tag. Some files write the hundredths after a colon, `[01:02:50]`, which is
+/// 1 min 2.5 s, not an hour.
+fn lrc_timestamp(raw: &str) -> Option<f64> {
+    let parts: Vec<&str> = raw.split(':').collect();
+    if let [minutes, seconds, fraction] = parts[..]
+        && (2..=3).contains(&fraction.len())
+        && fraction.bytes().all(|b| b.is_ascii_digit())
+        && !seconds.contains('.')
+    {
+        let fraction = fraction.parse::<f64>().ok()? / 10_f64.powi(fraction.len() as i32);
+        let total = minutes.parse::<f64>().ok()? * 60.0 + seconds.parse::<f64>().ok()? + fraction;
+        return total.is_finite().then_some(total);
+    }
+    timestamp(raw)
+}
+
 pub fn lrc(input: &str, source: &str) -> Lyrics {
     let mut lines = Vec::new();
     let mut offset = 0.0;
@@ -311,7 +331,9 @@ pub fn lrc(input: &str, source: &str) -> Lyrics {
             if !time.contains(':') {
                 break;
             }
-            let Some(time) = timestamp(time) else { break };
+            let Some(time) = lrc_timestamp(time) else {
+                break;
+            };
             times.push(time);
             rest = text;
         }
@@ -662,28 +684,53 @@ struct NotFound {
     not_found: bool,
 }
 
-fn negative_is_fresh(path: &std::path::Path) -> bool {
+/// On-disk form of lyrics kept for a day only: from a source that does not name the track they
+/// belong to, or plain text while a source that may have timed lyrics could not be reached.
+#[derive(Serialize, Deserialize)]
+struct Provisional<L> {
+    provisional: L,
+}
+
+fn short_lived_is_fresh(path: &std::path::Path) -> bool {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
-        .map(|modified| modified.elapsed().unwrap_or(Duration::MAX) <= NEGATIVE_TTL)
+        .map(|modified| modified.elapsed().unwrap_or(Duration::MAX) <= SHORT_TTL)
         .unwrap_or(false)
 }
 
-/// What a lookup leaves on disk: complete lyrics and a verified "not found". Plain text salvaged at the
-/// deadline is shown but never stored, because a later lookup may still find timed lyrics. Nor is a
-/// "not found" while a provider could not be reached (`some_unreachable`): it may have had them.
+/// What a lookup leaves on disk: complete lyrics, provisional lyrics and a verified "not found".
+/// Plain text salvaged at the deadline is shown but never stored, because a later lookup may still
+/// find timed lyrics. Nor is a "not found" while a provider could not be reached
+/// (`some_unreachable`): it may have had them.
 fn stored_form(
     result: &Result<Lyrics, String>,
     salvaged: bool,
     some_unreachable: bool,
+    unverified: bool,
 ) -> Option<Vec<u8>> {
     match result {
-        Ok(lyrics) if !salvaged => serde_json::to_vec(lyrics).ok(),
-        Ok(_) => None,
+        Ok(_) if salvaged => None,
+        Ok(lyrics) if unverified || (some_unreachable && lyrics.lines.is_empty()) => {
+            serde_json::to_vec(&Provisional {
+                provisional: lyrics,
+            })
+            .ok()
+        }
+        Ok(lyrics) => serde_json::to_vec(lyrics).ok(),
         Err(error) if error == NOT_FOUND && !some_unreachable => {
             serde_json::to_vec(&NotFound { not_found: true }).ok()
         }
         Err(_) => None,
+    }
+}
+
+/// Forgets that no source had lyrics for the track, so that Retry asks them again.
+pub async fn forget_miss(track: &Track, duration: Duration) {
+    let path = lyrics_cache_path(track, duration);
+    if let Ok(bytes) = tokio::fs::read(&path).await
+        && serde_json::from_slice::<NotFound>(&bytes).is_ok()
+    {
+        let _ = tokio::fs::remove_file(&path).await;
     }
 }
 
@@ -714,8 +761,13 @@ where
         if let Ok(lyrics) = serde_json::from_slice::<Lyrics>(&bytes) {
             return Ok(lyrics);
         }
+        if let Ok(entry) = serde_json::from_slice::<Provisional<Lyrics>>(&bytes)
+            && short_lived_is_fresh(&path)
+        {
+            return Ok(entry.provisional);
+        }
         if serde_json::from_slice::<NotFound>(&bytes).is_ok_and(|entry| entry.not_found)
-            && negative_is_fresh(&path)
+            && short_lived_is_fresh(&path)
         {
             return Err(NOT_FOUND.into());
         }
@@ -738,13 +790,8 @@ where
     // Global deadline for the whole chain; providers share one client.
     // Plain text kept when the deadline passed is shown, but it is not stored as a positive result.
     let mut salvaged = false;
-    let some_unreachable = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let lookup = load_inner(
-        track,
-        duration,
-        progress,
-        std::sync::Arc::clone(&some_unreachable),
-    );
+    let notes = std::sync::Arc::new(LookupNotes::default());
+    let lookup = load_inner(track, duration, progress, std::sync::Arc::clone(&notes));
     let result = match tokio::time::timeout(LYRICS_DEADLINE, lookup).await {
         Ok(result) => result,
         Err(_) => match latest_plain.lock().ok().and_then(|slot| slot.clone()) {
@@ -775,7 +822,10 @@ where
     let to_store = stored_form(
         &result,
         salvaged,
-        some_unreachable.load(std::sync::atomic::Ordering::Relaxed),
+        notes
+            .some_unreachable
+            .load(std::sync::atomic::Ordering::Relaxed),
+        notes.unverified.load(std::sync::atomic::Ordering::Relaxed),
     );
     if let Some(data) = to_store
         && let Some(parent) = path.parent()
@@ -854,9 +904,23 @@ fn name_key(name: &str) -> String {
     key
 }
 
+/// The same title, and the same version of it: a live take does not get the studio lyrics' timing.
 fn same_title(matched: &str, requested: &str) -> bool {
-    let (matched, requested) = (name_key(matched), name_key(requested));
-    !matched.is_empty() && matched == requested
+    let (matched_key, requested_key) = (name_key(matched), name_key(requested));
+    !matched_key.is_empty()
+        && matched_key == requested_key
+        && version_markers(matched) == version_markers(requested)
+}
+
+/// The text of an XML attribute or tag value with its character references decoded, as the names
+/// in QQ's lyrics come: "Mumford &amp; Sons".
+fn decode_entities(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
 }
 
 /// Artists are often credited together ("A & B"), so one name containing the other also matches.
@@ -881,6 +945,10 @@ fn verdict(text: &str, title: &str, artist: &str) -> Verdict {
     else {
         return Verdict::Unverified;
     };
+    let (matched_title, matched_artist) = (
+        decode_entities(&matched_title),
+        decode_entities(&matched_artist),
+    );
     if same_title(&matched_title, title) && same_artist(&matched_artist, artist) {
         Verdict::Verified
     } else {
@@ -1063,18 +1131,28 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
     }
     // In Japanese, Chinese or Russian the catalog writes a Western artist's name in that script
     // ("ダフト・パンク"), which LRCLIB does not know. The title alone, with a record of the same
-    // length, still finds the track.
+    // length, may still find the track, but nothing says it is the same artist's song: the result
+    // is unverified, and a record marked instrumental is not believed.
+    let mut by_title_unreachable = false;
     if track
         .artist
         .chars()
-        .any(|c| c.is_alphabetic() && !c.is_ascii())
+        .any(|c| c.is_alphabetic() && !is_latin(c))
     {
         let by_title = vec![("track_name", track.title.clone())];
-        if let Ok(Value::Array(found)) =
-            json(client, "https://lrclib.net/api/search", &by_title).await
-            && let Some(entry) = lrclib_best(&found, track, duration, false)
-        {
-            return lrclib_found(entry);
+        match json(client, "https://lrclib.net/api/search", &by_title).await {
+            Ok(Value::Array(found)) => {
+                if let Some(entry) = lrclib_best(&found, track, duration, false) {
+                    match lrclib_found(entry) {
+                        Found::Line(lyrics) | Found::Plain(lyrics) => {
+                            return Found::Unverified(lyrics);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(reason) => by_title_unreachable = matches!(reason, NoAnswer::Unreachable),
         }
     }
     // No record of this length has timed lines or text. Text from a record of another length is shown
@@ -1086,8 +1164,16 @@ async fn lrclib_provider(client: &reqwest::Client, track: &Track, duration: Dura
             plain: Some(text),
             length_mismatch: true,
         }),
+        // The search by title could not be made, so LRCLIB may still have the lyrics.
+        None if by_title_unreachable => Found::Unreachable,
         None => Found::Missing,
     }
+}
+
+/// Whether a letter is written in the Latin script, accents included: "é" in "Beyoncé" is, "ダ" is
+/// not.
+fn is_latin(c: char) -> bool {
+    c.is_ascii() || matches!(c, '\u{00C0}'..='\u{024F}' | '\u{1E00}'..='\u{1EFF}')
 }
 
 /// The LRCLIB record for the track: its title, its artist when `check_artist`, and its length, with
@@ -1186,11 +1272,20 @@ async fn better_lyrics_kugou_provider(
     }
 }
 
+/// What a lookup learned besides its result, which decides how long the result is kept.
+#[derive(Default)]
+struct LookupNotes {
+    /// A provider could not be reached, and may have had better lyrics.
+    some_unreachable: std::sync::atomic::AtomicBool,
+    /// The lyrics come from a source that does not name the track they belong to.
+    unverified: std::sync::atomic::AtomicBool,
+}
+
 async fn load_inner<F>(
     track: Track,
     duration: Duration,
     mut on_progress: F,
-    some_unreachable: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    notes: std::sync::Arc<LookupNotes>,
 ) -> Result<Lyrics, String>
 where
     F: FnMut(Lyrics),
@@ -1261,6 +1356,13 @@ where
         }
     }
     drop(running);
+    // A provider that could not be reached may have had them: a miss is shown but not kept, and
+    // plain text only for a day.
+    if unreachable > 0 {
+        notes
+            .some_unreachable
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     if let Some(lyrics) = best_line {
         return Ok(lyrics);
     }
@@ -1271,16 +1373,15 @@ where
         return Err("Instrumental track — no lyrics to display.".into());
     }
     if let Some((lyrics, _)) = unverified {
+        notes
+            .unverified
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         return Ok(lyrics);
     }
     if unreachable == providers {
         return Err(
             "Lyrics providers are unreachable. Check your connection and try again.".into(),
         );
-    }
-    // A provider that could not be reached may have had them: the miss is shown but not kept.
-    if unreachable > 0 {
-        some_unreachable.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     Err(NOT_FOUND.into())
 }
@@ -1428,6 +1529,21 @@ mod tests {
     }
 
     #[test]
+    fn hundredths_after_a_colon_are_hundredths() {
+        let lyrics = lrc("[01:02:50]A line\n[01:05:123]Next", "fixture");
+        let starts: Vec<f64> = lyrics.lines.iter().map(|line| line.start).collect();
+        assert_eq!(starts, [62.5, 65.123]);
+        // Hours, minutes and seconds with a fraction stay as they are.
+        assert_eq!(lrc_timestamp("1:02:03.50"), Some(3723.5));
+    }
+
+    #[test]
+    fn only_a_name_in_another_script_than_latin_searches_by_title_alone() {
+        assert!(is_latin('é') && is_latin('ö') && is_latin('ř') && is_latin('ệ'));
+        assert!(!is_latin('ダ') && !is_latin('Д') && !is_latin('周'));
+    }
+
+    #[test]
     fn lrc_multiple_timestamps_and_offset() {
         let l = lrc(
             "[offset:-200]\n[00:01.50][00:03.50]Hello\n[00:05.00]World",
@@ -1500,6 +1616,20 @@ mod tests {
             ),
             super::Found::Missing
         ));
+        // The answer is XML, so "&" in a name comes as "&amp;".
+        assert!(matches!(
+            super::qq_found(
+                &qq_answer("Example Song", "One &amp; Two"),
+                "Example Song",
+                "One & Two"
+            ),
+            super::Found::Word(_)
+        ));
+        // A live take is another recording, with other timing.
+        assert!(matches!(
+            super::qq_found(&text, "Example Song (Live)", "Example Artist"),
+            super::Found::Missing
+        ));
     }
 
     #[test]
@@ -1545,14 +1675,41 @@ mod tests {
             length_mismatch: false,
             plain: Some("words".into()),
         });
-        assert!(super::stored_form(&salvaged, true, false).is_none());
-        assert!(super::stored_form(&salvaged, false, false).is_some());
+        assert!(super::stored_form(&salvaged, true, false, false).is_none());
+        assert!(super::stored_form(&salvaged, false, false, false).is_some());
         let not_found: Result<Lyrics, String> = Err(super::NOT_FOUND.into());
-        assert!(super::stored_form(&not_found, false, false).is_some());
+        assert!(super::stored_form(&not_found, false, false, false).is_some());
         // A miss while a provider could not be reached is not kept.
-        assert!(super::stored_form(&not_found, false, true).is_none());
+        assert!(super::stored_form(&not_found, false, true, false).is_none());
         let timed_out: Result<Lyrics, String> = Err("timed out".into());
-        assert!(super::stored_form(&timed_out, false, false).is_none());
+        assert!(super::stored_form(&timed_out, false, false, false).is_none());
+    }
+
+    #[test]
+    fn lyrics_that_may_be_bettered_are_kept_for_a_day_only() {
+        let lyrics = |lines: Vec<Line>| Lyrics {
+            source: "fixture".into(),
+            plain: lines.is_empty().then(|| "words".to_owned()),
+            lines,
+            length_mismatch: false,
+        };
+        let provisional = |stored: Option<Vec<u8>>| {
+            let stored = stored.expect("stored");
+            serde_json::from_slice::<Lyrics>(&stored).is_err()
+                && serde_json::from_slice::<NotFound>(&stored).is_err()
+                && serde_json::from_slice::<Provisional<Lyrics>>(&stored).is_ok()
+        };
+        let plain = Ok(lyrics(Vec::new()));
+        let timed = Ok(lyrics(vec![timed_line(1.0, "A line")]));
+        // Lyrics that do not name their track, timed or not.
+        assert!(provisional(super::stored_form(&timed, false, false, true)));
+        // Plain text while a source that may have timed lyrics could not be asked.
+        assert!(provisional(super::stored_form(&plain, false, true, false)));
+        // Verified timed lyrics stay for the full time, whoever could not be reached.
+        assert!(!provisional(super::stored_form(&timed, false, true, false)));
+        assert!(!provisional(super::stored_form(
+            &plain, false, false, false
+        )));
     }
 
     #[test]
@@ -1755,6 +1912,14 @@ mod tests {
     fn instrumental_is_detected_without_invented_timings() {
         assert!(Lyrics::is_instrumental_text("Instrumental"));
         assert!(Lyrics::is_instrumental_text("[Instrumental]"));
+        assert!(Lyrics::is_instrumental_text(" (Instrumental track) "));
+        // A song that names its instrumental part still has words.
+        assert!(!Lyrics::is_instrumental_text(
+            "First verse\n[Instrumental]\nSecond verse"
+        ));
+        assert!(!Lyrics::is_instrumental_text(
+            "Instrumentals are what we play when the words run out of breath"
+        ));
         let l = lrc("Instrumental", "fixture");
         assert!(l.lines.is_empty());
     }

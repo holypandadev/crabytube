@@ -170,7 +170,7 @@ open before CrabyTube starts; the Discord and Vesktop Flatpaks are found at any 
   Without an API key it answers only for tracks it already holds, mostly popular songs.
   Lyrics are requested when the Lyrics tab is open, and also during the last 30 seconds of a track
   for the next track in the queue, so they are ready when that track starts. Fetched lyrics are
-  cached on this computer for 30 days.
+  cached on this computer for 30 days, or for a day when the source does not confirm the track.
 - The track that plays and the next one are downloaded to a temporary folder in the cache directory
   while they play. Files left behind by a crash are removed when CrabyTube starts, once they are old
   enough not to be in use.

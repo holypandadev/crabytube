@@ -643,7 +643,8 @@ mod ipc {
         }
     }
 
-    #[cfg(test)]
+    /// The test's fake Discord listens on a Unix socket.
+    #[cfg(all(test, unix))]
     pub(super) fn connect_to(
         path: &std::path::Path,
         client_id: &str,
