@@ -184,7 +184,9 @@ struct App {
     recent: Arc<Vec<crate::preferences::RecentPlay>>,
     /// The track whose start was last recorded in `recent`.
     recent_track_id: Option<String>,
-    discord_presence_key: Option<(String, bool)>,
+    /// What the last activity sent showed: the track, whether it was paused, and whether it had
+    /// the album, the cover and the length, which can arrive after the track starts.
+    discord_presence_key: Option<(String, bool, [bool; 3])>,
     discord_presence_position: Duration,
     discord_presence_updated_at: Option<std::time::Instant>,
     discord_presence_enabled_last: bool,
@@ -3411,7 +3413,7 @@ impl App {
                 let track_changed = self
                     .discord_presence_key
                     .as_ref()
-                    .is_some_and(|(active_id, _)| active_id != &track.video_id);
+                    .is_some_and(|(active_id, ..)| active_id != &track.video_id);
                 let should_clear = matches!(
                     state,
                     PlaybackState::Idle
@@ -3429,8 +3431,17 @@ impl App {
                 return;
             }
         };
-        let key = (track.video_id.clone(), paused);
         let position = self.playback_status.position;
+        let presence = self.presence_for(track, position, paused);
+        let key = (
+            presence.video_id.clone(),
+            paused,
+            [
+                presence.album.is_some(),
+                presence.artwork_url.is_some(),
+                presence.duration.is_some(),
+            ],
+        );
         let expected_position = self
             .discord_presence_updated_at
             .map(|updated| {
@@ -3446,7 +3457,6 @@ impl App {
             return;
         }
 
-        let presence = self.presence_for(track, position, paused);
         self.discord_presence.update(presence);
         self.discord_presence_key = Some(key);
         self.discord_presence_position = position;
@@ -6004,14 +6014,14 @@ mod tests {
         app.playback_status.track = Some(fixture_track("new"));
         app.playback_status.state = PlaybackState::Buffering;
         app.discord_presence_enabled_last = true;
-        app.discord_presence_key = Some(("old".into(), false));
+        app.discord_presence_key = Some(("old".into(), false, [false; 3]));
         app.discord_presence_updated_at = Some(std::time::Instant::now());
 
         app.sync_discord_presence(false);
         assert!(app.discord_presence_key.is_none());
         assert!(app.discord_presence_updated_at.is_none());
 
-        app.discord_presence_key = Some(("new".into(), false));
+        app.discord_presence_key = Some(("new".into(), false, [false; 3]));
         app.discord_presence_updated_at = Some(std::time::Instant::now());
         app.sync_discord_presence(false);
         assert_eq!(

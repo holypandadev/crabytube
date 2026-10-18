@@ -73,7 +73,7 @@ The Flatpak has no access to your Documents folder, so Settings → Export and I
 `~/.var/app/dev.holypanda.CrabyTube/data/crabytube-backup.json` instead.
 
 With Discord installed from your distribution rather than as a Flatpak, Discord Rich Presence works
-when Discord is already open as CrabyTube starts.
+when Discord is already open as CrabyTube starts (see [Discord](#discord)).
 
 ### Windows
 
@@ -143,6 +143,14 @@ uses it only when the signature is right, and installs a download only when its 
 match it, so a file that was changed, or a release someone else made, is never installed.
 `SHA256SUMS` lists the SHA-256 of every package, the `.dmg` included, for checking a download by
 hand.
+
+## Discord
+
+Discord Rich Presence shows on your Discord profile what you are listening to. Turn it on in
+**Settings → Integrations**; Settings then says whether Discord was reached. It needs the Discord
+desktop app, since the browser version has no local connection, and in Discord **Settings →
+Activity Privacy → Share my activity**. On Linux, a Discord installed from your distribution must be
+open before CrabyTube starts; the Discord and Vesktop Flatpaks are found at any time.
 
 ## Privacy
 

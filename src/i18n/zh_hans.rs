@@ -226,6 +226,14 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Discord 桌面客户端不可用 · 正在重试…",
         ),
         (
+            "Discord not found · if it was opened after CrabyTube, restart CrabyTube",
+            "未找到 Discord · 如果它是在 CrabyTube 之后打开的，请重新启动 CrabyTube",
+        ),
+        (
+            "Discord did not accept the activity",
+            "Discord 未接受该动态",
+        ),
+        (
             "Discord connection error · retrying…",
             "Discord 连接出错 · 正在重试…",
         ),

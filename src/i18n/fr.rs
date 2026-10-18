@@ -250,6 +250,14 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Application de bureau Discord indisponible · nouvelle tentative…",
         ),
         (
+            "Discord not found · if it was opened after CrabyTube, restart CrabyTube",
+            "Discord introuvable · s'il a été ouvert après CrabyTube, redémarrez CrabyTube",
+        ),
+        (
+            "Discord did not accept the activity",
+            "Discord n'a pas accepté l'activité",
+        ),
+        (
             "Discord connection error · retrying…",
             "Erreur de connexion à Discord · nouvelle tentative…",
         ),
