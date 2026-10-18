@@ -2642,6 +2642,10 @@ impl App {
         app.apply_ui_zoom();
         app.zoom_applied = app.ui_zoom;
         app.area = estimated_area(app.window_width, app.window_height);
+        // A place no connected screen shows is forgotten, so the next save does not keep it.
+        if app.preferences.window_position.is_some() && saved_window_position().is_none() {
+            app.preferences.window_position = None;
+        }
         // The window opens at the saved size; once it exists, what the compositor actually gave it
         // is read back (see `WindowOpened`).
         let (_, open_window) = iced::window::open(main_window_settings(
@@ -3982,14 +3986,10 @@ pub fn run() -> iced::Result {
 }
 
 /// The settings of the main window, opened at `size` (as Iced takes it) and maximized or not.
-fn main_window_settings(
-    size: iced::Size,
-    maximized: bool,
-    centered: bool,
-) -> iced::window::Settings {
-    // Where the window was left, while that place is still on a screen. The width is the saved
-    // one, in the system's points, like the position.
-    let saved = startup_state().as_ref().ok().and_then(|snapshot| {
+/// Where the window was left, while that place is still on a screen. The width is the saved one,
+/// in the system's points, like the position.
+fn saved_window_position() -> Option<(f64, f64)> {
+    startup_state().as_ref().ok().and_then(|snapshot| {
         let preferences = &snapshot.preferences;
         let (x, y) = preferences.window_position?;
         crate::screens::reachable(
@@ -3997,7 +3997,15 @@ fn main_window_settings(
             f64::from(preferences.window_width),
             &crate::screens::visible_areas(),
         )
-    });
+    })
+}
+
+fn main_window_settings(
+    size: iced::Size,
+    maximized: bool,
+    centered: bool,
+) -> iced::window::Settings {
+    let saved = saved_window_position();
     iced::window::Settings {
         size,
         maximized,
