@@ -1110,7 +1110,14 @@ fn lrclib_best<'a>(
                         .is_some_and(|s| artists_match(&track.artist, s)))
         })
         .filter(|v| record_matches_duration(v, duration))
-        .min_by_key(|v| v.get("syncedLyrics").and_then(Value::as_str).is_none())
+        // Timed lyrics first, then any lyrics, and a record marked instrumental only when no
+        // record of this version has words.
+        .min_by_key(|v| {
+            (
+                v.get("syncedLyrics").and_then(Value::as_str).is_none(),
+                v.get("instrumental").and_then(Value::as_bool) == Some(true),
+            )
+        })
 }
 
 fn lrclib_found(entry: &Value) -> Found {
@@ -1722,6 +1729,26 @@ mod tests {
             lrclib_found(&serde_json::json!({"plainLyrics": null})),
             Found::Missing
         ));
+        // Of two records of the same version, the one with words wins over the instrumental mark.
+        let track = crate::music::Track {
+            video_id: "id".into(),
+            title: "Song".into(),
+            artist: "Artist".into(),
+            album: None,
+            artist_page: None,
+            album_page: None,
+            thumbnail_url: None,
+            duration_secs: Some(200),
+        };
+        let entries = vec![
+            marked,
+            serde_json::json!({
+                "trackName": "Song", "artistName": "Artist", "duration": 200.0,
+                "instrumental": false, "plainLyrics": "Words", "syncedLyrics": null
+            }),
+        ];
+        let best = lrclib_best(&entries, &track, Duration::from_secs(200), true).unwrap();
+        assert_eq!(best["plainLyrics"], "Words");
     }
 
     #[test]

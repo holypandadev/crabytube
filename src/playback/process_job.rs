@@ -150,8 +150,8 @@ pub(super) fn hide_console_window(_command: &mut tokio::process::Command) {}
 const MAX_HELPER_OUTPUT_BYTES: u64 = 1024 * 1024;
 
 /// What a helper printed and how it ended. The scripts the helpers run come from the network, so
-/// their output is read up to `MAX_HELPER_OUTPUT_BYTES`; a helper that prints more is left to the
-/// caller's timeout.
+/// their output is read up to `MAX_HELPER_OUTPUT_BYTES`. The pipe is then closed, which ends a
+/// helper that goes on printing; the caller's timeout covers one that ignores that.
 pub(super) async fn bounded_output(
     child: &mut tokio::process::Child,
 ) -> std::io::Result<std::process::Output> {

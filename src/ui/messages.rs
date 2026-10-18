@@ -306,6 +306,8 @@ pub(super) enum Message {
     WindowMinimizedChecked(Option<bool>),
     /// A minute passed while Home is visible, so the greeting may have changed.
     ClockTick,
+    /// A second passed while Settings is visible, so its note follows whether saving fails.
+    SaveStatusCheck,
     /// Memory and CPU for the Home status line, sent only when the figures shown change.
     StatusReading(crate::process_stats::ProcessReading),
     /// A track notification was sent; zero when it was not.

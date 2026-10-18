@@ -165,6 +165,9 @@ struct App {
     window_hidden_to_tray: bool,
     /// The window was closed for the tray (Linux) and opens again from there.
     window_closed_to_tray: bool,
+    /// When a window was asked for that has not opened yet. Requests to show the window meanwhile
+    /// wait for that one, rather than opening a second window.
+    window_opening_since: Option<std::time::Instant>,
     /// How this copy was installed, which decides whether and how it updates itself.
     update_install: crate::updater::Install,
     update: updates::UpdateState,
@@ -308,6 +311,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::TrayServiceStarted(_)
         | Message::ShowWindowRequested
         | Message::ClockTick
+        | Message::SaveStatusCheck
         | Message::StatusReading(_)
         | Message::CheckForUpdates { manual: false }
         | Message::UpdateChecked { .. }
@@ -378,6 +382,9 @@ fn should_close_to_tray(preference_enabled: bool, tray_available: bool) -> bool 
     preference_enabled && tray_available
 }
 
+/// How long requests to show the window wait for one that is opening.
+const WINDOW_OPENING_PATIENCE: Duration = Duration::from_secs(5);
+
 /// Whether showing the open window takes closing it and opening it again. Wayland lets no client
 /// raise, focus or restore its own window, but the compositor puts a new window in front, so there
 /// a window that is not in front, behind others or minimized, is opened anew.
@@ -385,10 +392,14 @@ fn reopens_to_show(wayland: bool, focused: Option<bool>, minimized: bool) -> boo
     wayland && (minimized || focused != Some(true))
 }
 
-/// Whether the window is on Wayland, which winit picks whenever the session offers it.
+/// Whether the window is on Wayland, which winit picks whenever the session offers it. Read once,
+/// before the event loop starts: the Wayland library removes `WAYLAND_SOCKET` once it connects.
 fn wayland_session() -> bool {
-    let set = |name| std::env::var_os(name).is_some_and(|value| !value.is_empty());
-    cfg!(target_os = "linux") && (set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET"))
+    static WAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *WAYLAND.get_or_init(|| {
+        let set = |name| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+        cfg!(target_os = "linux") && (set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET"))
+    })
 }
 
 impl Default for App {
@@ -641,6 +652,14 @@ impl App {
     }
 
     fn show_window_task(&mut self, wayland: bool) -> Task<Message> {
+        // A double click on the tray icon or a launcher sends two requests; the second finds the
+        // window still opening. Past the patience, a window that never opened is asked for again.
+        if self
+            .window_opening_since
+            .is_some_and(|since| since.elapsed() < WINDOW_OPENING_PATIENCE)
+        {
+            return Task::none();
+        }
         self.window_hidden_to_tray = false;
         if !self.window_closed_to_tray
             && reopens_to_show(wayland, self.window_focused, self.window_minimized)
@@ -667,6 +686,7 @@ impl App {
                 self.preferences.window_maximized,
                 false,
             ));
+            self.window_opening_since = Some(std::time::Instant::now());
             return open.map(Message::WindowOpened);
         }
         iced::window::latest().and_then(move |id| {
@@ -751,6 +771,7 @@ impl App {
             }
             Message::WindowOpened(id) => {
                 // A new window is neither minimized nor hidden.
+                self.window_opening_since = None;
                 self.window_minimized = false;
                 self.window_hidden_to_tray = false;
                 // Read back what the compositor gave the window, and on the first launch fit it to
@@ -817,6 +838,11 @@ impl App {
                 }
                 self.search_cancel = None;
                 self.search_loading = false;
+                // The page shows what this search found, none or an error included, even when the
+                // field was edited while it ran.
+                if result.is_some() {
+                    self.search_committed = true;
+                }
                 match result {
                     Some(Ok(page)) => {
                         self.search_results = page
@@ -2094,6 +2120,8 @@ impl App {
             Message::ClockTick => {
                 self.clock = crate::local_clock::LocalClock::now();
             }
+            // Nothing changes here: the page is drawn again with what the writer reports now.
+            Message::SaveStatusCheck => {}
             Message::StatusReading(reading) => {
                 self.process_reading = Some(reading);
             }
@@ -2330,6 +2358,7 @@ impl App {
             tray_available: false,
             window_hidden_to_tray: false,
             window_closed_to_tray: false,
+            window_opening_since: None,
             update_install: crate::updater::Install::Managed,
             update: updates::UpdateState::default(),
             scroll_before_tray: None,
@@ -2513,9 +2542,10 @@ impl App {
         }
     }
 
-    /// Whether the last save of the state failed.
+    /// Whether changes are not being saved: the last save failed, or saving is off because an
+    /// unreadable state file could not be moved aside.
     fn save_failing(&self) -> bool {
-        self.persistence.as_ref().is_some_and(Persistence::failing)
+        self.persistence.as_ref().is_none_or(Persistence::failing)
     }
 
     fn tr<'a>(&self, source: &'a str) -> std::borrow::Cow<'a, str> {
@@ -3734,6 +3764,7 @@ fn window_icon() -> Option<iced::window::Icon> {
 }
 
 pub fn run() -> iced::Result {
+    wayland_session();
     // A daemon keeps running without a window: on Linux the window is closed while the app plays
     // from the tray, since Wayland cannot hide one, and opened again from there.
     iced::daemon(App::boot, App::update, App::view)
@@ -4065,8 +4096,26 @@ mod tests {
         let mut app = App::default();
         let second_launch = app.update(Message::ShowWindowRequested);
         assert!(second_launch.units() > 0);
+        let mut app = App::default();
         let tray_show = app.update(Message::TrayCommand(crate::tray::TrayCommand::ShowWindow));
         assert!(tray_show.units() > 0);
+    }
+
+    #[test]
+    fn a_second_request_waits_for_the_window_that_is_opening() {
+        let mut app = App {
+            window_focused: Some(false),
+            ..App::default()
+        };
+        assert!(app.show_window_task(true).units() > 0);
+        // A double click: the second request finds the new window still on its way.
+        assert_eq!(app.show_window_task(true).units(), 0);
+        drop(app.update(Message::WindowOpened(iced::window::Id::unique())));
+        assert!(app.window_opening_since.is_none());
+        assert!(app.show_window_task(true).units() > 0);
+        // A window that never opened does not keep the next request waiting for ever.
+        app.window_opening_since = Some(std::time::Instant::now() - super::WINDOW_OPENING_PATIENCE);
+        assert!(app.show_window_task(true).units() > 0);
     }
 
     #[test]
@@ -5691,6 +5740,25 @@ mod tests {
         assert_eq!(app.catalog_results.len(), 1);
         assert_eq!(app.committed_query, "Daft Punk");
         assert_eq!(app.page, Page::Search);
+
+        // A search that fails, or finds nothing, after an edit says so rather than showing Home.
+        for result in [
+            Err("YouTube Music could not be reached.".to_owned()),
+            Ok(CatalogPage {
+                items: vec![],
+                continuation: None,
+            }),
+        ] {
+            drop(app.update(Message::SearchChanged("Daft Punk".into())));
+            drop(app.update(Message::SearchSubmitted));
+            let request_id = app.search_request_id;
+            drop(app.update(Message::SearchChanged("Daft".into())));
+            drop(app.update(Message::CatalogCompleted {
+                request_id,
+                result: Some(result),
+            }));
+            assert!(!app.home_on_screen());
+        }
     }
 
     #[test]

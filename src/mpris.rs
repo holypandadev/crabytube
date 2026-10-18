@@ -637,7 +637,11 @@ fn emit_changed(connection: &zbus::blocking::Connection, old: &PlayerState, new:
 /// Whether the position moved other than by playback: a user seek, or a jump by the shell.
 /// A track change is not a seek, and neither is a pause or a resume.
 fn is_seek(old: &PlayerState, new: &PlayerState, since_last_change: Duration) -> bool {
-    if old.title != new.title || old.playback_status != new.playback_status {
+    // Another track starts at its own position; that is no seek, even under the same title.
+    if old.track_id != new.track_id
+        || old.title != new.title
+        || old.playback_status != new.playback_status
+    {
         return false;
     }
     if old.position == new.position {
@@ -707,6 +711,16 @@ mod tests {
         assert!(!is_seek(
             &at("a", "Playing", 10),
             &at("b", "Playing", 40),
+            half_second
+        ));
+        // Two tracks with the same title are still two tracks.
+        let other_track = PlayerState {
+            track_id: Some("second".into()),
+            ..at("a", "Playing", 0)
+        };
+        assert!(!is_seek(
+            &at("a", "Playing", 150),
+            &other_track,
             half_second
         ));
         // A pause or a resume is a playback change, not a seek.

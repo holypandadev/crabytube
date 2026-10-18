@@ -9,6 +9,10 @@ const NOW_PLAYING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 /// How often a window off screen reads the playback position on macOS, for the media session.
 const MEDIA_SESSION_TICK: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How often Settings looks again at whether saving fails, which the writer finds out on its own
+/// thread.
+const SAVE_STATUS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// The interval of the progress tick on `page`.
 pub(super) fn progress_tick(page: &Page) -> std::time::Duration {
     if *page == Page::NowPlaying {
@@ -70,6 +74,11 @@ impl App {
         } else {
             Subscription::none()
         };
+        let save_status = if self.page == Page::Settings && on_screen {
+            iced::time::every(SAVE_STATUS_TICK).map(|_| Message::SaveStatusCheck)
+        } else {
+            Subscription::none()
+        };
         let diagnostic = diagnostic_subscription();
         let carousel = if self.carousel.animating() {
             iced::window::frames().map(Message::CarouselFrame)
@@ -88,6 +97,7 @@ impl App {
         };
         Subscription::batch([
             diagnostic,
+            save_status,
             clock,
             status,
             carousel,
