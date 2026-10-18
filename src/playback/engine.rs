@@ -643,8 +643,9 @@ async fn actor(
     let mut prepared_ahead: Option<PreparedAhead> = None;
     // Set when an expired URL stopped a track: where to resume once the new stream is ready.
     let mut resume_at: Option<Duration> = None;
-    // One re-resolution per track; a second refusal is reported as a failure.
-    let mut resumed_this_track = false;
+    // When the stream of this track was last resolved again after a refusal. A refusal soon after is
+    // reported as a failure; one much later, as the URLs of a long broadcast expire, is resolved again.
+    let mut resolved_again_at: Option<Instant> = None;
     // The prefetch in flight, tracked so that Play and Stop can cancel it or wait for it.
     let mut prefetching: Option<Prefetching> = None;
     // A Play that waits for the prefetch of its track.
@@ -693,14 +694,26 @@ async fn actor(
                                 }
                             };
                             stream.fill_track(&mut track);
-                            if let Some((duration, source)) = prepare_stream(stream, token.clone(), prefetch_generation, events_tx.clone(), false).await {
-                                let _ = events_tx.send(Event::PreparedAhead { track, generation: prefetch_generation, duration, cancellation: token, source });
+                            match prepare_stream(stream, token.clone(), prefetch_generation, events_tx.clone(), false).await {
+                                Some((duration, source)) => {
+                                    let _ = events_tx.send(Event::PreparedAhead { track, generation: prefetch_generation, duration, cancellation: token, source });
+                                }
+                                // A Play may be waiting for this prefetch: it learns that nothing came,
+                                // and resolves the track itself.
+                                None => {
+                                    let _ = events_tx.send(Event::PrefetchFailed { generation: prefetch_generation });
+                                }
                             }
                         });
                     }
                 }
                 Some(Command::Play(track)) => {
-                    if let Some(token) = cancellation.take() { token.cancel(); }
+                    // Playing again the track whose prefetch a Play already waits for, as after a pause
+                    // while it loads, keeps that prefetch: the playback's token is the prefetch's own.
+                    let waits_again = awaiting.as_ref().is_some_and(|waiting| waiting.track.video_id == track.video_id)
+                        && prefetching.as_ref().is_some_and(|prefetch| prefetch.video_id == track.video_id);
+                    let token = cancellation.take();
+                    if !waits_again && let Some(token) = token { token.cancel(); }
                     if let Some(audio) = active.take() { let _ = audio.worker.send(WorkerCommand::Stop); }
                     clear_output(&mut output);
                     awaiting = None;
@@ -711,8 +724,9 @@ async fn actor(
                         prefetching.as_ref().map(|prefetch| prefetch.video_id.as_str()),
                         &track.video_id,
                     );
+                    // A prepared stream that failed while it waited is resolved again instead.
                     let ahead = match prepared {
-                        Some(ahead) if plan == PlayPlan::Prepared => Some(ahead),
+                        Some(ahead) if plan == PlayPlan::Prepared && !ahead.failed() => Some(ahead),
                         Some(stale) => {
                             stale.discard();
                             None
@@ -736,7 +750,7 @@ async fn actor(
                     seek_generation = seek_generation.wrapping_add(1);
                     paused_by_user = false;
                     resume_at = None;
-                    resumed_this_track = false;
+                    resolved_again_at = None;
                     first_audio_logged = false;
                     decoder_finished = false;
                     let selected_at = Instant::now();
@@ -1173,10 +1187,10 @@ async fn actor(
                     decoder_finished = true;
                     info!(generation, "TrackEnded received from decoder EOF");
                 }
-                Some(Event::Failed { generation: event_generation, error: failure }) if generation_matches(generation, event_generation) && !resumed_this_track && refused_by_googlevideo(&failure) && status.track.is_some() => {
+                Some(Event::Failed { generation: event_generation, error: failure }) if generation_matches(generation, event_generation) && resolved_again_at.is_none_or(|at| at.elapsed() >= RESOLVE_AGAIN_AFTER) && refused_by_googlevideo(&failure) && status.track.is_some() => {
                     // Googlevideo refused the URL mid-track, usually because it expired. Resolve once more and
                     // resume from the position playback reached; the output stays open, so the pause is short.
-                    resumed_this_track = true;
+                    resolved_again_at = Some(Instant::now());
                     // A live edge cannot be sought: the new resolution joins the broadcast where it is now.
                     resume_at = (!status.live).then_some(status.position);
                     warn!(failure = %redact_urls(&format!("{failure:?}")), position_ms = status.position.as_millis(), "stream URL refused mid-track; resolving again from this position");
@@ -1371,7 +1385,37 @@ struct PreparedAhead {
     decoder_events: Vec<Event>,
 }
 
+/// How long a stream resolved again after a refusal must play before another refusal is resolved
+/// again too. Broadcast URLs expire every few hours; a refusal sooner than this is a real failure.
+const RESOLVE_AGAIN_AFTER: Duration = Duration::from_secs(10 * 60);
+
+/// Reports a decoder thread that panicked, on data it could not handle, as a failure of its track.
+/// The thread would otherwise end without a word and the track would stay buffering.
+struct PanicReport {
+    events: mpsc::UnboundedSender<Event>,
+    generation: u64,
+}
+
+impl Drop for PanicReport {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            let _ = self.events.send(Event::Failed {
+                generation: self.generation,
+                error: EngineError::Worker("the audio decoder stopped unexpectedly".into()),
+            });
+        }
+    }
+}
+
 impl PreparedAhead {
+    /// Whether its stream already failed while it waited, as when the network dropped during the
+    /// download. Played, it would only report that failure.
+    fn failed(&self) -> bool {
+        self.decoder_events
+            .iter()
+            .any(|event| matches!(event, Event::Failed { .. }))
+    }
+
     fn discard(self) {
         self.cancellation.cancel();
         let _ = self.source.worker.send(WorkerCommand::Stop);
@@ -2124,6 +2168,10 @@ where
         let worker_result = thread::Builder::new()
             .name("crabytube-decoder".into())
             .spawn(move || {
+                let _panic_report = PanicReport {
+                    events: events.clone(),
+                    generation,
+                };
                 info!("first audio frame decoded");
                 // Holding a sender keeps the signal channel open for as long as this thread runs.
                 let _drained_open = drained_keepalive;
@@ -2244,6 +2292,34 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_decoder_thread_that_panics_reports_its_track_as_failed() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let worker = std::thread::spawn(move || {
+            let _report = super::PanicReport {
+                events,
+                generation: 7,
+            };
+            panic!("decoder failure");
+        });
+        assert!(worker.join().is_err());
+        assert!(matches!(
+            received.try_recv(),
+            Ok(super::Event::Failed { generation: 7, .. })
+        ));
+        // A thread that ends normally reports nothing.
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        std::thread::spawn(move || {
+            drop(super::PanicReport {
+                events,
+                generation: 8,
+            })
+        })
+        .join()
+        .unwrap();
+        assert!(received.try_recv().is_err());
+    }
+
     #[test]
     fn every_engine_error_message_has_a_spanish_entry() {
         use crate::preferences::UiLanguage;
