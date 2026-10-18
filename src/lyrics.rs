@@ -1114,6 +1114,10 @@ fn lrclib_best<'a>(
 }
 
 fn lrclib_found(entry: &Value) -> Found {
+    // An instrumental is marked by a flag, with both lyrics fields left empty.
+    if entry.get("instrumental").and_then(Value::as_bool) == Some(true) {
+        return Found::Instrumental;
+    }
     if let Some(s) = entry.get("syncedLyrics").and_then(Value::as_str) {
         return Found::Line(lrc(s, "LRCLIB"));
     }
@@ -1701,6 +1705,23 @@ mod tests {
         assert!(!titles_match("Song (Remix)", "Song"));
         assert!(!titles_match("Song (Cover)", "Song (Acoustic)"));
         assert!(titles_match("Song feat. Someone", "Song feat. Someone"));
+    }
+
+    #[test]
+    fn an_lrclib_record_marked_instrumental_is_an_instrumental() {
+        let marked = serde_json::json!({
+            "trackName": "Song", "artistName": "Artist", "duration": 200.0,
+            "instrumental": true, "plainLyrics": null, "syncedLyrics": null
+        });
+        assert!(matches!(lrclib_found(&marked), Found::Instrumental));
+        let sung = serde_json::json!({
+            "instrumental": false, "plainLyrics": "A line", "syncedLyrics": "[00:01.00] A line"
+        });
+        assert!(matches!(lrclib_found(&sung), Found::Line(_)));
+        assert!(matches!(
+            lrclib_found(&serde_json::json!({"plainLyrics": null})),
+            Found::Missing
+        ));
     }
 
     #[test]
