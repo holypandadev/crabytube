@@ -336,7 +336,9 @@ impl App {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            Task::none()
+            Task::done(Message::FlatpakUpdateProgress(FlatpakProgress::Failed(
+                "only the Flatpak updates this way".into(),
+            )))
         }
     }
 
