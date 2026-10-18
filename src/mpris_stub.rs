@@ -17,6 +17,8 @@ pub fn command_stream(_receiver: &CommandReceiver) -> BoxStream<'static, RemoteC
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerState {
+    /// The video id of the track, which names it in `mpris:trackid`.
+    pub track_id: Option<String>,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,

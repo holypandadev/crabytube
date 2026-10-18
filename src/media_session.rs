@@ -20,6 +20,8 @@ pub const SEEK_TOLERANCE: Duration = Duration::from_millis(1500);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerState {
+    /// The video id of the track, which names it in `mpris:trackid`.
+    pub track_id: Option<String>,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,

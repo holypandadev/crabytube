@@ -24,10 +24,31 @@ const OBJECT_PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 /// Slack for the wake-up timing when deciding that a position jump was a seek.
 const SEEK_TOLERANCE_SECS: f64 = 1.5;
-const TRACK_ID: &str = "/org/mpris/MediaPlayer2/Track/current";
+/// The `mpris:trackid` while no track is loaded, as the MPRIS specification names it.
+const NO_TRACK: &str = "/org/mpris/MediaPlayer2/TrackList/NoTrack";
+
+/// The `mpris:trackid` of a track: an object path made from its video id. Object paths allow only
+/// letters, digits and `_`, so any other byte, and `_` itself, is written as `_` and two hex digits;
+/// two different ids never give the same path.
+fn track_object_path(video_id: Option<&str>) -> String {
+    let Some(video_id) = video_id.filter(|id| !id.is_empty()) else {
+        return NO_TRACK.into();
+    };
+    let mut path = String::from("/dev/holypanda/CrabyTube/track/");
+    for byte in video_id.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            path.push(char::from(byte));
+        } else {
+            path.push_str(&format!("_{byte:02x}"));
+        }
+    }
+    path
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerState {
+    /// The video id of the track, which names it in `mpris:trackid`.
+    pub track_id: Option<String>,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
@@ -385,7 +406,8 @@ impl PlayerInterface {
     }
 
     fn set_position(&self, track_id: OwnedObjectPath, position: i64) {
-        if track_id.as_str() == TRACK_ID {
+        // A position for a track that is no longer the current one is ignored, as MPRIS asks.
+        if track_id.as_str() == track_object_path(self.snapshot().track_id.as_deref()) {
             self.send(RemoteCommand::SeekTo(position));
         }
     }
@@ -509,7 +531,8 @@ impl PlayerInterface {
 
 fn metadata(state: &PlayerState) -> HashMap<String, OwnedValue> {
     let mut values = HashMap::new();
-    let track = ObjectPath::try_from(TRACK_ID).expect("static MPRIS object path is valid");
+    let path = track_object_path(state.track_id.as_deref());
+    let track = ObjectPath::try_from(path).expect("track object paths use only allowed characters");
     values.insert("mpris:trackid".into(), variant(track));
     if let Some(title) = &state.title {
         values.insert("xesam:title".into(), variant(title.clone()));
@@ -545,7 +568,8 @@ fn position_micros(state: &PlayerState) -> i64 {
 }
 
 fn state_properties_changed(old: &PlayerState, new: &PlayerState) -> bool {
-    old.title != new.title
+    old.track_id != new.track_id
+        || old.title != new.title
         || old.artist != new.artist
         || old.album != new.album
         || old.art_url != new.art_url
@@ -577,7 +601,8 @@ fn emit_changed(connection: &zbus::blocking::Connection, old: &PlayerState, new:
     if old.volume != new.volume {
         changed.insert("Volume".into(), variant(new.volume));
     }
-    if old.title != new.title
+    if old.track_id != new.track_id
+        || old.title != new.title
         || old.artist != new.artist
         || old.album != new.album
         || old.art_url != new.art_url
@@ -707,6 +732,7 @@ mod tests {
     #[test]
     fn metadata_uses_mpris_types_and_bounds_duration() {
         let state = PlayerState {
+            track_id: Some("dQw4w9WgXcQ".into()),
             title: Some("Track".into()),
             artist: Some("Artist".into()),
             duration: Some(Duration::from_secs(180)),
@@ -723,7 +749,24 @@ mod tests {
         );
         let track_id =
             OwnedObjectPath::try_from(values["mpris:trackid"].try_clone().unwrap()).unwrap();
-        assert_eq!(track_id.as_str(), TRACK_ID);
+        assert_eq!(
+            track_id.as_str(),
+            "/dev/holypanda/CrabyTube/track/dQw4w9WgXcQ"
+        );
+    }
+
+    #[test]
+    fn every_track_has_its_own_valid_track_id() {
+        let ids = ["abc-def_GHI", "abc_def-GHI", "abc_2ddef", "a"];
+        let paths: Vec<String> = ids.iter().map(|id| track_object_path(Some(id))).collect();
+        for path in &paths {
+            assert!(ObjectPath::try_from(path.as_str()).is_ok(), "{path}");
+        }
+        assert_eq!(paths[0], "/dev/holypanda/CrabyTube/track/abc_2ddef_5fGHI");
+        let distinct: std::collections::HashSet<_> = paths.iter().collect();
+        assert_eq!(distinct.len(), ids.len());
+        assert_eq!(track_object_path(None), NO_TRACK);
+        assert_eq!(track_object_path(Some("")), NO_TRACK);
     }
 
     #[test]
@@ -744,6 +787,8 @@ mod tests {
         }
         let service = MprisRemote::start();
         service.update(PlayerState {
+            track_id: Some("bus-test_1".into()),
+            duration: Some(Duration::from_secs(200)),
             title: Some("Bus test".into()),
             artist: Some("CrabyTube".into()),
             playback_status: "Paused".into(),
@@ -778,21 +823,30 @@ mod tests {
             String::try_from(metadata["xesam:title"].try_clone().unwrap()).unwrap(),
             "Bus test"
         );
+        let current =
+            OwnedObjectPath::try_from(metadata["mpris:trackid"].try_clone().unwrap()).unwrap();
+        let stale = ObjectPath::try_from(track_object_path(Some("another"))).unwrap();
+        let _: () = proxy.call("SetPosition", &(stale, 5_000_000_i64)).unwrap();
         let _: () = root.call("Raise", &()).unwrap();
         let _: () = root.call("Quit", &()).unwrap();
         let _: () = proxy.call("PlayPause", &()).unwrap();
+        let _: () = proxy
+            .call("SetPosition", &(current, 7_000_000_i64))
+            .unwrap();
         let command_deadline = Instant::now() + Duration::from_secs(1);
         let mut received = Vec::new();
-        while received.is_empty() && Instant::now() < command_deadline {
-            received = service.drain();
+        while received.len() < 4 && Instant::now() < command_deadline {
+            received.extend(service.drain());
             thread::sleep(Duration::from_millis(5));
         }
+        // The position for another track is ignored; the one for the current track is sent.
         assert_eq!(
             received,
             vec![
                 RemoteCommand::Raise,
                 RemoteCommand::Quit,
-                RemoteCommand::PlayPause
+                RemoteCommand::PlayPause,
+                RemoteCommand::SeekTo(7_000_000)
             ]
         );
     }
