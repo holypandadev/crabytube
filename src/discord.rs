@@ -556,8 +556,17 @@ mod ipc {
 
         fn read_within(&mut self, buffer: &mut [u8], deadline: Instant) -> io::Result<()> {
             let left = deadline.saturating_duration_since(Instant::now());
-            self.0
-                .set_read_timeout(Some(left.max(Duration::from_millis(1))))?;
+            match self
+                .0
+                .set_read_timeout(Some(left.max(Duration::from_millis(1))))
+            {
+                Ok(()) => {}
+                // macOS refuses a new timeout (EINVAL) once Discord has closed its end, as it may
+                // after a refusal, though its reply still waits to be read. Reading then cannot
+                // block: it returns that reply or the end of the stream.
+                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+                Err(error) => return Err(error),
+            }
             self.0.read_exact(buffer)
         }
     }
