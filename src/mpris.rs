@@ -622,6 +622,10 @@ fn emit_changed(connection: &zbus::blocking::Connection, old: &PlayerState, new:
     if old.can_go_previous != new.can_go_previous {
         changed.insert("CanGoPrevious".into(), variant(new.can_go_previous));
     }
+    // A track can be sought once its length is known (see `can_seek`).
+    if old.duration.is_some() != new.duration.is_some() {
+        changed.insert("CanSeek".into(), variant(new.duration.is_some()));
+    }
     if !changed.is_empty() {
         let body = (PLAYER_IFACE, changed, Vec::<String>::new());
         let _ = connection.emit_signal(
