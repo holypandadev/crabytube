@@ -4,7 +4,10 @@ use iced::widget::image;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::OnceLock,
+    sync::{
+        OnceLock, PoisonError, RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -331,6 +334,27 @@ fn legacy_cache_path(url: &str) -> std::path::PathBuf {
     ))
 }
 
+/// How many times the cover folder has been cleared. A download that began before a clear does not
+/// save what it got, so the folder does not fill again with covers the user just cleared.
+static CLEARS: AtomicU64 = AtomicU64::new(0);
+
+/// Saves hold it shared and a clear holds it alone, so no file lands in the folder while it is being
+/// removed.
+static FOLDER: RwLock<()> = RwLock::new(());
+
+/// Runs `clear` alone on the cover folder, and turns away the saves of downloads already under way.
+pub fn clearing_folder<T>(clear: impl FnOnce() -> T) -> T {
+    let _alone = FOLDER.write().unwrap_or_else(PoisonError::into_inner);
+    CLEARS.fetch_add(1, Ordering::AcqRel);
+    clear()
+}
+
+/// Saves a downloaded cover unless the folder was cleared since the download began.
+fn save_unless_cleared(path: &std::path::Path, bytes: &[u8], clears_at_start: u64) -> bool {
+    let _shared = FOLDER.read().unwrap_or_else(PoisonError::into_inner);
+    CLEARS.load(Ordering::Acquire) == clears_at_start && atomic_save_bytes(path, bytes)
+}
+
 /// A temp file name no other save of this process uses. Covers are saved in parallel, and the clock
 /// alone does not tell two saves apart: on macOS it counts whole microseconds, and two saves that shared
 /// a file left one cover's picture under the other's name.
@@ -535,6 +559,7 @@ async fn fetch_in_lane(
     lane: Lane,
 ) -> Option<image::Handle> {
     let max_dim = max_dim.clamp(64, LARGE_MAX);
+    let clears_at_start = CLEARS.load(Ordering::Acquire);
     // Variant-specific file first, then legacy v4 master (downsampled).
     // Either hit avoids the network, so a second visit with an empty RAM
     // cache but warm disk reuses thumbs without re-downloading. Disk hits run
@@ -604,7 +629,7 @@ async fn fetch_in_lane(
         // after RAM eviction without forcing a 640px download for each row.
         let image = thumbnail_sized(&bytes, max_dim)?;
         let path = variant_cache_path(&url, max_dim);
-        atomic_save_bytes(&path, &bytes);
+        save_unless_cleared(&path, &bytes, clears_at_start);
         Some(rgba_handle(image))
     })
     .await
@@ -782,6 +807,25 @@ mod tests {
         thumbnail_sized(bytes, LARGE_MAX)
     }
 
+    #[test]
+    fn a_download_that_began_before_a_clear_is_not_saved() {
+        use std::sync::atomic::Ordering;
+        let directory = std::env::temp_dir().join(format!(
+            "crabytube-artwork-clear-race-{}",
+            std::process::id()
+        ));
+        let path = directory.join("cover.jpg");
+        let before = super::CLEARS.load(Ordering::Acquire);
+        super::clearing_folder(|| ());
+        assert!(!super::save_unless_cleared(&path, b"cover", before));
+        assert!(!path.exists());
+        // One that began after the clear is saved. Another test may clear meanwhile, so a few tries.
+        let saved = (0..3).any(|_| {
+            super::save_unless_cleared(&path, b"cover", super::CLEARS.load(Ordering::Acquire))
+        });
+        assert!(saved && path.is_file());
+        let _ = std::fs::remove_dir_all(directory);
+    }
     #[test]
     fn video_frames_are_cropped_to_square_without_letterbox_bars() {
         let mut frame = ::image::RgbaImage::from_pixel(480, 360, ::image::Rgba([0, 0, 0, 255]));

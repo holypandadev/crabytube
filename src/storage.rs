@@ -98,6 +98,16 @@ fn home_snapshots(root: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn clear_cache_at(root: &Path, kind: CacheKind) -> io::Result<u64> {
+    // Covers are saved as they download, so their folder is measured and removed with no save under
+    // way, and downloads that began before are not saved.
+    if kind == CacheKind::Artwork {
+        let folder = root.join("artwork");
+        return crate::artwork::clearing_folder(|| {
+            let bytes = directory_bytes(&folder);
+            remove_dir_if_present(&folder)?;
+            Ok(bytes)
+        });
+    }
     let bytes = match kind {
         CacheKind::Artwork => directory_bytes(&root.join("artwork")),
         CacheKind::Lyrics => directory_bytes(&root.join("lyrics")),
