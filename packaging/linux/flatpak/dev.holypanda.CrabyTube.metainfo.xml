@@ -48,6 +48,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.1" date="2026-10-18">
+      <description>
+        <p>Closing the window keeps CrabyTube in the tray, and Open in the tray brings the window
+        back to the front on Wayland. Also fixes for search, instrumental tracks, the media
+        controls and saving settings.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-16"/>
   </releases>
   <provides>
