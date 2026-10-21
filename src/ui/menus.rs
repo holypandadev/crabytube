@@ -222,6 +222,17 @@ impl App {
             RowContext::Plain => {}
             RowContext::Queue(index) => {
                 actions.push((
+                    "arrow-up",
+                    "Move up",
+                    (index > 0).then_some(Message::MoveInQueue { index, up: true }),
+                ));
+                actions.push((
+                    "arrow-down",
+                    "Move down",
+                    (index + 1 < self.queue.len())
+                        .then_some(Message::MoveInQueue { index, up: false }),
+                ));
+                actions.push((
                     "close",
                     "Remove from queue",
                     Some(Message::RemoveFromQueue(index)),
@@ -271,6 +282,8 @@ impl App {
         let playlist = self.playlists.get(place)?;
         let id = playlist.id;
         let full = !playlist.tracks.is_empty();
+        // Moving belongs to the user's order, shown whole.
+        let movable = self.library_reorderable();
         let width = self.panel_width(PANEL_W);
         let actions: Vec<Action> = vec![
             (
@@ -286,7 +299,7 @@ impl App {
             (
                 "arrow-up",
                 "Move up",
-                (place > 0).then_some(Message::MovePlaylist {
+                (movable && place > 0).then_some(Message::MovePlaylist {
                     index: place,
                     up: true,
                 }),
@@ -294,7 +307,7 @@ impl App {
             (
                 "arrow-down",
                 "Move down",
-                (place + 1 < self.playlists.len()).then_some(Message::MovePlaylist {
+                (movable && place + 1 < self.playlists.len()).then_some(Message::MovePlaylist {
                     index: place,
                     up: false,
                 }),

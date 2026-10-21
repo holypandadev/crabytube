@@ -29,6 +29,9 @@ const NAME_FIELD_MIN_W: f32 = 140.0;
 /// so the list glides.
 const DRAG_SCROLL_EVERY: std::time::Duration = std::time::Duration::from_millis(33);
 
+/// The room the heart of a song row takes.
+pub(super) const HEART_W: f32 = 44.0;
+
 /// The Save panel: its widest, and the cover of each list in it.
 const SAVE_PANEL_W: f32 = 440.0;
 const SAVE_COVER: f32 = 40.0;
@@ -70,6 +73,31 @@ impl App {
     /// Whether the song is in any of the user's lists, which fills its heart.
     pub(super) fn is_saved(&self, video_id: &str) -> bool {
         self.liked.contains(video_id) || self.in_playlists.contains(video_id)
+    }
+
+    /// The heart at the end of a song row, filled when the song is in one of the user's lists. A
+    /// press sends `message`: the Save panel, or what a row being dragged turns it into.
+    pub(super) fn row_heart<'a>(
+        &self,
+        track: &Track,
+        color: iced::Color,
+        current: bool,
+        message: Message,
+    ) -> Element<'a, Message> {
+        let saved = self.is_saved(&track.video_id);
+        container(
+            button(icon(
+                if saved { "like-filled" } else { "like" },
+                18.0,
+                color,
+            ))
+            .on_press(message)
+            .padding(6)
+            .style(theme::row_icon_button(current, false)),
+        )
+        .width(HEART_W)
+        .center_x(HEART_W)
+        .into()
     }
 
     /// Notes again which songs are in a playlist, after the playlists changed.
@@ -282,17 +310,34 @@ impl App {
                 }
             }
             Message::RemoveFromList { list, index } => {
-                if self
+                let Some(track) = self
                     .list_songs(list)
-                    .is_some_and(|songs| index < songs.len())
-                {
-                    self.with_list_songs(list, |songs| {
-                        songs.remove(index);
-                    });
-                    self.row_menu = None;
-                    self.row_cursor = None;
-                    self.persist();
-                }
+                    .and_then(|songs| songs.get(index))
+                    .cloned()
+                else {
+                    return Task::none();
+                };
+                self.with_list_songs(list, |songs| {
+                    songs.remove(index);
+                });
+                self.row_menu = None;
+                self.row_cursor = None;
+                self.persist();
+                let name = match list {
+                    ListId::Favorites => String::new(),
+                    ListId::Playlist(id) => self
+                        .playlist(id)
+                        .map(|playlist| playlist.name.clone())
+                        .unwrap_or_default(),
+                };
+                return self.show_toast(
+                    super::toast::Note::RemovedFrom { list, name },
+                    Some(super::toast::ToastAction::RestoreListSong {
+                        list,
+                        index,
+                        track: Box::new(track),
+                    }),
+                );
             }
             Message::MoveInList { list, index, up } => {
                 let count = self.list_songs(list).map_or(0, <[Track]>::len);
@@ -514,6 +559,90 @@ impl App {
         self.persist();
     }
 
+    /// Makes a playlist named `name` of `tracks`, with `cover` as its cover: a playlist or album of
+    /// YouTube Music, or the queue. A song in it twice goes in once, and what the limits leave no
+    /// room for is left out; the note says how much went in, with a button that opens it.
+    pub(super) fn save_as_playlist(
+        &mut self,
+        name: &str,
+        tracks: &[Track],
+        cover: Option<String>,
+    ) -> Task<Message> {
+        use super::toast::{Note, ToastAction};
+        if self.playlists.len() >= MAX_PLAYLISTS {
+            return self.show_toast(Note::Limit(PlaylistNotice::TooManyPlaylists), None);
+        }
+        let total: usize = self
+            .playlists
+            .iter()
+            .map(|playlist| playlist.tracks.len())
+            .sum();
+        let room = MAX_PLAYLIST_TRACKS.min(MAX_PLAYLIST_TRACKS_TOTAL.saturating_sub(total));
+        if room == 0 {
+            return self.show_toast(Note::Limit(PlaylistNotice::AllFull), None);
+        }
+        let mut seen = HashSet::new();
+        let unique: Vec<&Track> = tracks
+            .iter()
+            .filter(|track| seen.insert(track.video_id.as_str()))
+            .collect();
+        let of = unique.len();
+        let songs: Vec<Track> = unique
+            .into_iter()
+            .take(room)
+            .map(|track| {
+                let mut track = track.clone();
+                if track.duration_secs.is_none() {
+                    track.duration_secs = self.stored_duration_secs(&track.video_id);
+                }
+                track
+            })
+            .collect();
+        let saved = songs.len();
+        let name =
+            clean_playlist_name(name).unwrap_or_else(|| self.tr("New playlist").into_owned());
+        let id = next_playlist_id(&self.playlists);
+        Arc::make_mut(&mut self.playlists).push(Playlist {
+            id,
+            name: name.clone(),
+            tracks: songs,
+            cover: cover.filter(|url| url.len() <= crate::preferences::MAX_COVER_URL_BYTES),
+            cover_file: None,
+        });
+        self.persist();
+        self.show_toast(
+            Note::PlaylistSaved { name, saved, of },
+            Some(ToastAction::Open(ListId::Playlist(id))),
+        )
+    }
+
+    /// Puts a song taken out of a list back at its place: Undo on the note about it. A list that
+    /// is gone, has the song again, or is full meanwhile is left as it is.
+    pub(super) fn restore_list_song(&mut self, list: ListId, index: usize, track: Track) {
+        let Some(count) = self.list_songs(list).map(<[Track]>::len) else {
+            return;
+        };
+        if self.list_contains(list, &track.video_id) {
+            return;
+        }
+        let total: usize = self
+            .playlists
+            .iter()
+            .map(|playlist| playlist.tracks.len())
+            .sum();
+        let full = match list {
+            ListId::Favorites => count >= MAX_LOCAL_FAVORITES,
+            ListId::Playlist(_) => {
+                count >= MAX_PLAYLIST_TRACKS || total >= MAX_PLAYLIST_TRACKS_TOTAL
+            }
+        };
+        if full {
+            return;
+        }
+        self.with_list_songs(list, |songs| songs.insert(index.min(songs.len()), track));
+        self.persist();
+    }
+
     /// Changes a list's songs, and keeps what is worked out from them in step.
     fn with_list_songs(&mut self, list: ListId, change: impl FnOnce(&mut Vec<Track>)) {
         match list {
@@ -656,6 +785,7 @@ impl App {
         match list {
             DragList::Songs(list) => self.list_songs(list).map_or(0, <[Track]>::len),
             DragList::Lists => self.playlists.len(),
+            DragList::Queue => self.queue.len(),
         }
     }
 
@@ -682,6 +812,12 @@ impl App {
                 super::library::LIST_ROW_PITCH,
                 self.lists_scroll.y,
                 1,
+            ),
+            DragList::Queue => (
+                "queue-content",
+                self.preferences.ui_density.queue_row_pitch(),
+                self.queue_scroll.y,
+                0,
             ),
         }
     }
@@ -763,6 +899,7 @@ impl App {
         match drag.list {
             DragList::Songs(_) => self.library_scroll = scrolled,
             DragList::Lists => self.lists_scroll = scrolled,
+            DragList::Queue => self.queue_scroll = scrolled,
         }
         self.aim_drag();
         Task::batch([
@@ -794,6 +931,7 @@ impl App {
                 let playlist = playlists.remove(from);
                 playlists.insert(to, playlist);
             }
+            DragList::Queue => self.move_in_queue(from, to),
         }
         self.row_menu = None;
         self.row_cursor = None;
@@ -850,6 +988,10 @@ impl App {
                 .playlists
                 .get(drag.from)
                 .map(|playlist| playlist.name.clone()),
+            DragList::Queue => self
+                .queue
+                .get(drag.from)
+                .map(|track| display_title(&track.title).to_owned()),
         }?;
         let height = self.drag_list_height;
         let mut layers = iced::widget::stack![];
@@ -1192,6 +1334,106 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_queue_is_saved_as_a_playlist_once_per_song_and_the_note_opens_it() {
+        use super::super::toast::{Note, ToastAction};
+        let mut app = App {
+            queue: Arc::new(vec![song("a"), song("b"), song("a"), song("c")]),
+            queue_index: Some(1),
+            ..App::default()
+        };
+        drop(app.update(Message::SaveQueue));
+        let playlist = app.playlists.last().expect("a playlist");
+        let ids: Vec<&str> = playlist
+            .tracks
+            .iter()
+            .map(|t| t.video_id.as_str())
+            .collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(playlist.name, "Saved queue");
+        let id = playlist.id;
+        let toast = app.toast.clone().expect("a note");
+        assert_eq!(
+            toast.note,
+            Note::PlaylistSaved {
+                name: "Saved queue".into(),
+                saved: 3,
+                of: 3
+            }
+        );
+        assert_eq!(toast.action, Some(ToastAction::Open(ListId::Playlist(id))));
+        drop(app.update(Message::ToastPressed(toast.count)));
+        assert_eq!(app.page, Page::List(ListId::Playlist(id)));
+        assert!(
+            app.in_playlists.contains("c"),
+            "the hearts follow the new playlist"
+        );
+    }
+
+    #[test]
+    fn a_saved_playlist_takes_only_the_songs_the_limits_leave_room_for() {
+        use super::super::toast::Note;
+        let mut app = App::default();
+        let full: Vec<Track> = (0..MAX_PLAYLIST_TRACKS)
+            .map(|n| song(&format!("x{n}")))
+            .collect();
+        let songs: Vec<Track> = (0..MAX_PLAYLIST_TRACKS + 5)
+            .map(|n| song(&format!("s{n}")))
+            .collect();
+        drop(app.save_as_playlist("Big", &songs, None));
+        assert_eq!(app.playlists[0].tracks.len(), MAX_PLAYLIST_TRACKS);
+        assert!(matches!(
+            app.toast.as_ref().map(|toast| &toast.note),
+            Some(Note::PlaylistSaved { saved, of, .. })
+                if *saved == MAX_PLAYLIST_TRACKS && *of == MAX_PLAYLIST_TRACKS + 5
+        ));
+        // Once the playlists hold all they can, nothing is made and the note says why.
+        while app.playlists.iter().map(|p| p.tracks.len()).sum::<usize>()
+            < MAX_PLAYLIST_TRACKS_TOTAL
+        {
+            drop(app.save_as_playlist("More", &full, None));
+        }
+        let count = app.playlists.len();
+        drop(app.save_as_playlist("One more", &songs, None));
+        assert_eq!(app.playlists.len(), count);
+        assert_eq!(
+            app.toast.as_ref().map(|toast| &toast.note),
+            Some(&Note::Limit(PlaylistNotice::AllFull))
+        );
+    }
+
+    #[test]
+    fn the_library_filters_and_sorts_its_playlists_with_favorite_songs_first() {
+        use crate::preferences::LibrarySort;
+        let mut app = library();
+        for name in ["Rock", "ambient", "Road trip"] {
+            make(&mut app, name);
+            drop(app.update(Message::Navigate(Page::Library)));
+        }
+        // Rows by place: Favorite songs is 0, then the playlists in the user's order.
+        assert_eq!(app.library_rows(), [0, 1, 2, 3]);
+        assert!(app.library_reorderable());
+        drop(app.update(Message::Preference(Preference::LibrarySort(
+            LibrarySort::Name,
+        ))));
+        assert_eq!(app.library_rows(), [0, 2, 3, 1]);
+        assert!(
+            !app.library_reorderable(),
+            "dragging is for the user's order"
+        );
+        drop(app.update(Message::Preference(Preference::LibrarySort(
+            LibrarySort::Recent,
+        ))));
+        assert_eq!(app.library_rows(), [0, 3, 2, 1]);
+        // The filter ignores case, and leaves Favorite songs out when its name does not match.
+        drop(app.update(Message::LibraryFilterChanged("RO".into())));
+        assert_eq!(app.library_rows(), [3, 1]);
+        drop(app.update(Message::LibraryFilterChanged("favorite".into())));
+        assert_eq!(app.library_rows(), [0]);
+        drop(app.update(Message::LibraryFilterChanged("nothing".into())));
+        assert!(app.library_rows().is_empty());
+    }
+
     /// Makes a playlist from the Library page and returns its id.
     fn make(app: &mut App, name: &str) -> u64 {
         drop(app.update(Message::NewPlaylist(None)));
@@ -1482,6 +1724,45 @@ mod tests {
         drop(app.update(Message::PointerHeld(false)));
         let order: Vec<u64> = app.playlists.iter().map(|playlist| playlist.id).collect();
         assert_eq!(order, [ids[2], ids[0], ids[1]]);
+    }
+
+    #[test]
+    fn a_dragged_queue_entry_moves_and_the_playing_track_stays_current() {
+        let mut app = App {
+            page: Page::NowPlaying,
+            queue: Arc::new(["a", "b", "c", "d", "e"].map(song).to_vec()),
+            queue_index: Some(1),
+            ..App::default()
+        };
+        let pitch = app.preferences.ui_density.queue_row_pitch();
+        let order =
+            |app: &App| -> Vec<String> { app.queue.iter().map(|t| t.video_id.clone()).collect() };
+        // The track that plays, "b", goes to the end.
+        drop(app.update(Message::DragPressed {
+            list: DragList::Queue,
+            index: 1,
+        }));
+        point(&mut app, 1.5 * pitch);
+        point(&mut app, 5.0 * pitch);
+        drop(app.update(Message::PointerHeld(false)));
+        assert_eq!(order(&app), ["a", "c", "d", "e", "b"]);
+        assert_eq!(app.queue_index, Some(4));
+        // "e" moves above "a": the track that plays is pushed one place down.
+        drop(app.update(Message::DragPressed {
+            list: DragList::Queue,
+            index: 3,
+        }));
+        point(&mut app, 3.5 * pitch);
+        point(&mut app, 0.0);
+        drop(app.update(Message::DragReleased));
+        assert_eq!(order(&app), ["e", "a", "c", "d", "b"]);
+        assert_eq!(app.queue_index, Some(4));
+        // Move up and down from a ••• menu keep it too.
+        drop(app.update(Message::MoveInQueue { index: 4, up: true }));
+        assert_eq!(order(&app), ["e", "a", "c", "b", "d"]);
+        assert_eq!(app.queue_index, Some(3));
+        drop(app.update(Message::MoveInQueue { index: 0, up: true }));
+        assert_eq!(order(&app), ["e", "a", "c", "b", "d"]);
     }
 
     #[test]

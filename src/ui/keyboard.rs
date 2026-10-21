@@ -46,10 +46,16 @@ impl App {
         if self.playlist_editor.is_some() && self.playlist_name_typed {
             return Task::none();
         }
-        if matches!(self.page, Page::Home | Page::Search) {
-            operation::is_focused("search-field").map(move |typing| Message::RowKey { key, typing })
-        } else {
-            self.apply_row_key(key, false)
+        let field = match self.page {
+            Page::Home | Page::Search => Some("search-field"),
+            Page::Library => Some(super::library::LIBRARY_FILTER),
+            _ => None,
+        };
+        match field {
+            Some(field) => {
+                operation::is_focused(field).map(move |typing| Message::RowKey { key, typing })
+            }
+            None => self.apply_row_key(key, false),
         }
     }
 
@@ -126,9 +132,10 @@ impl App {
             // without songs, there is no row to move to.
             Page::Search if self.home_on_screen() => home(),
             Page::Search => (self.search_row_order(), 1),
-            // Favorite songs, then each playlist.
+            // Favorite songs, then each playlist, in the order shown.
             Page::Library => (
-                (0..=self.playlists.len())
+                self.library_rows()
+                    .into_iter()
                     .map(|index| row("lists", index))
                     .collect(),
                 1,

@@ -32,6 +32,8 @@ pub(super) enum DragList {
     Songs(ListId),
     /// The playlists on the Library page. Favorite songs stays first.
     Lists,
+    /// Up next, the whole queue.
+    Queue,
 }
 
 /// A row being dragged: the place it was taken from and the place it would land.
@@ -120,6 +122,7 @@ pub(super) enum Preference {
     LyricsFollow(bool),
     UiLanguage(crate::preferences::UiLanguage),
     UiDensity(crate::preferences::UiDensity),
+    LibrarySort(crate::preferences::LibrarySort),
     ShowLyricsDefault(bool),
     SearchSuggestions(bool),
     TrackNotifications(bool),
@@ -169,6 +172,11 @@ pub(super) enum Message {
     WindowOpened(iced::window::Id),
     QuitApp,
     RemoveFromQueue(usize),
+    /// Moves a queue entry one place up or down.
+    MoveInQueue {
+        index: usize,
+        up: bool,
+    },
     ClearUpcomingQueue,
     Resized {
         width: f32,
@@ -261,6 +269,10 @@ pub(super) enum Message {
     /// Steps the current song's lyrics offset: the Earlier and Later buttons over the lyrics.
     AdjustLyricsOffset(i64),
     RetryCollection,
+    /// "Save as playlist" on a playlist or album of YouTube Music.
+    SaveCollection,
+    /// "Save as playlist" over Up next: the whole queue.
+    SaveQueue,
     RetryCollectionMore,
     CollectionLoaded {
         generation: u64,
@@ -278,6 +290,8 @@ pub(super) enum Message {
     },
     LibraryScrolled(AbsoluteOffset),
     LibraryListsScrolled(AbsoluteOffset),
+    /// The text that filters the playlists on the Library page.
+    LibraryFilterChanged(String),
     QueueScrolled(AbsoluteOffset),
     TogglePlayback,
     NextTrack,
@@ -414,6 +428,14 @@ pub(super) enum Message {
         forward: bool,
     },
     CarouselScrolled(f32),
+    /// Home scrolled down to the rows under its first screen, or back.
+    HomeScrolled(f32),
+    /// The arrows of a row of cards under Home's first screen.
+    StripStep {
+        strip: super::home::Strip,
+        forward: bool,
+    },
+    StripScrolled(super::home::Strip, f32),
     CarouselFrame(std::time::Instant),
     /// The volume button of Now Playing: opens the rail, or mutes while it is open.
     ToggleVolumeRail,
@@ -502,6 +524,10 @@ pub(super) enum Message {
     LoadingPulse,
     /// The press of a drag ended over a row.
     DragReleased,
+    /// The note of this count has been shown long enough.
+    ToastExpired(u64),
+    /// The button of the note of this count: Undo, or Open.
+    ToastPressed(u64),
     /// The first press on Reset. The reset itself waits for the confirmation.
     AskResetSettings,
     /// Resets the preferences. This is also the second press on the Reset confirmation.

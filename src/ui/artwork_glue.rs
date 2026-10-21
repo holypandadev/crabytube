@@ -133,19 +133,24 @@ impl App {
                         .take(layout.jump)
                         .filter_map(|play| cover_request(play.thumbnail_url(), jump_variant)),
                 );
+                if layout.flow {
+                    requests.extend(self.strip_artwork(&layout));
+                }
                 requests
             }
             Page::Search => self.search_artwork(),
             Page::Library => {
-                // Favorite songs is the first row and has no cover to fetch.
+                // Favorite songs has no cover to fetch.
+                let rows = self.library_rows();
                 let range = layout::virtual_range(
-                    self.playlists.len() + 1,
+                    rows.len(),
                     self.lists_scroll.y,
                     self.area.height,
                     library::LIST_ROW_PITCH,
                     4,
                 );
-                range
+                rows[range]
+                    .iter()
                     .filter_map(|row| row.checked_sub(1))
                     .filter_map(|position| self.playlists.get(position))
                     .flat_map(|playlist| {

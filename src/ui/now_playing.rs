@@ -1,6 +1,9 @@
 //! Now Playing: large artwork with transport on the left, Up Next and Lyrics
 //! on the right.
 
+use super::drag::{drag_area, drag_row};
+use super::messages::DragList;
+use super::playlists::HEART_W;
 use super::shell::{display_title, fit};
 use super::theme::{
     self, BLACK, DIM, DIM_ON_LIGHT, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION,
@@ -131,14 +134,7 @@ fn now_playing_geometry(area: Size) -> Option<(f32, f32)> {
 /// A short message about the queue, shown above it until the queue changes again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum QueueNotice {
-    Full,
     Limited(usize),
-    AddedToQueue,
-    PlaysNext,
-    /// "Start radio" is loading the radio of the chosen track.
-    RadioLoading,
-    /// "Start radio" could not load its radio.
-    RadioFailed,
 }
 
 impl App {
@@ -251,7 +247,7 @@ impl App {
                 text(fit(display_title(&track.title), text_width, TEXT_TITLE))
                     .size(TEXT_TITLE)
                     .font(MONO),
-                self.artist_link(&track.artist, text_width, TEXT_SECTION, INK),
+                self.artist_link(track, text_width, TEXT_SECTION, INK),
                 details,
             ]
             .spacing(4)
@@ -371,14 +367,9 @@ impl App {
     /// The notice in the current language.
     fn queue_notice_text(&self, notice: QueueNotice) -> String {
         match notice {
-            QueueNotice::Full => self.tr("The queue is full.").into_owned(),
             QueueNotice::Limited(entries) => self
                 .tr("Queue limited to {} entries; the selected track stays first.")
                 .replacen("{}", &entries.to_string(), 1),
-            QueueNotice::AddedToQueue => self.tr("Added to queue").into_owned(),
-            QueueNotice::PlaysNext => self.tr("Plays next").into_owned(),
-            QueueNotice::RadioLoading => self.tr("[ LOADING RADIO ]").into_owned(),
-            QueueNotice::RadioFailed => self.tr("[ RADIO FAILED ]").into_owned(),
         }
     }
 
@@ -406,7 +397,8 @@ impl App {
             rows =
                 rows.push(Space::new().height(layout::virtual_spacer_height(range.start, pitch)));
         }
-        let text_width = width - cover - 20.0 - 64.0 - 44.0 - 24.0;
+        let text_width = width - cover - 20.0 - 64.0 - 44.0 - 24.0 - HEART_W - 20.0;
+        let dragged = self.dragged_row(DragList::Queue);
         for index in range.clone() {
             let entry = &self.queue[index];
             let current = self.queue_index == Some(index);
@@ -421,7 +413,12 @@ impl App {
             let open = self.row_menu.as_ref() == Some(&menu);
             // The row under the keyboard cursor is outlined; the playing row stays inverted.
             let cursor = self.row_is_cursor("queue", index);
-            let ink = theme::row_ink(current);
+            let mut ink = theme::row_ink(current);
+            // The row being dragged stays in its place, faded, while a label follows the pointer.
+            if dragged == Some(index) {
+                ink.title = theme::FADED;
+                ink.secondary = theme::FADED;
+            }
             let title = display_title(&entry.title);
             let title = if current {
                 format!("▶ {title}")
@@ -429,7 +426,7 @@ impl App {
                 title.to_owned()
             };
             let more = button(super::theme::icon("more", 18.0, ink.icon))
-                .on_press(Message::ToggleRowMenu(menu))
+                .on_press(self.row_click(DragList::Queue, Message::ToggleRowMenu(menu)))
                 .padding(6)
                 .style(theme::row_icon_button(current, open));
             let mut names = column![
@@ -456,11 +453,17 @@ impl App {
                     names.spacing(6).width(Length::Fill),
                     label(duration, TEXT_CAPTION).color(ink.secondary),
                     more,
+                    self.row_heart(
+                        entry,
+                        ink.icon,
+                        current,
+                        self.row_click(DragList::Queue, Message::OpenSaveDialog(entry.clone()))
+                    ),
                 ]
                 .spacing(20)
                 .align_y(Alignment::Center),
             )
-            .on_press(Message::PlayQueueIndex(index))
+            .on_press(self.row_click(DragList::Queue, Message::PlayQueueIndex(index)))
             .width(Length::Fill)
             .padding([padding, 8.0])
             .style(if current {
@@ -473,7 +476,13 @@ impl App {
             rows = rows.push(super::keyboard::mark_row(
                 "queue",
                 index,
-                column![main, hrule(RULE)],
+                drag_row(
+                    column![main, hrule(RULE)],
+                    Some(Message::DragPressed {
+                        list: DragList::Queue,
+                        index,
+                    }),
+                ),
             ));
         }
         let remaining = self.queue.len().saturating_sub(range.end);
@@ -513,7 +522,9 @@ impl App {
         // The notice takes the room left of the button and is cut short, never wrapped, so the list
         // below keeps its place. The room follows the translated label's width.
         let clear_label = self.tr("Clear up next").into_owned();
-        let clear_width = clear_label.width() as f32 * TEXT_CAPTION * 0.6 + CLEAR_BUTTON_EXTRA;
+        let save_label = self.tr("Save as playlist").into_owned();
+        let clear_width = (clear_label.width() + save_label.width()) as f32 * TEXT_CAPTION * 0.6
+            + 2.0 * CLEAR_BUTTON_EXTRA;
         // The count of what comes next, or a notice about the last change to the queue while one
         // is set. Either is cut short, never wrapped, so the list keeps its place.
         let status = match self.queue_notice {
@@ -532,21 +543,34 @@ impl App {
                     .color(DIM)
                 )
                 .width(Length::Fill),
+                button(label(save_label, TEXT_CAPTION))
+                    .on_press_maybe((!self.queue.is_empty()).then_some(Message::SaveQueue))
+                    .padding([6, 12])
+                    .style(theme::outline_button),
                 button(label(clear_label, TEXT_CAPTION))
                     .on_press_maybe((upcoming > 0).then_some(Message::ClearUpcomingQueue))
                     .padding([6, 12])
                     .style(theme::outline_button),
             ]
+            .spacing(8)
             .align_y(Alignment::Center),
         )
         .height(QUEUE_HEADER_H)
         .center_y(QUEUE_HEADER_H);
-        let list = scrollable(rows)
-            .id("queue-content")
-            .on_scroll(|viewport| Message::QueueScrolled(viewport.absolute_offset()))
-            .direction(theme::vbar())
-            .style(theme::scroll_style)
-            .height(Length::Fill);
+        let mut list = iced::widget::stack![
+            scrollable(rows)
+                .id("queue-content")
+                .on_scroll(|viewport| Message::QueueScrolled(viewport.absolute_offset()))
+                .direction(theme::vbar())
+                .style(theme::scroll_style)
+                .height(Length::Fill)
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
+        if let Some(overlay) = self.drag_overlay(DragList::Queue, width) {
+            list = list.push(overlay);
+        }
+        let list = drag_area(list, self.drag_moves(DragList::Queue));
         column![header, list].spacing(8).height(Length::Fill).into()
     }
 
@@ -569,8 +593,9 @@ impl App {
             .into();
         }
         let Some(lyrics) = &self.lyrics else {
-            // A restored track has no lyrics until playback starts; nothing is fetched at startup.
-            if self.playback_status.track.is_none() {
+            // A restored track whose length is not known has no lyrics until playback starts;
+            // nothing is fetched at startup.
+            if self.playback_status.track.is_none() && self.lyrics_error.is_none() {
                 return label(
                     self.tr("Press play to load the lyrics.").into_owned(),
                     TEXT_BODY,

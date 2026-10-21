@@ -154,20 +154,26 @@ impl App {
         }
     }
 
-    /// An artist name that searches for that artist when pressed. Plain text when there is no name.
+    /// A track's artist name that opens the artist's page when pressed, or searches for the name
+    /// when the catalog gave no page. Plain text when there is no name.
     pub(super) fn artist_link(
         &self,
-        artist: &str,
+        track: &Track,
         width: f32,
         size: f32,
         color: Color,
     ) -> Element<'_, Message> {
+        let artist = track.artist.as_str();
         let shown = fit(artist, width, size);
         if artist.trim().is_empty() {
             return text(shown).size(size).font(MONO).color(color).into();
         }
+        let open = match &track.artist_page {
+            Some(page) => Message::OpenCollection(page.clone()),
+            None => Message::SearchFor(artist.to_owned()),
+        };
         button(text(shown).size(size).font(MONO))
-            .on_press(Message::SearchFor(artist.to_owned()))
+            .on_press(open)
             .padding(0)
             .style(theme::text_link(color))
             .into()
@@ -190,8 +196,7 @@ impl App {
                 left: gutter,
             });
         let mut body = column![self.header(), content];
-        // The player bar appears once something is loaded.
-        if !matches!(self.page, Page::NowPlaying) && self.shown_track().is_some() {
+        if self.player_bar_shown() {
             body = body.push(hrule(INK)).push(
                 container(responsive(move |size| self.player_bar(size.width)))
                     .width(Length::Fill)
@@ -209,6 +214,21 @@ impl App {
         #[cfg(not(target_os = "macos"))]
         {
             layers = layers.push(resize_grips());
+        }
+        // A note sits at the foot of the window, over the page but under any panel. Only the card
+        // takes presses: the rest of its layer lets them through to the page.
+        if let Some(toast) = self.toast_view() {
+            layers = layers.push(
+                container(iced::widget::opaque(toast))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::End)
+                    .padding(iced::Padding {
+                        bottom: self.toast_lift(),
+                        ..iced::Padding::ZERO
+                    }),
+            );
         }
         // A panel sits in the middle of the dimmed window; a press outside it closes it.
         if let Some(panel) = self.overlay_panel() {
@@ -397,6 +417,11 @@ impl App {
         .padding(0)
         .style(theme::icon_button)
         .into()
+    }
+
+    /// The player bar shows once something is loaded, on every page but Now Playing.
+    pub(super) fn player_bar_shown(&self) -> bool {
+        !matches!(self.page, Page::NowPlaying) && self.shown_track().is_some()
     }
 
     pub(super) fn is_playing(&self) -> bool {
@@ -590,7 +615,7 @@ impl App {
     }
 
     /// The mini player's second line: the artist, or the seek notice for a moment, as in the bar.
-    fn mini_subtitle(&self, artist: &str, width: f32) -> Element<'_, Message> {
+    fn mini_subtitle(&self, track: Option<&Track>, width: f32) -> Element<'_, Message> {
         if let Some(failure) = self.playback_failure() {
             return text(fit(&failure, width, TEXT_CAPTION))
                 .size(TEXT_CAPTION)
@@ -606,7 +631,10 @@ impl App {
                 .color(DIM)
                 .into();
         }
-        self.artist_link(artist, width, 12.0, DIM)
+        match track {
+            Some(track) => self.artist_link(track, width, 12.0, DIM),
+            None => Space::new().into(),
+        }
     }
 
     /// Why the track stopped, in the interface language, while playback is in its error state.
@@ -651,9 +679,8 @@ impl App {
         };
         let text_width = (width - 32.0 - 44.0 - 12.0 - 150.0).max(60.0);
         let title = track.map_or_else(String::new, |t| display_title(&t.title).to_owned());
-        let subtitle = track.map_or_else(String::new, |t| t.artist.clone());
         // A mouse area rather than a button: the artist name inside is a button of its own,
-        // and a click on it searches instead of opening Now Playing.
+        // and a click on it opens the artist instead of Now Playing.
         let now = mouse_area(
             row![
                 self.cover(
@@ -665,7 +692,7 @@ impl App {
                     text(fit(&title, text_width, TEXT_BODY))
                         .size(TEXT_BODY)
                         .font(MONO),
-                    self.mini_subtitle(&subtitle, text_width),
+                    self.mini_subtitle(track, text_width),
                 ]
                 .spacing(4)
                 .width(Length::Fill),
@@ -722,13 +749,22 @@ impl App {
             || self.tr("Nothing playing").into_owned(),
             |t| display_title(&t.title).to_owned(),
         );
-        let subtitle = status.unwrap_or_else(|| {
-            track.map_or_else(
-                || self.tr("Search to start").into_owned(),
-                |t| t.artist.clone(),
-            )
-        });
-        let now = button(
+        // The artist opens its page; a notice about playback takes its place for a while.
+        let subtitle: Element<'_, Message> = match (status, track) {
+            (None, Some(track)) => self.artist_link(track, text_width, TEXT_CAPTION, DIM),
+            (status, _) => text(fit(
+                &status.unwrap_or_else(|| self.tr("Search to start").into_owned()),
+                text_width,
+                TEXT_CAPTION,
+            ))
+            .size(TEXT_CAPTION)
+            .font(MONO)
+            .color(DIM)
+            .into(),
+        };
+        // A mouse area rather than a button, as in the mini player, so the artist name inside
+        // takes its own press.
+        let now = mouse_area(
             row![
                 self.cover(
                     track.and_then(|t| t.thumbnail_url.as_deref()),
@@ -739,19 +775,19 @@ impl App {
                     text(fit(&title, text_width, TEXT_BODY))
                         .size(TEXT_BODY)
                         .font(MONO),
-                    text(fit(&subtitle, text_width, TEXT_CAPTION))
-                        .size(TEXT_CAPTION)
-                        .font(MONO)
-                        .color(DIM),
+                    subtitle,
                 ]
                 .spacing(4),
             ]
             .spacing(12)
             .align_y(Alignment::Center),
-        )
-        .on_press_maybe(track.map(|_| Message::OpenNowPlaying))
-        .padding(0)
-        .style(theme::bare_button);
+        );
+        let now = match track {
+            Some(_) => now
+                .on_press(Message::OpenNowPlaying)
+                .interaction(iced::mouse::Interaction::Pointer),
+            None => now,
+        };
         let left = row![now, self.like_button(track, 18.0)]
             .spacing(8)
             .align_y(Alignment::Center);

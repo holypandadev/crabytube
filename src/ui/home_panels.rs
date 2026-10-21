@@ -6,6 +6,7 @@ use super::home::{
     JUMP_ROW_GAP, MAX_CHIPS, STATUS_H,
 };
 use super::messages::RowMenu;
+use super::playlists::HEART_W;
 use super::shell::{fit, section_heading};
 use super::theme::{
     self, BLACK, DIM, FADED, MONO, MONO_BOLD, RULE, TEXT_BODY, TEXT_CAPTION, hrule, icon, label,
@@ -25,6 +26,8 @@ use unicode_width::UnicodeWidthStr;
 pub(super) const JUMP_THUMB: f32 = 36.0;
 /// Width of the duration or track count at the end of a "Jump back in" entry.
 const JUMP_META_W: f32 = 96.0;
+/// An entry narrower than this leaves the length out.
+const JUMP_META_MIN_W: f32 = 440.0;
 /// Room for the ••• button of a track entry, with its spacing.
 const JUMP_MORE_W: f32 = 42.0;
 /// Gap between the two columns of "Jump back in".
@@ -339,33 +342,41 @@ impl App {
         } else {
             format!("{title} — {detail}")
         };
-        // A track entry's ••• button takes room from the title.
+        // A track entry's ••• button and heart take room from the title.
         let more_width = if menu.is_some() && matches!(play, RecentPlay::Track(_)) {
-            JUMP_MORE_W
+            JUMP_MORE_W + HEART_W
         } else {
             0.0
         };
-        let text_width = (width - JUMP_THUMB - JUMP_META_W - 36.0 - more_width).max(40.0);
+        // On a phone the length gives its room to the title.
+        let show_meta = width >= JUMP_META_MIN_W;
+        let meta_width = if show_meta { JUMP_META_W } else { 0.0 };
+        let text_width = (width - JUMP_THUMB - meta_width - 36.0 - more_width).max(40.0);
         let mut content = row![
             self.cover(url, JUMP_THUMB, variant),
             container(label(fit(&line, text_width, TEXT_BODY), TEXT_BODY)).width(Length::Fill),
-            label(meta, TEXT_CAPTION).color(DIM),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
+        if show_meta {
+            content = content.push(label(meta, TEXT_CAPTION).color(DIM));
+        }
         // The entry under the keyboard cursor is outlined.
         let index = menu.as_ref().map_or(0, |menu| menu.index);
         let cursor = self.row_is_cursor("recent", index);
-        if let (Some(menu), RecentPlay::Track(_)) = (menu, play) {
-            // The entry keeps the plain row style, so its ••• button does too, even for the
-            // track that is playing.
+        if let (Some(menu), RecentPlay::Track(track)) = (menu, play) {
+            // The entry keeps the plain row style, so its ••• button and heart do too, even for
+            // the track that is playing.
             let open = self.row_menu.as_ref() == Some(&menu);
-            content = content.push(
-                button(icon("more", 18.0, theme::row_ink(false).icon))
-                    .on_press(Message::ToggleRowMenu(menu))
-                    .padding(6)
-                    .style(theme::row_icon_button(false, open)),
-            );
+            let ink = theme::row_ink(false).icon;
+            content = content
+                .push(
+                    button(icon("more", 18.0, ink))
+                        .on_press(Message::ToggleRowMenu(menu))
+                        .padding(6)
+                        .style(theme::row_icon_button(false, open)),
+                )
+                .push(self.row_heart(track, ink, false, Message::OpenSaveDialog(track.clone())));
         }
         let entry = button(content)
             .on_press(action)
@@ -428,8 +439,35 @@ impl App {
     }
 
     /// Opens Home: the clock is read now.
-    pub(super) fn enter_home(&mut self) {
+    /// Home opens again where it was left: the page, its carousel and its rows.
+    pub(super) fn enter_home(&mut self) -> iced::Task<Message> {
         self.clock = LocalClock::now();
+        let mut tasks = vec![
+            iced::widget::operation::scroll_to(
+                super::home::HOME_SCROLL_ID,
+                iced::widget::operation::AbsoluteOffset {
+                    x: 0.0,
+                    y: self.home_scroll,
+                },
+            ),
+            iced::widget::operation::scroll_to(
+                super::home::CAROUSEL_ID,
+                iced::widget::operation::AbsoluteOffset {
+                    x: self.carousel.offset,
+                    y: 0.0,
+                },
+            ),
+        ];
+        for (strip, motion) in &self.strips {
+            tasks.push(iced::widget::operation::scroll_to(
+                strip.id(),
+                iced::widget::operation::AbsoluteOffset {
+                    x: motion.offset,
+                    y: 0.0,
+                },
+            ));
+        }
+        iced::Task::batch(tasks)
     }
 }
 

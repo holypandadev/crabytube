@@ -172,6 +172,33 @@ pub enum RepeatMode {
     One,
 }
 
+/// The order of the playlists on the Library page. Favorite songs stays first in each.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LibrarySort {
+    /// The user's own order, which dragging changes.
+    #[default]
+    Custom,
+    /// The newest playlist first.
+    Recent,
+    /// By name.
+    Name,
+}
+
+impl LibrarySort {
+    pub const ALL: [Self; 3] = [Self::Custom, Self::Recent, Self::Name];
+}
+
+impl std::fmt::Display for LibrarySort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Custom => "Custom order",
+            Self::Recent => "Recently added",
+            Self::Name => "A–Z",
+        };
+        f.write_str(crate::i18n::translate(crate::i18n::current_language(), label).as_ref())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiDensity {
     Compact,
@@ -346,6 +373,8 @@ pub struct Preferences {
     pub ui_font_family: UiFontFamily,
     pub ui_language: UiLanguage,
     pub ui_density: UiDensity,
+    /// The order of the playlists on the Library page.
+    pub library_sort: LibrarySort,
     pub startup: bool,
     /// Closing the window keeps the app in the system tray. Saved as `keep_in_tray`: copies
     /// before 0.1.1 wrote `close_to_tray` with the old default, off, which no one had chosen.
@@ -405,6 +434,7 @@ impl Default for Preferences {
             ui_font_family: UiFontFamily::default(),
             ui_language: UiLanguage::default(),
             ui_density: UiDensity::default(),
+            library_sort: LibrarySort::default(),
             startup: false,
             close_to_tray: true,
             discord_presence: false,
@@ -549,7 +579,7 @@ impl Playlist {
 }
 
 /// The longest cover address kept, as for a song's cover.
-const MAX_COVER_URL_BYTES: usize = 2_048;
+pub const MAX_COVER_URL_BYTES: usize = 2_048;
 
 /// A playlist name as it is kept: without the spaces at its ends and with each run of spaces
 /// inside it made one, at most `MAX_PLAYLIST_NAME_CHARS` characters. `None` when nothing is left.

@@ -85,11 +85,12 @@ impl App {
             Subscription::none()
         };
         let diagnostic = diagnostic_subscription();
-        let carousel = if self.carousel.animating() {
-            iced::window::frames().map(Message::CarouselFrame)
-        } else {
-            Subscription::none()
-        };
+        let carousel =
+            if self.carousel.animating() || self.strips.values().any(home::Carousel::animating) {
+                iced::window::frames().map(Message::CarouselFrame)
+            } else {
+                Subscription::none()
+            };
         let volume_rail = if self.volume_rail.animating() {
             iced::window::frames().map(Message::VolumeRailFrame)
         } else {

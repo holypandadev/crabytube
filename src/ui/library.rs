@@ -3,22 +3,24 @@
 
 use super::drag::{drag_area, drag_row};
 use super::messages::{CoverChoice, DragList, ListId, PlaylistEditTarget, RowMenu};
+use super::playlists::HEART_W;
 use super::shell::{display_title, fit};
 use super::theme::{
     self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_TITLE, hrule,
     icon, label,
 };
-use super::{App, Message, Page, format_duration, layout};
+use super::{App, Message, Page, Preference, format_duration, layout};
 use crate::music::Track;
-use crate::preferences::UiDensity;
-use iced::widget::{Space, button, column, container, row, scrollable, stack, text};
+use crate::preferences::{LibrarySort, UiDensity};
+use iced::widget::{
+    Space, button, column, container, pick_list, row, scrollable, stack, text, text_input,
+};
 use iced::{Alignment, Element, Length, Size};
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
 const INDEX_W: f32 = 48.0;
 const DURATION_W: f32 = 96.0;
-const HEART_W: f32 = 44.0;
 /// Width of the ••• button beside the heart.
 const MORE_W: f32 = 30.0;
 const CELL_GAP: f32 = 16.0;
@@ -27,6 +29,10 @@ const CELL_GAP: f32 = 16.0;
 /// and below, and a 1 px rule.
 pub(super) const LIST_COVER: f32 = 56.0;
 pub(super) const LIST_ROW_PITCH: f32 = LIST_COVER + 2.0 * 8.0 + 1.0;
+/// The id of the Library's filter field, and the widths of the field and of the order's list.
+pub(super) const LIBRARY_FILTER: &str = "library-filter";
+const FILTER_W: f32 = 360.0;
+const SORT_W: f32 = 220.0;
 /// The gap between the buttons under a list's name.
 const BUTTON_GAP: f32 = 12.0;
 /// The most song covers a playlist offers to choose from as its own.
@@ -97,17 +103,31 @@ impl App {
             column![title, new].spacing(16)
         } else {
             column![row![container(title).width(Length::Fill), new].align_y(Alignment::Center)]
+                .spacing(20)
         };
         if self.save_dialog.is_none()
             && let Some(notice) = &self.playlist_notice
         {
             header = header.push(label(self.playlist_notice_text(notice), TEXT_CAPTION).color(DIM));
         }
+        // With playlists to find, a filter and the order to show them in.
+        if !self.playlists.is_empty() {
+            header = header.push(self.library_controls(width));
+        }
 
         let lists = DragList::Lists;
         let dragged = self.dragged_row(lists);
+        // The user's order can be changed by dragging while the page shows it whole.
+        let reorderable = self.library_reorderable();
         let mut rows = column![].width(Length::Fill);
-        for shown in 0..=self.playlists.len() {
+        let shown_rows = self.library_rows();
+        if shown_rows.is_empty() {
+            rows = rows.push(
+                container(label(self.tr("No playlists match.").into_owned(), TEXT_BODY).color(DIM))
+                    .padding([20, 4]),
+            );
+        }
+        for shown in shown_rows {
             // Favorite songs is the first row and stays there.
             let place = shown.checked_sub(1);
             let (list, name, count) = match place {
@@ -167,7 +187,9 @@ impl App {
                 shown,
                 drag_row(
                     column![line, hrule(RULE)].height(LIST_ROW_PITCH),
-                    place.map(|index| Message::DragPressed { list: lists, index }),
+                    place
+                        .filter(|_| reorderable)
+                        .map(|index| Message::DragPressed { list: lists, index }),
                 ),
             ));
         }
@@ -192,6 +214,96 @@ impl App {
             drag_area(area, self.drag_moves(lists)),
         ]
         .into()
+    }
+
+    /// The rows of the Library page in the order shown, by their place: 0 is Favorite songs and
+    /// each playlist follows at its place in the user's order plus one. The filter keeps the
+    /// lists whose name holds it, and Favorite songs stays first in every order.
+    pub(super) fn library_rows(&self) -> Vec<usize> {
+        let filter = self.library_filter.trim().to_lowercase();
+        let matches = |name: &str| filter.is_empty() || name.to_lowercase().contains(&filter);
+        let mut places: Vec<usize> = (0..self.playlists.len())
+            .filter(|&place| matches(&self.playlists[place].name))
+            .collect();
+        match self.preferences.library_sort {
+            LibrarySort::Custom => {}
+            // Ids only grow, so the newest playlist has the largest.
+            LibrarySort::Recent => {
+                places.sort_by_key(|&place| std::cmp::Reverse(self.playlists[place].id));
+            }
+            LibrarySort::Name => {
+                places.sort_by_cached_key(|&place| self.playlists[place].name.to_lowercase());
+            }
+        }
+        let favorites = matches(&self.tr("Favorite songs")).then_some(0);
+        favorites
+            .into_iter()
+            .chain(places.into_iter().map(|place| place + 1))
+            .collect()
+    }
+
+    /// Whether the Library shows the user's order whole, which dragging and Move up and down
+    /// change.
+    pub(super) fn library_reorderable(&self) -> bool {
+        self.preferences.library_sort == LibrarySort::Custom
+            && self.library_filter.trim().is_empty()
+    }
+
+    /// The filter field and the order of the Library page, side by side, or one under the other on
+    /// a phone.
+    fn library_controls(&self, width: f32) -> Element<'_, Message> {
+        let narrow = width < 560.0;
+        let placeholder = self.tr("Filter playlists").into_owned();
+        let mut field = row![
+            icon("search", 16.0, INK),
+            text_input(&placeholder, &self.library_filter)
+                .id(LIBRARY_FILTER)
+                .on_input(Message::LibraryFilterChanged)
+                .font(MONO)
+                .size(TEXT_BODY)
+                .padding([8, 4])
+                .style(theme::input_style),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        if !self.library_filter.is_empty() {
+            field = field.push(
+                button(icon("close", 14.0, INK))
+                    .on_press(Message::LibraryFilterChanged(String::new()))
+                    .padding(4)
+                    .style(theme::icon_button),
+            );
+        }
+        let field = container(field)
+            .width(if narrow {
+                Length::Fill
+            } else {
+                Length::Fixed(FILTER_W.min(width * 0.5))
+            })
+            .padding([0, 14])
+            .style(theme::boxed);
+        let sort = pick_list(
+            LibrarySort::ALL,
+            Some(self.preferences.library_sort),
+            |sort| Message::Preference(Preference::LibrarySort(sort)),
+        )
+        .font(MONO)
+        .text_size(TEXT_BODY)
+        .padding([9, 12])
+        .width(if narrow {
+            Length::Fill
+        } else {
+            Length::Fixed(SORT_W)
+        })
+        .style(theme::pick_style)
+        .menu_style(theme::menu_style);
+        if narrow {
+            column![field, sort].spacing(10).into()
+        } else {
+            row![field, Space::new().width(Length::Fill), sort]
+                .align_y(Alignment::Center)
+                .into()
+        }
     }
 
     /// The page of one list. A list that is gone shows the Library.
@@ -259,11 +371,7 @@ impl App {
                 .size(title_size)
                 .font(MONO),
             label(
-                if list == ListId::Favorites {
-                    self.tr_string(format!("{count} saved tracks"))
-                } else {
-                    self.song_count(count, false)
-                },
+                fit(&self.list_summary(list, songs), room, TEXT_BODY),
                 TEXT_BODY
             ),
             Space::new().height(8),
@@ -289,6 +397,39 @@ impl App {
             header = header.push(label(self.playlist_notice_text(notice), TEXT_CAPTION).color(DIM));
         }
         header.spacing(20).into()
+    }
+
+    /// How many songs a list has and how long they play together, as far as their lengths are
+    /// known.
+    fn list_summary(&self, list: ListId, songs: &[Track]) -> String {
+        let count = songs.len();
+        let songs_line = if list == ListId::Favorites {
+            self.tr_string(format!("{count} saved tracks"))
+        } else {
+            self.song_count(count, false)
+        };
+        let total: u64 = songs
+            .iter()
+            .filter_map(|track| self.duration_of(track))
+            .map(|duration| duration.as_secs())
+            .sum();
+        if total == 0 {
+            return songs_line;
+        }
+        format!("{songs_line} · {}", self.total_length(total))
+    }
+
+    /// A length of `seconds` in minutes, or in hours and minutes from an hour up.
+    pub(super) fn total_length(&self, seconds: u64) -> String {
+        let minutes = seconds.div_ceil(60);
+        if minutes < 60 {
+            self.tr_static("{} min")
+                .replacen("{}", &minutes.to_string(), 1)
+        } else {
+            self.tr_static("{} h {} min")
+                .replacen("{}", &(minutes / 60).to_string(), 1)
+                .replacen("{}", &(minutes % 60).to_string(), 1)
+        }
     }
 
     /// Buttons of one size, the size of the widest label among them, in as many rows as `room`
@@ -456,9 +597,17 @@ impl App {
         let count = songs.len();
         let rows_name = App::song_rows(list);
         let dragging = DragList::Songs(list);
-        // Narrow windows drop the album and then the duration column.
-        let show_album = width >= 900.0;
-        let show_duration = width >= 560.0;
+        // Narrow windows drop the album and then the artist and duration columns, which go under
+        // the title. A column no song has anything for is left out too.
+        let columns = width >= 560.0;
+        let show_album = width >= 900.0
+            && songs.iter().any(|track| {
+                track
+                    .album
+                    .as_deref()
+                    .is_some_and(|album| !album.trim().is_empty())
+            });
+        let show_duration = columns && songs.iter().any(|track| self.duration_of(track).is_some());
         let fixed = INDEX_W
             + HEART_W
             + MORE_W
@@ -474,7 +623,7 @@ impl App {
             let title = (flexible * 0.4).floor();
             let artist = (flexible * 0.3).floor();
             (title, artist, flexible - title - artist)
-        } else if show_duration {
+        } else if columns {
             let title = (flexible * 0.6).floor();
             (title, flexible - title, 0.0)
         } else {
@@ -487,7 +636,7 @@ impl App {
         let mut table_head = row![column_head("#", INDEX_W), column_head("TITLE", title_w)]
             .spacing(CELL_GAP)
             .padding([0, 4]);
-        if show_duration {
+        if columns {
             table_head = table_head.push(column_head("ARTIST", artist_w));
         }
         if show_album {
@@ -572,7 +721,7 @@ impl App {
                         cover,
                         crate::artwork::THUMB_MAX
                     ),
-                    if show_duration {
+                    if columns {
                         Element::from(
                             label(
                                 fit(
@@ -611,7 +760,7 @@ impl App {
             ]
             .spacing(CELL_GAP)
             .align_y(Alignment::Center);
-            let cells = if show_duration {
+            let cells = if columns {
                 cells.push(
                     container(
                         label(fit(&track.artist, artist_w, TEXT_BODY), TEXT_BODY).color(ink.title),
@@ -640,19 +789,12 @@ impl App {
             };
             // The heart sits inside the row, so the hover fill runs under it
             // instead of stopping at a black box. It opens the Save panel.
-            let saved = self.is_saved(&track.video_id);
-            let heart = container(
-                button(icon(
-                    if saved { "like-filled" } else { "like" },
-                    18.0,
-                    ink.icon,
-                ))
-                .on_press(self.row_click(dragging, Message::OpenSaveDialog(track.clone())))
-                .padding(6)
-                .style(theme::row_icon_button(current, false)),
-            )
-            .width(HEART_W)
-            .center_x(HEART_W);
+            let heart = self.row_heart(
+                track,
+                ink.icon,
+                current,
+                self.row_click(dragging, Message::OpenSaveDialog(track.clone())),
+            );
             let more = button(icon("more", 18.0, ink.icon))
                 .on_press(self.row_click(dragging, Message::ToggleRowMenu(menu)))
                 .padding(6)

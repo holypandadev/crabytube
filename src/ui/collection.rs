@@ -1,3 +1,4 @@
+use super::playlists::HEART_W;
 use super::shell::{display_title, fit, meta_text};
 use super::theme::{
     self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_TITLE, hrule, icon, label,
@@ -26,6 +27,9 @@ pub(super) struct CollectionState {
     pub generation: u64,
     pub cancellation: Option<CancellationToken>,
     pub tracks_context: Arc<[crate::music::Track]>,
+    /// "Save as playlist" was pressed while more of the collection was still to load: the rest
+    /// loads first.
+    pub save_pending: bool,
 }
 
 /// The tracks a collection queues when played. An album's tracks come without covers of their own,
@@ -63,6 +67,7 @@ impl CollectionState {
         self.loading = false;
         self.more_loading = false;
         self.more_error = None;
+        self.save_pending = false;
     }
 
     pub fn begin(&mut self, target: BrowseTarget) -> (u64, CancellationToken) {
@@ -128,6 +133,31 @@ impl CollectionState {
 const ROW_MORE_W: f32 = 30.0;
 
 impl App {
+    /// "Save as playlist" on a collection: its songs go in a new playlist once all of them have
+    /// loaded.
+    pub(super) fn save_collection(&mut self) -> Task<Message> {
+        let Some(data) = self.collection.data.clone() else {
+            return Task::none();
+        };
+        if data.continuation.is_some() && self.collection.more_error.is_none() {
+            self.collection.save_pending = true;
+            return self.load_collection_more();
+        }
+        self.collection.save_pending = false;
+        let tracks = Arc::clone(&self.collection.tracks_context);
+        self.save_as_playlist(&data.title, &tracks, data.thumbnail_url.clone())
+    }
+
+    /// After a page of the collection arrived: the next one, while a save waits for them all, or
+    /// the save once they are in.
+    pub(super) fn continue_collection_save(&mut self) -> Task<Message> {
+        if self.collection.save_pending {
+            self.save_collection()
+        } else {
+            Task::none()
+        }
+    }
+
     pub(super) fn load_collection_more(&mut self) -> Task<Message> {
         if self.collection.more_loading || self.collection.more_error.is_some() {
             return Task::none();
@@ -307,8 +337,32 @@ impl App {
                 )
                 .padding([10, 22])
                 .style(theme::outline_button),
+                button(
+                    row![
+                        icon("plus", 14.0, INK),
+                        label(
+                            self.tr(if self.collection.save_pending {
+                                "Saving…"
+                            } else {
+                                "Save as playlist"
+                            })
+                            .into_owned(),
+                            TEXT_BODY
+                        )
+                    ]
+                    .spacing(12)
+                    .align_y(Alignment::Center)
+                )
+                .on_press_maybe(
+                    (has_tracks && !self.collection.save_pending)
+                        .then_some(Message::SaveCollection)
+                )
+                .padding([10, 22])
+                .style(theme::outline_button),
             ]
-            .spacing(16),
+            .spacing(16)
+            .wrap()
+            .vertical_spacing(12),
         );
         let cover = self.cover(
             data.thumbnail_url.as_deref(),
@@ -345,13 +399,14 @@ impl App {
             32.0
         };
         let gap = if narrow { 10.0 } else { 16.0 };
-        let gaps = 2.0 + f32::from(u8::from(show_covers)) + f32::from(u8::from(show_duration));
+        let gaps = 3.0 + f32::from(u8::from(show_covers)) + f32::from(u8::from(show_duration));
         let cover = if show_covers {
             self.preferences.ui_density.collection_cover()
         } else {
             0.0
         };
-        let title_w = width - index_w - cover - duration_w - ROW_MORE_W - gaps * gap - 8.0;
+        let title_w =
+            width - index_w - cover - duration_w - ROW_MORE_W - HEART_W - gaps * gap - 8.0;
         let mut table_head = row![
             container(label(self.tr("#").into_owned(), TEXT_CAPTION).color(DIM)).width(index_w),
             container(label(self.tr("TITLE").into_owned(), TEXT_CAPTION).color(DIM))
@@ -365,7 +420,7 @@ impl App {
             );
         }
         let table_head = table_head
-            .push(Space::new().width(ROW_MORE_W))
+            .push(Space::new().width(ROW_MORE_W + gap + HEART_W))
             .spacing(gap)
             .padding([0, 4]);
         let mut page = column![
@@ -479,7 +534,17 @@ impl App {
                         .align_x(alignment::Horizontal::Right),
                 );
             }
-            let cells = cells.push(more).spacing(gap).align_y(Alignment::Center);
+            let heart = self.row_heart(
+                track,
+                ink.icon,
+                current,
+                Message::OpenSaveDialog(track.clone()),
+            );
+            let cells = cells
+                .push(more)
+                .push(heart)
+                .spacing(gap)
+                .align_y(Alignment::Center);
             let line = button(cells)
                 .on_press(Message::PlayCollection(
                     Arc::clone(&queue_tracks),

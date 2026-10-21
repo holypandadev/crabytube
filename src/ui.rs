@@ -18,6 +18,7 @@ mod subscriptions;
 mod theme;
 #[cfg(feature = "diagnostics")]
 mod timing;
+mod toast;
 mod track_actions;
 mod updates;
 use collection::CollectionState;
@@ -139,6 +140,8 @@ struct App {
     /// The playlist's name, not the search, is the text typed in last. A text field takes the
     /// Escape that unfocuses it, so this tells whose Escape it was.
     playlist_name_typed: bool,
+    /// The text that filters the playlists on the Library page.
+    library_filter: String,
     page: Page,
     history: Vec<Page>,
     forward: Vec<Page>,
@@ -159,6 +162,9 @@ struct App {
     /// The queue's order before Shuffle mixed it, by video id. Turning Shuffle off puts it back.
     unshuffled_order: Vec<String>,
     queue_notice: Option<now_playing::QueueNotice>,
+    /// The note at the foot of the window about what the last action did.
+    toast: Option<toast::Toast>,
+    toast_count: u64,
     queue_generation: u64,
     liked: HashSet<String>,
     shuffle: bool,
@@ -279,6 +285,9 @@ struct App {
     home_picks: home::HomePicks,
     /// Smooth scrolling of the Home carousel.
     carousel: home::Carousel,
+    /// How far Home is scrolled down, and the rows of cards under its first screen.
+    home_scroll: f32,
+    strips: HashMap<home::Strip, home::Carousel>,
     volume_rail: now_playing::VolumeRail,
     /// Size of the page area below the tabs, as laid out (see `shell_view`).
     area: iced::Size,
@@ -315,6 +324,9 @@ fn cache_cleared_notice(kind: crate::storage::CacheKind, cleared: &Result<u64, S
         }
     }
 }
+
+/// The longest filter the Library page takes.
+const MAX_FILTER_CHARS: usize = 80;
 
 /// How long a confirmation waits for its second press. Long enough to read the import summary: when
 /// it lapses the row it replaced comes back, and a late press would land on that row's buttons.
@@ -414,11 +426,14 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::DragMoved(..)
         | Message::DragTick(_)
         | Message::LoadingPulse
+        | Message::ToastExpired(_)
         | Message::CoverFilePicked(_)
         | Message::CoverFileImported(_)
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
         | Message::CarouselScrolled(_)
+        | Message::HomeScrolled(_)
+        | Message::StripScrolled(..)
         | Message::ChipHovered(_) => true,
         Message::KeyPressed(
             iced::keyboard::Event::KeyReleased { .. } | iced::keyboard::Event::ModifiersChanged(_),
@@ -903,6 +918,7 @@ impl App {
             | Message::RetryRadio
             | Message::RadioLoaded { .. }
             | Message::RemoveFromQueue(..)
+            | Message::MoveInQueue { .. }
             | Message::ClearUpcomingQueue
             | Message::SeekTo(..)
             | Message::ToggleShuffle
@@ -952,6 +968,9 @@ impl App {
             | Message::DragMoved(..)
             | Message::DragTick(..)
             | Message::DragReleased => return self.update_playlists(message),
+            Message::ToastExpired(..) | Message::ToastPressed(..) => {
+                return self.update_toast(message);
+            }
             Message::CatalogCompleted { request_id, result } => {
                 if request_id != self.search_request_id {
                     return Task::none();
@@ -1204,7 +1223,7 @@ impl App {
                 }
             }
             Message::RetryLyrics => {
-                if let Some(t) = self.playback_status.track.clone() {
+                if let Some(t) = self.shown_track().cloned() {
                     return self.lookup_lyrics(t, true);
                 }
             }
@@ -1407,6 +1426,16 @@ impl App {
                             ]);
                         }
                     }
+                    Preference::LibrarySort(v) => {
+                        self.preferences.library_sort = v;
+                        self.row_cursor = None;
+                        self.lists_scroll = AbsoluteOffset::default();
+                        self.persist();
+                        return Task::batch([
+                            operation::scroll_to("library-lists", self.lists_scroll),
+                            self.preload_current_page_artwork(),
+                        ]);
+                    }
                     Preference::UiDensity(v) => {
                         let previous = self.preferences.ui_density;
                         if previous != v {
@@ -1519,7 +1548,7 @@ impl App {
                         self.now_playing_tab = NowPlayingTab::Lyrics;
                         if self.lyrics.is_none()
                             && !self.lyrics_loading
-                            && let Some(track) = self.playback_status.track.clone()
+                            && let Some(track) = self.shown_track().cloned()
                         {
                             let lyrics = self.load_lyrics(track);
                             let navigation = self.navigate(Page::NowPlaying);
@@ -1539,9 +1568,10 @@ impl App {
                 self.resync_lyrics();
                 let resync = self.take_lyrics_resync();
                 let follow = self.follow_lyrics_task(None, resync);
+                // A restored track shows its lyrics before it plays, when its length is known.
                 if self.lyrics.is_none()
                     && !self.lyrics_loading
-                    && let Some(track) = self.playback_status.track.clone()
+                    && let Some(track) = self.shown_track().cloned()
                 {
                     return Task::batch([follow, self.load_lyrics(track)]);
                 }
@@ -1780,6 +1810,8 @@ impl App {
                 self.collection.more_loading = false;
                 if let Err(error) = &result {
                     self.collection.more_error = Some(error.clone());
+                    // A save that waited saves what loaded.
+                    return self.continue_collection_save();
                 }
                 if let (Some(data), Ok(more)) =
                     (self.collection.data.as_mut().map(Arc::make_mut), result)
@@ -1817,8 +1849,18 @@ impl App {
                         self.collection_cache.push_front((target, shared));
                         self.collection_cache.truncate(MAX_CACHED_COLLECTIONS);
                     }
-                    return self.preload_current_page_artwork();
+                    let artwork = self.preload_current_page_artwork();
+                    return Task::batch([artwork, self.continue_collection_save()]);
                 }
+            }
+            Message::SaveCollection => return self.save_collection(),
+            Message::SaveQueue => {
+                let name = match &self.queue_source {
+                    Some(source) => source.title.clone(),
+                    None => self.tr("Saved queue").into_owned(),
+                };
+                let tracks = Arc::clone(&self.queue);
+                return self.save_as_playlist(&name, &tracks, None);
             }
             Message::CollectionScrolled(y) => {
                 self.collection_scroll = y;
@@ -1938,6 +1980,22 @@ impl App {
             {
                 // Escape in the playlist's name field closes it, unsaved.
                 self.playlist_editor = None;
+            }
+            Message::SearchFieldEscape { .. } if self.page == Page::Library => {
+                // Escape in the Library's filter clears it.
+                if !self.library_filter.is_empty() {
+                    return self.update(Message::LibraryFilterChanged(String::new()));
+                }
+            }
+            Message::LibraryFilterChanged(filter) => {
+                self.library_filter = filter.chars().take(MAX_FILTER_CHARS).collect();
+                self.row_cursor = None;
+                self.row_menu = None;
+                self.lists_scroll = AbsoluteOffset::default();
+                return Task::batch([
+                    operation::scroll_to("library-lists", self.lists_scroll),
+                    self.preload_current_page_artwork(),
+                ]);
             }
             Message::SearchFieldEscape { repeat: true } => {
                 // A held Escape acts once; the field it unfocused again takes the focus back.
@@ -2360,13 +2418,47 @@ impl App {
                 }
             }
             Message::CarouselFrame(now) => {
-                let x = self.carousel.step(now);
-                return operation::scroll_to(home::CAROUSEL_ID, AbsoluteOffset { x, y: 0.0 });
+                let mut tasks = Vec::new();
+                if self.carousel.animating() {
+                    let x = self.carousel.step(now);
+                    tasks.push(operation::scroll_to(
+                        home::CAROUSEL_ID,
+                        AbsoluteOffset { x, y: 0.0 },
+                    ));
+                }
+                let mut settled = false;
+                for (strip, motion) in &mut self.strips {
+                    if motion.animating() {
+                        let x = motion.step(now);
+                        settled |= !motion.animating();
+                        tasks.push(operation::scroll_to(
+                            strip.id(),
+                            AbsoluteOffset { x, y: 0.0 },
+                        ));
+                    }
+                }
+                // A row that came to rest shows new cards.
+                if settled {
+                    tasks.push(self.scroll_preload_task());
+                }
+                return Task::batch(tasks);
             }
             Message::CarouselScrolled(x) => {
                 // Our own scroll_to also reports here; only manual scrolling moves the offset.
                 if !self.carousel.animating() {
                     self.carousel.offset = x;
+                }
+            }
+            Message::HomeScrolled(y) => {
+                self.home_scroll = y;
+                return self.scroll_preload_task();
+            }
+            Message::StripStep { strip, forward } => return self.step_strip(strip, forward),
+            Message::StripScrolled(strip, x) => {
+                let motion = self.strips.entry(strip).or_default();
+                if !motion.animating() {
+                    motion.offset = x;
+                    return self.scroll_preload_task();
                 }
             }
             Message::ToggleRowMenu(menu) => {
@@ -2472,6 +2564,7 @@ impl App {
             lists_scroll: AbsoluteOffset::default(),
             delete_prompt: None,
             playlist_name_typed: false,
+            library_filter: String::new(),
             page: Page::Home,
             history: Vec::new(),
             forward: Vec::new(),
@@ -2488,6 +2581,8 @@ impl App {
             radio_track_ids: HashSet::new(),
             unshuffled_order: Vec::new(),
             queue_notice: None,
+            toast: None,
+            toast_count: 0,
             queue_scroll: AbsoluteOffset::default(),
             queue_generation: 0,
             liked: HashSet::new(),
@@ -2579,6 +2674,8 @@ impl App {
             home_more_cancel: None,
             home_picks: home::HomePicks::default(),
             carousel: home::Carousel::default(),
+            home_scroll: 0.0,
+            strips: HashMap::new(),
             volume_rail: now_playing::VolumeRail::default(),
             area: estimated_area(1024.0, 768.0),
             ui_zoom: 1.0,
@@ -3429,9 +3526,9 @@ impl App {
         self.delete_prompt = None;
         self.page = page.clone();
         if self.page == Page::Home {
-            self.enter_home();
+            let scroll = self.enter_home();
             tracing::info!("returned to cached Home");
-            self.preload_current_page_artwork()
+            Task::batch([scroll, self.preload_current_page_artwork()])
         } else if self.page == Page::Search {
             Task::batch([
                 operation::scroll_to("search-content", self.search_scroll),
@@ -3518,13 +3615,21 @@ impl App {
         self.lyrics_scroll = AbsoluteOffset::default();
         self.lyrics_heights.clear();
         let scroll = operation::scroll_to("lyrics", AbsoluteOffset::<f32>::default());
-        let duration = self.track_duration(&track.video_id).or_else(|| {
-            self.playback_status
-                .track
-                .as_ref()
-                .filter(|current| current.video_id == track.video_id)
-                .and(self.playback_status.duration)
-        });
+        // The length the catalog gave is enough for a track that has not played yet.
+        let duration = self
+            .track_duration(&track.video_id)
+            .or_else(|| {
+                self.playback_status
+                    .track
+                    .as_ref()
+                    .filter(|current| current.video_id == track.video_id)
+                    .and(self.playback_status.duration)
+            })
+            .or_else(|| {
+                track
+                    .duration_secs
+                    .map(|secs| Duration::from_secs(u64::from(secs)))
+            });
         // LRCLIB only accepts a record whose length matches, so the search waits for the length. A track that
         // plays reports it once its stream resolves, and the retry in playback_glue starts the search then.
         let Some(duration) = duration else {
@@ -5193,8 +5298,22 @@ mod tests {
 
         let task = app.preload_current_page_artwork();
 
-        // Every card of the one Home shelf, at a size the cache can hold.
-        assert_eq!(app.artwork_requested.len(), 20);
+        // Every card of the shelf at the top, and of the rows near the first screen only, at
+        // sizes the cache can hold.
+        for item in 0..20 {
+            let url = format!("cover-0-{item}");
+            assert!(
+                app.artwork_requested
+                    .iter()
+                    .any(|(requested, _)| *requested == url)
+            );
+        }
+        assert!(
+            !app.artwork_requested
+                .iter()
+                .any(|(url, _)| url.starts_with("cover-9-")),
+            "a row far down the page waits until it is scrolled to"
+        );
         assert!(app.artwork_requested.len() <= crate::artwork::MAX_ARTWORK_ENTRIES);
         let requested_bytes: usize = app
             .artwork_requested
@@ -5915,6 +6034,21 @@ mod tests {
             app.lyrics_error.as_deref(),
             Some("Press play to load the lyrics.")
         );
+    }
+
+    #[test]
+    fn a_restored_track_with_a_known_length_loads_its_lyrics_when_the_tab_opens() {
+        let mut track = lyrics_test_track("restored");
+        track.duration_secs = Some(215);
+        let mut app = App {
+            queue: Arc::new(vec![track]),
+            queue_index: Some(0),
+            page: Page::NowPlaying,
+            ..App::default()
+        };
+        drop(app.update(Message::SetNowPlayingTab(super::NowPlayingTab::Lyrics)));
+        assert!(app.lyrics_loading, "the search starts without playback");
+        assert!(app.lyrics_error.is_none());
     }
 
     #[test]
@@ -7421,13 +7555,11 @@ mod tests {
             queue_index: Some(0),
             ..App::default()
         };
+        let note = |app: &App| app.toast.as_ref().map(|toast| toast.note.clone());
         let _ = app.update(Message::AddToQueue(fixture_track("b")));
-        assert_eq!(
-            app.queue_notice,
-            Some(now_playing::QueueNotice::AddedToQueue)
-        );
+        assert_eq!(note(&app), Some(toast::Note::AddedToQueue));
         let _ = app.update(Message::PlayNext(fixture_track("c")));
-        assert_eq!(app.queue_notice, Some(now_playing::QueueNotice::PlaysNext));
+        assert_eq!(note(&app), Some(toast::Note::PlaysNext));
     }
 
     #[test]

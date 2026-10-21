@@ -374,8 +374,7 @@ impl App {
             return self.update(Message::SelectTrack(track));
         }
         if self.queue.len() >= crate::preferences::MAX_QUEUE_TRACKS {
-            self.queue_notice = Some(super::now_playing::QueueNotice::Full);
-            return Task::none();
+            return self.show_toast(super::toast::Note::QueueFull, None);
         }
         let position = match (next, self.queue_index) {
             (true, Some(current)) => (current + 1).min(self.queue.len()),
@@ -391,13 +390,15 @@ impl App {
         }
         self.queue_source = None;
         self.queue_generation = self.queue_generation.wrapping_add(1);
-        self.queue_notice = Some(if next {
-            super::now_playing::QueueNotice::PlaysNext
-        } else {
-            super::now_playing::QueueNotice::AddedToQueue
-        });
         self.persist();
-        Task::none()
+        self.show_toast(
+            if next {
+                super::toast::Note::PlaysNext
+            } else {
+                super::toast::Note::AddedToQueue
+            },
+            None,
+        )
     }
 
     pub(super) fn remember_duration(&mut self, video_id: String, duration: Duration) {
@@ -473,11 +474,13 @@ impl App {
     }
 
     /// Drops one upcoming or earlier track. The playing track stays in place.
-    pub(super) fn remove_from_queue(&mut self, index: usize) {
+    /// Takes a track out of the queue; the note says so, with Undo.
+    pub(super) fn remove_from_queue(&mut self, index: usize) -> Task<Message> {
         if index >= self.queue.len() || self.queue_index == Some(index) {
-            return;
+            return Task::none();
         }
-        Arc::make_mut(&mut self.queue).remove(index);
+        self.row_menu = None;
+        let removed = Arc::make_mut(&mut self.queue).remove(index);
         self.queue_index = self.queue_index.map(|current| {
             if index < current {
                 current - 1
@@ -488,18 +491,55 @@ impl App {
         self.queue_source = None;
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.persist();
+        self.show_toast(
+            super::toast::Note::RemovedFromQueue,
+            Some(super::toast::ToastAction::RestoreQueue {
+                index,
+                tracks: vec![removed],
+                generation: self.queue_generation,
+            }),
+        )
     }
 
-    /// Drops every track after the playing one; the playing track keeps playing.
-    pub(super) fn clear_upcoming_queue(&mut self) {
-        let keep = self.queue_index.map_or(0, |current| current + 1);
-        if keep >= self.queue.len() {
+    /// Moves a queue entry from `from` to `to`. The track that plays stays the one that plays,
+    /// wherever it goes.
+    pub(super) fn move_in_queue(&mut self, from: usize, to: usize) {
+        let count = self.queue.len();
+        if from >= count || to >= count || from == to {
             return;
         }
-        Arc::make_mut(&mut self.queue).truncate(keep);
+        let queue = Arc::make_mut(&mut self.queue);
+        let track = queue.remove(from);
+        queue.insert(to, track);
+        self.queue_index = self
+            .queue_index
+            .map(|current| moved_index(current, from, to));
+        self.queue_generation = self.queue_generation.wrapping_add(1);
+        if let Some(current) = self.queue_index {
+            crate::playback::set_upcoming_video_ids(self.upcoming_video_ids(current));
+        }
+        self.persist();
+    }
+
+    /// Drops every track after the playing one; the playing track keeps playing. The note says
+    /// so, with Undo.
+    pub(super) fn clear_upcoming_queue(&mut self) -> Task<Message> {
+        let keep = self.queue_index.map_or(0, |current| current + 1);
+        if keep >= self.queue.len() {
+            return Task::none();
+        }
+        let cleared = Arc::make_mut(&mut self.queue).split_off(keep);
         self.queue_source = None;
         self.queue_generation = self.queue_generation.wrapping_add(1);
         self.persist();
+        self.show_toast(
+            super::toast::Note::UpNextCleared,
+            Some(super::toast::ToastAction::RestoreQueue {
+                index: keep,
+                tracks: cleared,
+                generation: self.queue_generation,
+            }),
+        )
     }
 
     pub(super) fn shuffle_queue(&mut self) {
@@ -910,8 +950,26 @@ impl App {
                     Err(error) => self.radio_error = Some(error),
                 }
             }
-            Message::RemoveFromQueue(index) => self.remove_from_queue(index),
-            Message::ClearUpcomingQueue => self.clear_upcoming_queue(),
+            Message::RemoveFromQueue(index) => return self.remove_from_queue(index),
+            Message::MoveInQueue { index, up } => {
+                let to = if up {
+                    index.checked_sub(1)
+                } else {
+                    Some(index + 1).filter(|to| *to < self.queue.len())
+                };
+                if let Some(to) = to {
+                    self.move_in_queue(index, to);
+                    for row in [&mut self.row_menu, &mut self.row_cursor]
+                        .into_iter()
+                        .flatten()
+                    {
+                        if row.list == "queue" && row.index == index {
+                            row.index = to;
+                        }
+                    }
+                }
+            }
+            Message::ClearUpcomingQueue => return self.clear_upcoming_queue(),
 
             Message::SeekTo(seconds) => {
                 let audio_seconds = seconds - self.current_lyrics_offset() as f64 / 1000.0;
@@ -1145,5 +1203,18 @@ impl App {
             _ => unreachable!("update_inner routes only this group here"),
         }
         Task::none()
+    }
+}
+
+/// Where the entry at `index` is after the entry at `from` moved to `to`.
+fn moved_index(index: usize, from: usize, to: usize) -> usize {
+    if index == from {
+        to
+    } else if from < index && index <= to {
+        index - 1
+    } else if to <= index && index < from {
+        index + 1
+    } else {
+        index
     }
 }

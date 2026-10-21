@@ -1,5 +1,6 @@
 //! Home: the search field, the "All-time essentials" carousel and search results.
 
+use super::playlists::HEART_W;
 use super::shell::{display_title, fit, meta_text, section_heading};
 use super::theme::{
     self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, TEXT_TITLE, hrule,
@@ -8,10 +9,11 @@ use super::theme::{
 use super::{App, Message};
 use crate::music::{HomeItem, HomeItemKind, Track};
 use crate::preferences::UiDensity;
+use iced::widget::operation::{self, AbsoluteOffset};
 use iced::widget::{
     Space, button, column, container, mouse_area, pin, row, scrollable, stack, text, text_input,
 };
-use iced::{Alignment, Element, Length, Size};
+use iced::{Alignment, Element, Length, Size, Task};
 use std::sync::Arc;
 
 pub(super) const CAROUSEL_ID: &str = "essentials";
@@ -48,40 +50,50 @@ const CAROUSEL_DURATION_MS: f32 = 320.0;
 /// languages Home takes the first shelf of collections instead (see `HomePicks::rebuild`).
 const ESSENTIALS_TITLES: &[&str] = &["all-time essentials", "esenciales de todos los tiempos"];
 const MAX_ITEMS: usize = 30;
+/// The feed's other shelves shown under the first screen, at most.
+const MAX_MORE_SHELVES: usize = 12;
+/// How much of what follows the first screen of a wide window shows at its foot, so the page
+/// says it goes on.
+const PEEK: f32 = 56.0;
+/// The cards of the rows under the first screen, the gap above each row, and its heading.
+const STRIP_CARD: f32 = 168.0;
+const STRIP_CARD_NARROW: f32 = 132.0;
+const STRIP_GAP: f32 = 40.0;
+const STRIP_HEADING_H: f32 = 22.0;
+const STRIP_HEADING_GAP: f32 = 18.0;
+/// The room under a card's cover: the gap, the title and the subtitle.
+const CARD_TEXT_H: f32 = 10.0 + 20.0 + 18.0;
+/// The id of Home's vertical scrollable, once rows follow the first screen.
+pub(super) const HOME_SCROLL_ID: &str = "home-content";
 /// Songs, and collections of each kind, the results page lists.
 const SEARCH_SONGS_SHOWN: usize = 8;
 const SEARCH_COLLECTIONS_SHOWN: usize = 6;
 
-/// The one Home shelf: "All-time essentials", or the first shelf of
-/// collections when the feed does not include it.
+/// The shelf at the top of Home: "All-time essentials", or the first shelf of
+/// collections when the feed does not include it. The feed's other shelves follow under the first
+/// screen.
 #[derive(Default)]
 pub(super) struct HomePicks {
     pub title: String,
     pub items: Vec<HomeItem>,
     /// Song items as a play queue, in shelf order.
     pub queue: Arc<[Track]>,
+    /// The feed's other shelves, in feed order.
+    pub more: Vec<ShelfPicks>,
 }
 
-impl HomePicks {
-    pub fn rebuild(&mut self, shelves: &[crate::music::HomeShelf]) {
-        let shelf = shelves
-            .iter()
-            .find(|shelf| ESSENTIALS_TITLES.contains(&shelf.title.trim().to_lowercase().as_str()))
-            .or_else(|| {
-                shelves.iter().find(|shelf| {
-                    shelf.items.iter().any(|item| {
-                        item.browse_target
-                            .as_ref()
-                            .is_some_and(|target| target.is_public_collection())
-                    })
-                })
-            });
-        let Some(shelf) = shelf else {
-            *self = Self::default();
-            return;
-        };
-        self.title = shelf.title.clone();
-        self.items = shelf
+/// A shelf of the feed under the first screen of Home.
+pub(super) struct ShelfPicks {
+    pub title: String,
+    pub items: Vec<HomeItem>,
+    /// Song items as a play queue, in shelf order.
+    pub queue: Arc<[Track]>,
+}
+
+impl ShelfPicks {
+    /// The songs and public collections of a shelf, which a card can play or open.
+    fn of(shelf: &crate::music::HomeShelf) -> Self {
+        let items: Vec<HomeItem> = shelf
             .items
             .iter()
             .filter(|item| {
@@ -94,12 +106,81 @@ impl HomePicks {
             .take(MAX_ITEMS)
             .cloned()
             .collect();
-        self.queue = self
-            .items
+        let queue = items.iter().filter_map(|item| item.track.clone()).collect();
+        Self {
+            title: shelf.title.clone(),
+            items,
+            queue,
+        }
+    }
+}
+
+impl HomePicks {
+    pub fn rebuild(&mut self, shelves: &[crate::music::HomeShelf]) {
+        let first = shelves
             .iter()
-            .filter_map(|item| item.track.clone())
+            .position(|shelf| {
+                ESSENTIALS_TITLES.contains(&shelf.title.trim().to_lowercase().as_str())
+            })
+            .or_else(|| {
+                shelves.iter().position(|shelf| {
+                    shelf.items.iter().any(|item| {
+                        item.browse_target
+                            .as_ref()
+                            .is_some_and(|target| target.is_public_collection())
+                    })
+                })
+            });
+        let Some(first) = first else {
+            *self = Self::default();
+            return;
+        };
+        let picks = ShelfPicks::of(&shelves[first]);
+        self.title = picks.title;
+        self.items = picks.items;
+        self.queue = picks.queue;
+        self.more = shelves
+            .iter()
+            .enumerate()
+            .filter(|(position, shelf)| *position != first && !shelf.title.trim().is_empty())
+            .map(|(_, shelf)| ShelfPicks::of(shelf))
+            .filter(|picks| !picks.items.is_empty())
+            .take(MAX_MORE_SHELVES)
             .collect();
     }
+}
+
+/// A row of cards under the first screen of Home: the user's lists, or one of the feed's other
+/// shelves by its place in `HomePicks::more`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum Strip {
+    Lists,
+    Shelf(usize),
+}
+
+impl Strip {
+    /// The id of the row's scrollable.
+    pub(super) fn id(self) -> String {
+        match self {
+            Self::Lists => "home-lists".to_owned(),
+            Self::Shelf(position) => format!("home-shelf-{position}"),
+        }
+    }
+}
+
+/// The side of a card in the rows under the first screen.
+pub(super) fn strip_card(narrow: bool) -> f32 {
+    if narrow {
+        STRIP_CARD_NARROW
+    } else {
+        STRIP_CARD
+    }
+}
+
+/// The height of one row under the first screen: the gap above it, its heading, and its cards with
+/// their two lines.
+pub(super) fn strip_height(narrow: bool) -> f32 {
+    STRIP_GAP + STRIP_HEADING_H + STRIP_HEADING_GAP + strip_card(narrow) + CARD_TEXT_H
 }
 
 /// Smooth horizontal scrolling of the Home carousel.
@@ -153,6 +234,8 @@ pub(super) struct HomeExtras {
     pub chips: usize,
     /// Entries in "Jump back in", before any are dropped for lack of height.
     pub jump: usize,
+    /// Rows of cards follow the first screen, which then scrolls.
+    pub flow: bool,
 }
 
 /// The greeting is two lines while the page has room, and one line when it does not.
@@ -184,6 +267,8 @@ pub(super) struct HomeLayout {
     pub chips: usize,
     /// Entries shown in "Jump back in" (0 hides the section).
     pub jump: usize,
+    /// Rows of cards follow the first screen: see `HomeExtras::flow`.
+    pub flow: bool,
 }
 
 /// Space between the greeting and the search field.
@@ -238,7 +323,14 @@ impl HomeLayout {
     /// then do "Jump back in" and the chips go. The search field is never resized.
     pub fn new(area: Size, items: usize, extras: HomeExtras) -> Self {
         let width = area.width.max(CARD_MIN);
-        let page_h = (area.height - STATUS_H).max(0.0);
+        // With rows to follow, the status line goes to the foot of the page, and a wide window
+        // keeps room for the start of the next row.
+        let reserved = match (extras.flow, width < NARROW_W) {
+            (false, _) => STATUS_H,
+            (true, false) => PEEK,
+            (true, true) => 0.0,
+        };
+        let page_h = (area.height - reserved).max(0.0);
         // Before Home has loaded, or when it failed, the page has the column a full row of cards
         // would give it, so the search field keeps its width.
         let items = if items == 0 { 8 } else { items.clamp(1, 8) } as f32;
@@ -314,7 +406,12 @@ impl HomeLayout {
             card = (card - (total - budget)).max(last_resort).floor();
         }
         let total = block(greeting, chips, jump, card);
-        let top = ((page_h - total) / 2.0 * 0.9).max(EDGE_GAP).floor();
+        // On a phone the rows follow straight after the block, which starts at the top.
+        let top = if extras.flow && narrow {
+            EDGE_GAP
+        } else {
+            ((page_h - total) / 2.0 * 0.9).max(EDGE_GAP).floor()
+        };
         Self {
             visible: across as usize,
             card,
@@ -328,6 +425,17 @@ impl HomeLayout {
             greeting_font,
             chips,
             jump,
+            flow: extras.flow,
+        }
+    }
+
+    /// How tall the first screen is in a page `height` tall, when rows follow it: the page less
+    /// the peek of the next row on a wide window, and the block alone on a phone.
+    pub fn hero_height(&self, height: f32) -> f32 {
+        if self.narrow {
+            self.block_bottom() + EDGE_GAP
+        } else {
+            (height - PEEK).max(self.block_bottom())
         }
     }
 
@@ -350,9 +458,7 @@ impl HomeLayout {
         self.top + self.greeting_height()
     }
 
-    /// Y of the bottom edge of the whole block, from the top of the page. The tests check the
-    /// whole stack against the page; the app itself only needs the parts.
-    #[cfg(test)]
+    /// Y of the bottom edge of the whole block, from the top of the page.
     pub fn block_bottom(&self) -> f32 {
         self.search_top()
             + SEARCH_H
@@ -396,6 +502,7 @@ impl App {
         let extras = HomeExtras {
             chips,
             jump: self.recent.len().min(MAX_JUMP),
+            flow: !self.home_strips().is_empty(),
         };
         HomeLayout::new(area, self.home_picks.items.len(), extras)
     }
@@ -554,7 +661,7 @@ impl App {
         if let Some(line) = self.refresh_failure_line(&layout) {
             head = head.push(line);
         }
-        let mut page = head.width(Length::Fill).height(Length::Fill);
+        let mut page = head.width(Length::Fill);
         page = page
             .push(container(self.search_field(layout.search_width, true)).center_x(Length::Fill));
         if layout.chips > 0 {
@@ -568,15 +675,265 @@ impl App {
                 .push(self.jump_view(&layout));
         }
         page = page.push(Space::new().height(layout.gap)).push(carousel);
-        page = page
-            .push(Space::new().height(Length::Fill))
-            .push(container(self.status_line(layout.row_width)).center_x(Length::Fill));
+        let status = container(self.status_line(layout.row_width)).center_x(Length::Fill);
+        if !layout.flow {
+            page = page
+                .height(Length::Fill)
+                .push(Space::new().height(Length::Fill))
+                .push(status);
+            return self.with_suggestions(
+                page.into(),
+                layout.search_width,
+                search_x,
+                layout.search_top() + SEARCH_H,
+            );
+        }
+        // Rows of cards follow the first screen, and the page scrolls; the status line ends it.
+        let mut content = column![page.height(layout.hero_height(area.height))];
+        for strip in self.home_strips() {
+            content = content.push(
+                container(self.strip_view(strip, &layout))
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+            );
+        }
+        content = content.push(Space::new().height(STRIP_GAP)).push(status);
+        let scroll = scrollable(content.width(Length::Fill))
+            .id(HOME_SCROLL_ID)
+            .on_scroll(|viewport| Message::HomeScrolled(viewport.absolute_offset().y))
+            .direction(theme::vbar())
+            .style(theme::scroll_style)
+            .width(Length::Fill)
+            .height(Length::Fill);
         self.with_suggestions(
-            page.into(),
+            scroll.into(),
             layout.search_width,
             search_x,
-            layout.search_top() + SEARCH_H,
+            layout.search_top() + SEARCH_H - self.home_scroll,
         )
+    }
+
+    /// A row of cards under the first screen: its heading with arrows that page through it, and
+    /// its cards, which scroll sideways.
+    fn strip_view<'a>(&'a self, strip: Strip, layout: &HomeLayout) -> Element<'a, Message> {
+        let size = strip_card(layout.narrow);
+        let width = layout.row_width;
+        let variant = crate::artwork::variant_for_pixels(size * self.pixel_scale());
+        let text_width = size - 4.0;
+        let (title, cards): (String, Vec<Element<'a, Message>>) = match strip {
+            Strip::Lists => {
+                let mut cards = Vec::new();
+                for list in self.home_lists() {
+                    let (name, count) = match list {
+                        super::messages::ListId::Favorites => {
+                            (self.tr("Favorite songs").into_owned(), self.favorites.len())
+                        }
+                        super::messages::ListId::Playlist(id) => {
+                            let Some(playlist) = self.playlist(id) else {
+                                continue;
+                            };
+                            (playlist.name.clone(), playlist.tracks.len())
+                        }
+                    };
+                    cards.push(card(
+                        self.list_cover(list, size),
+                        fit(&name, text_width, TEXT_BODY),
+                        fit(&self.song_count(count, false), text_width, TEXT_CAPTION),
+                        size,
+                        Message::Navigate(super::Page::List(list)),
+                    ));
+                }
+                (self.tr("Your lists").into_owned(), cards)
+            }
+            Strip::Shelf(position) => {
+                let Some(shelf) = self.home_picks.more.get(position) else {
+                    return Space::new().into();
+                };
+                let cards = shelf
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        let action = match &item.track {
+                            Some(track) => shelf
+                                .queue
+                                .iter()
+                                .position(|queued| queued.video_id == track.video_id)
+                                .map(|index| Message::PlayContext(Arc::clone(&shelf.queue), index)),
+                            None => item.browse_target.clone().map(Message::OpenCollection),
+                        }?;
+                        Some(card(
+                            self.cover(item.thumbnail_url.as_deref(), size, variant),
+                            fit(&item.title, text_width, TEXT_BODY),
+                            fit(&meta_text(&item.subtitle), text_width, TEXT_CAPTION),
+                            size,
+                            action,
+                        ))
+                    })
+                    .collect();
+                (shelf.title.clone(), cards)
+            }
+        };
+        let count = cards.len();
+        let offset = self.strip_offset(strip);
+        let max_offset = strip_max_offset(count, size, layout);
+        let can_back = offset > 1.0;
+        let can_forward = offset < max_offset - 1.0;
+        let arrow = |name: &'static str, enabled: bool, forward: bool| {
+            button(icon(name, 18.0, if enabled { INK } else { FADED }))
+                .on_press_maybe(enabled.then_some(Message::StripStep { strip, forward }))
+                .padding(4)
+                .style(theme::icon_button)
+        };
+        let arrows = row![
+            arrow("chev-left", can_back, false),
+            arrow("chev-right", can_forward, true)
+        ]
+        .spacing(6);
+        let strip_row =
+            scrollable(iced::widget::Row::with_children(cards).spacing(layout.card_gap))
+                .id(strip.id())
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::hidden(),
+                ))
+                .on_scroll(move |viewport| {
+                    Message::StripScrolled(strip, viewport.absolute_offset().x)
+                })
+                .width(width)
+                .height(size + CARD_TEXT_H);
+        column![
+            Space::new().height(STRIP_GAP),
+            section_heading(
+                fit(&title, width - SHELF_ARROWS_W, TEXT_SECTION),
+                Some(arrows.into())
+            ),
+            Space::new().height(STRIP_HEADING_GAP),
+            strip_row,
+        ]
+        .width(width)
+        .into()
+    }
+
+    /// The rows of cards under the first screen: the user's lists while there are any, then the
+    /// feed's other shelves.
+    pub(super) fn home_strips(&self) -> Vec<Strip> {
+        let lists =
+            (!self.favorites.is_empty() || !self.playlists.is_empty()).then_some(Strip::Lists);
+        lists
+            .into_iter()
+            .chain((0..self.home_picks.more.len()).map(Strip::Shelf))
+            .collect()
+    }
+
+    /// The lists the "Your lists" row shows: Favorite songs while it has songs, then the
+    /// playlists in the Library's order.
+    pub(super) fn home_lists(&self) -> Vec<super::messages::ListId> {
+        let favorites = (!self.favorites.is_empty()).then_some(super::messages::ListId::Favorites);
+        favorites
+            .into_iter()
+            .chain(
+                self.playlists
+                    .iter()
+                    .map(|playlist| super::messages::ListId::Playlist(playlist.id)),
+            )
+            .collect()
+    }
+
+    /// How many cards a row has.
+    pub(super) fn strip_len(&self, strip: Strip) -> usize {
+        match strip {
+            Strip::Lists => self.home_lists().len(),
+            Strip::Shelf(position) => self
+                .home_picks
+                .more
+                .get(position)
+                .map_or(0, |shelf| shelf.items.len()),
+        }
+    }
+
+    /// How far a row is scrolled.
+    pub(super) fn strip_offset(&self, strip: Strip) -> f32 {
+        self.strips.get(&strip).map_or(0.0, |motion| motion.offset)
+    }
+
+    /// The arrows of a row: one screen of its cards on, or back, ending on a card's edge.
+    pub(super) fn step_strip(&mut self, strip: Strip, forward: bool) -> Task<Message> {
+        let layout = self.home_layout(self.area);
+        let size = strip_card(layout.narrow);
+        let stride = size + layout.card_gap;
+        let max = strip_max_offset(self.strip_len(strip), size, &layout);
+        let shown = ((layout.row_width + layout.card_gap) / stride)
+            .floor()
+            .max(1.0);
+        let offset = self.strip_offset(strip);
+        let target = if forward {
+            (offset + shown * stride).min(max)
+        } else {
+            (offset - shown * stride).max(0.0)
+        };
+        let target = if target >= max - 0.5 {
+            max
+        } else {
+            (target / stride).round() * stride
+        };
+        let reduced = self.preferences.reduced_motion;
+        let motion = self.strips.entry(strip).or_default();
+        motion.start(target, reduced);
+        if motion.animating() {
+            return Task::none();
+        }
+        Task::batch([
+            operation::scroll_to(strip.id(), AbsoluteOffset { x: target, y: 0.0 }),
+            self.scroll_preload_task(),
+        ])
+    }
+
+    /// The covers of the rows under the first screen that show, or nearly: the rows in the window
+    /// and the cards in each row's view.
+    pub(super) fn strip_artwork(&self, layout: &HomeLayout) -> Vec<(String, u32)> {
+        let size = strip_card(layout.narrow);
+        let stride = size + layout.card_gap;
+        let height = strip_height(layout.narrow);
+        let variant = crate::artwork::variant_for_pixels(size * self.pixel_scale());
+        let top = self.home_scroll - height;
+        let bottom = self.home_scroll + self.area.height + height;
+        let mut y = layout.hero_height(self.area.height);
+        let mut requests = Vec::new();
+        for strip in self.home_strips() {
+            let shown = y + height >= top && y <= bottom;
+            y += height;
+            if !shown {
+                continue;
+            }
+            let offset = self.strip_offset(strip);
+            let first = ((offset / stride).floor() as usize).saturating_sub(1);
+            let count = ((layout.row_width / stride).ceil() as usize) + 3;
+            match strip {
+                Strip::Lists => {
+                    for list in self.home_lists().into_iter().skip(first).take(count) {
+                        let variant = self.list_cover_variant(list, size);
+                        requests.extend(
+                            self.list_cover_urls(list)
+                                .into_iter()
+                                .map(|url| (url.to_owned(), variant)),
+                        );
+                    }
+                }
+                Strip::Shelf(position) => {
+                    if let Some(shelf) = self.home_picks.more.get(position) {
+                        requests.extend(
+                            shelf
+                                .items
+                                .iter()
+                                .skip(first)
+                                .take(count)
+                                .filter_map(|item| item.thumbnail_url.clone())
+                                .map(|url| (url, variant)),
+                        );
+                    }
+                }
+            }
+        }
+        requests
     }
 
     fn essentials(&self, layout: &HomeLayout) -> Element<'_, Message> {
@@ -997,7 +1354,7 @@ impl App {
         let density = self.preferences.ui_density;
         let cover = density.result_cover();
         let padding = UiDensity::row_padding(cover, density.result_row_height());
-        let text_width = width - cover - 16.0 - 60.0 - 44.0 - 24.0;
+        let text_width = width - cover - 16.0 - 60.0 - 44.0 - 24.0 - HEART_W - 16.0;
         let ink = theme::row_ink(playing);
         let title = byline(&track.title, &track.artist);
         let title = if playing {
@@ -1025,6 +1382,12 @@ impl App {
                     .width(Length::Fill),
                 label(duration, TEXT_CAPTION).color(ink.secondary),
                 more,
+                self.row_heart(
+                    track,
+                    ink.icon,
+                    playing,
+                    Message::OpenSaveDialog(track.clone())
+                ),
             ]
             .spacing(16)
             .align_y(Alignment::Center),
@@ -1094,6 +1457,11 @@ impl App {
         }
         grid.into()
     }
+}
+
+/// The farthest a row of `count` cards of `size` scrolls.
+fn strip_max_offset(count: usize, size: f32, layout: &HomeLayout) -> f32 {
+    (count as f32 * (size + layout.card_gap) - layout.card_gap - layout.row_width).max(0.0)
 }
 
 /// `Title — Artist`, or just the title when the catalog omitted the artist.
@@ -1176,7 +1544,11 @@ mod tests {
             let layout = HomeLayout::new(
                 Size::new(width, height),
                 12,
-                HomeExtras { chips: 5, jump: 4 },
+                HomeExtras {
+                    chips: 5,
+                    jump: 4,
+                    flow: false,
+                },
             );
             let page_h = height - STATUS_H;
             assert!(
@@ -1232,7 +1604,15 @@ mod tests {
                 // The page area is the window minus the title bar, the navigation row, the
                 // player bar and the status line's rule.
                 let area = Size::new(width, height as f32 - 195.0);
-                let layout = HomeLayout::new(area, 12, HomeExtras { chips: 5, jump: 4 });
+                let layout = HomeLayout::new(
+                    area,
+                    12,
+                    HomeExtras {
+                        chips: 5,
+                        jump: 4,
+                        flow: false,
+                    },
+                );
                 let page_h = area.height - STATUS_H;
                 let label = format!("{width}x{height}: {layout:?}");
                 assert!(layout.block_bottom() <= page_h + 0.5, "{label}");
@@ -1254,7 +1634,15 @@ mod tests {
         for (width, height) in [(390.0, 649.0), (1206.0, 525.0), (1354.0, 602.0)] {
             let area = Size::new(width, height);
             let bare = HomeLayout::new(area, 12, HomeExtras::default());
-            let full = HomeLayout::new(area, 12, HomeExtras { chips: 5, jump: 4 });
+            let full = HomeLayout::new(
+                area,
+                12,
+                HomeExtras {
+                    chips: 5,
+                    jump: 4,
+                    flow: false,
+                },
+            );
             let floor = if width < NARROW_W {
                 CARD_FLOOR_NARROW
             } else {
@@ -1280,7 +1668,15 @@ mod tests {
             (358.0, 649.0),
         ] {
             let area = Size::new(width, height);
-            let layout = HomeLayout::new(area, 12, HomeExtras { chips: 1, jump: 1 });
+            let layout = HomeLayout::new(
+                area,
+                12,
+                HomeExtras {
+                    chips: 1,
+                    jump: 1,
+                    flow: false,
+                },
+            );
             let floor = if width < NARROW_W {
                 CARD_FLOOR_NARROW
             } else {
@@ -1301,7 +1697,11 @@ mod tests {
         let layout = HomeLayout::new(
             Size::new(1920.0, 1080.0),
             12,
-            HomeExtras { chips: 5, jump: 4 },
+            HomeExtras {
+                chips: 5,
+                jump: 4,
+                flow: false,
+            },
         );
         assert_eq!(layout.greeting, GreetingSize::Full);
         assert_eq!((layout.chips, layout.jump), (5, 4), "{layout:?}");

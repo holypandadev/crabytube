@@ -1,20 +1,20 @@
 //! Track menu actions beyond the queue: "Start radio" and the "Go to" destinations a track names.
 
-use super::now_playing::QueueNotice;
+use super::toast::Note;
 use super::*;
 
 impl App {
     /// Starts the catalog radio of `track` in the background. The queue is replaced when it
     /// arrives, so the track plays first.
     pub(super) fn start_radio(&mut self, track: Track) -> Task<Message> {
-        self.queue_notice = Some(QueueNotice::RadioLoading);
         let service = Arc::clone(&self.music_service);
         let video = track.video_id.clone();
         let generation = self.queue_generation;
         // A newer request, or a track picked meanwhile, makes this answer late.
         self.radio_generation = self.radio_generation.wrapping_add(1);
         let request = self.radio_generation;
-        Task::perform(
+        let note = self.show_toast(Note::RadioLoading(request), None);
+        let radio = Task::perform(
             async move {
                 service
                     .radio(&video)
@@ -27,7 +27,8 @@ impl App {
                 request,
                 result,
             },
-        )
+        );
+        Task::batch([note, radio])
     }
 
     /// Plays the radio that came back for `track`: the track first, then the radio in its order.
@@ -41,17 +42,15 @@ impl App {
         result: Result<Vec<Track>, String>,
     ) -> Task<Message> {
         if generation != self.queue_generation || request != self.radio_generation {
-            if self.queue_notice == Some(QueueNotice::RadioLoading) {
-                self.queue_notice = None;
-            }
+            self.hide_toast(&Note::RadioLoading(request));
             return Task::none();
         }
         let Ok(radio) = result else {
-            self.queue_notice = Some(QueueNotice::RadioFailed);
-            return Task::none();
+            return self.show_toast(Note::RadioFailed, None);
         };
         let tracks: Vec<Track> = std::iter::once(track).chain(radio).collect();
-        self.update(Message::PlayContext(Arc::from(tracks), 0))
+        let play = self.update(Message::PlayContext(Arc::from(tracks), 0));
+        Task::batch([play, self.show_toast(Note::RadioStarted, None)])
     }
 }
 
@@ -135,25 +134,30 @@ mod tests {
             Err("offline".into()),
         );
         assert!(app.queue.is_empty());
-        assert_eq!(app.queue_notice, Some(QueueNotice::RadioFailed));
+        assert_eq!(
+            app.toast.as_ref().map(|toast| &toast.note),
+            Some(&Note::RadioFailed)
+        );
     }
 
     #[test]
     fn a_radio_that_arrives_after_the_queue_changed_is_dropped() {
         let mut app = App::default();
+        drop(app.start_radio(track("seed")));
         let asked_at = app.queue_generation;
-        app.queue_notice = Some(QueueNotice::RadioLoading);
+        let request = app.radio_generation;
         // The user plays something else while the radio loads.
         let _ = app.update(Message::PlayContext(Arc::from(vec![track("other")]), 0));
-        let _ = app.start_radio_loaded(
-            track("seed"),
-            asked_at,
-            app.radio_generation,
-            Ok(vec![track("two")]),
-        );
+        let _ = app.start_radio_loaded(track("seed"), asked_at, request, Ok(vec![track("two")]));
         let queued: Vec<&str> = app.queue.iter().map(|t| t.video_id.as_str()).collect();
         assert_eq!(queued, ["other"]);
-        assert_ne!(app.queue_notice, Some(QueueNotice::RadioLoading));
+        assert!(
+            !matches!(
+                app.toast.as_ref().map(|toast| &toast.note),
+                Some(Note::RadioLoading(_))
+            ),
+            "the late radio's note is gone"
+        );
     }
 
     #[test]
