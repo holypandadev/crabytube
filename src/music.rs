@@ -1116,7 +1116,7 @@ mod live_feed_probe {
                 let service = &service;
                 async move {
                     match service.browse(&target).await.ok()? {
-                        BrowsePage::Collection(page) => Some(page),
+                        BrowsePage::Collection(page) => Some(*page),
                         _ => None,
                     }
                 }

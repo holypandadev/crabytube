@@ -549,6 +549,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Filter playlists", "筛选播放列表"),
         ("No playlists match.", "没有匹配的播放列表。"),
         ("Playlist created: {}", "已创建播放列表：{}"),
+        ("All songs", "全部歌曲"),
     ],
     templates: &[
         ("Active: {}.", "当前：{0}。"),

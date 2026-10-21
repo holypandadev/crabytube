@@ -621,6 +621,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Filter playlists", "プレイリストを絞り込む"),
         ("No playlists match.", "一致するプレイリストはありません。"),
         ("Playlist created: {}", "プレイリストを作成しました：{}"),
+        ("All songs", "すべての曲"),
     ],
     templates: &[
         ("Active: {}.", "使用中：{0}。"),

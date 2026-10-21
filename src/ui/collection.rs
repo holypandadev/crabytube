@@ -10,6 +10,7 @@ use iced::widget::{
     row, scrollable, text,
 };
 use iced::{Alignment, Element, Length, Size, Task, alignment};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -30,6 +31,8 @@ pub(super) struct CollectionState {
     /// "Save as playlist" was pressed while more of the collection was still to load: the rest
     /// loads first.
     pub save_pending: bool,
+    /// An artist's shelves under their songs: albums, singles, videos, artists alike.
+    pub related: Vec<super::home::ShelfPicks>,
 }
 
 /// The tracks a collection queues when played. An album's tracks come without covers of their own,
@@ -58,6 +61,27 @@ pub(super) fn queue_context(
         .into()
 }
 
+/// The shelves an artist's page shows under the songs, leaving out the one that holds those songs.
+fn related_shelves(data: &Collection) -> Vec<super::home::ShelfPicks> {
+    let songs: HashSet<&str> = data
+        .tracks
+        .iter()
+        .map(|entry| entry.track.video_id.as_str())
+        .collect();
+    data.related
+        .iter()
+        .filter(|shelf| {
+            !shelf.items.iter().all(|item| {
+                item.track
+                    .as_ref()
+                    .is_some_and(|track| songs.contains(track.video_id.as_str()))
+            })
+        })
+        .map(super::home::ShelfPicks::of)
+        .filter(|picks| !picks.items.is_empty())
+        .collect()
+}
+
 impl CollectionState {
     pub fn cancel(&mut self) {
         if let Some(token) = self.cancellation.take() {
@@ -79,6 +103,7 @@ impl CollectionState {
         if !same_target {
             self.data = None;
             self.tracks_context = Arc::from([]);
+            self.related.clear();
         }
         self.error = None;
         self.loading = true;
@@ -102,6 +127,7 @@ impl CollectionState {
     /// Shows `data` without copying it: the cache and the page share one allocation.
     fn show(&mut self, data: Arc<Collection>) {
         self.tracks_context = queue_context(self.target.as_ref(), &data);
+        self.related = related_shelves(&data);
         self.data = Some(data);
     }
 
@@ -110,7 +136,7 @@ impl CollectionState {
             return false;
         }
         match result {
-            Ok(BrowsePage::Collection(data)) => self.show(Arc::new(data)),
+            Ok(BrowsePage::Collection(data)) => self.show(Arc::from(data)),
             Ok(BrowsePage::Unsupported { .. }) => {
                 self.error = Some("This collection type is not supported yet.".into());
             }
@@ -196,6 +222,9 @@ impl App {
     }
 
     pub(super) fn load_collection(&mut self, target: BrowseTarget) -> Task<Message> {
+        // An artist's rows start at their first card.
+        self.strips
+            .retain(|strip, _| !matches!(strip, super::home::Strip::Related(_)));
         let (generation, cancellation) = self.collection.begin(target.clone());
         if let Some((_, cached)) = self
             .collection_cache
@@ -309,34 +338,40 @@ impl App {
             );
         }
         let has_tracks = !queue_tracks.is_empty();
-        metadata = metadata.push(Space::new().height(8)).push(
-            row![
-                button(
-                    row![
-                        icon("play", 14.0, INK),
-                        label(self.tr("Play").into_owned(), TEXT_BODY)
-                    ]
-                    .spacing(12)
-                    .align_y(Alignment::Center)
-                )
-                .on_press_maybe(has_tracks.then(|| {
-                    Message::PlayCollection(Arc::clone(&queue_tracks), 0, queue_source.clone())
-                }))
-                .padding([10, 22])
-                .style(theme::outline_button),
-                button(
-                    row![
-                        icon("shuffle", 14.0, INK),
-                        label(self.tr("Shuffle").into_owned(), TEXT_BODY)
-                    ]
-                    .spacing(12)
-                    .align_y(Alignment::Center)
-                )
-                .on_press_maybe(
-                    has_tracks.then(|| Message::ShuffleContext(Arc::clone(&queue_tracks)))
-                )
-                .padding([10, 22])
-                .style(theme::outline_button),
+        let mut buttons = row![
+            button(
+                row![
+                    icon("play", 14.0, INK),
+                    label(self.tr("Play").into_owned(), TEXT_BODY)
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center)
+            )
+            .on_press_maybe(has_tracks.then(|| {
+                Message::PlayCollection(Arc::clone(&queue_tracks), 0, queue_source.clone())
+            }))
+            .padding([10, 22])
+            .style(theme::outline_button),
+            button(
+                row![
+                    icon("shuffle", 14.0, INK),
+                    label(self.tr("Shuffle").into_owned(), TEXT_BODY)
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center)
+            )
+            .on_press_maybe(has_tracks.then(|| Message::ShuffleContext(Arc::clone(&queue_tracks))))
+            .padding([10, 22])
+            .style(theme::outline_button),
+        ]
+        .spacing(16);
+        // An artist's page shows a few songs; "All songs" under them is the list to keep.
+        let artist =
+            self.collection.target.as_ref().is_some_and(|target| {
+                target.page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ARTIST")
+            });
+        if !artist {
+            buttons = buttons.push(
                 button(
                     row![
                         icon("plus", 14.0, INK),
@@ -351,19 +386,19 @@ impl App {
                         )
                     ]
                     .spacing(12)
-                    .align_y(Alignment::Center)
+                    .align_y(Alignment::Center),
                 )
                 .on_press_maybe(
                     (has_tracks && !self.collection.save_pending)
-                        .then_some(Message::SaveCollection)
+                        .then_some(Message::SaveCollection),
                 )
                 .padding([10, 22])
                 .style(theme::outline_button),
-            ]
-            .spacing(16)
-            .wrap()
-            .vertical_spacing(12),
-        );
+            );
+        }
+        metadata = metadata
+            .push(Space::new().height(8))
+            .push(buttons.wrap().vertical_spacing(12));
         let cover = self.cover(
             data.thumbnail_url.as_deref(),
             cover_size,
@@ -593,6 +628,24 @@ impl App {
                 .padding([12, 4]),
             );
         }
+        // An artist's page: all their songs, then their albums, singles, videos and artists alike.
+        if let Some(all) = &data.all_songs {
+            rows = rows.push(
+                container(
+                    button(label(self.tr("All songs").into_owned(), TEXT_BODY))
+                        .on_press(Message::OpenCollection(all.as_ref().clone()))
+                        .padding([10, 22])
+                        .style(theme::outline_button),
+                )
+                .padding([16, 4]),
+            );
+        }
+        for position in 0..self.collection.related.len() {
+            rows = rows.push(self.strip_view(super::home::Strip::Related(position)));
+        }
+        if !self.collection.related.is_empty() {
+            rows = rows.push(Space::new().height(24));
+        }
         page.push(
             scrollable(rows)
                 .id("collection-content")
@@ -654,6 +707,7 @@ mod tests {
             continuation: continuation.map(|token| crate::music::Continuation { token }),
             unavailable_tracks: 0,
             related: Vec::new(),
+            all_songs: None,
         })
     }
 

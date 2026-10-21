@@ -142,6 +142,8 @@ struct App {
     playlist_name_typed: bool,
     /// The text that filters the playlists on the Library page.
     library_filter: String,
+    /// Counts artist look-ups by name; navigating counts too, so a late answer goes nowhere.
+    artist_lookup: u64,
     page: Page,
     history: Vec<Page>,
     forward: Vec<Page>,
@@ -403,6 +405,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::CollectionMoreLoaded { .. }
         | Message::CatalogCompleted { .. }
         | Message::CatalogMoreCompleted { .. }
+        | Message::ArtistFound { .. }
         | Message::RadioLoaded { .. }
         | Message::SuggestionsCompleted { .. }
         | Message::HomeLoaded { .. }
@@ -2062,6 +2065,12 @@ impl App {
                     self.seek_notice = None;
                 }
             }
+            Message::FindArtist(name) => return self.find_artist(name),
+            Message::ArtistFound {
+                request,
+                name,
+                page,
+            } => return self.artist_found(request, name, page),
             Message::SearchFor(query) => {
                 self.invalidate_suggestions();
                 self.search_committed = !query.trim().is_empty();
@@ -2565,6 +2574,7 @@ impl App {
             delete_prompt: None,
             playlist_name_typed: false,
             library_filter: String::new(),
+            artist_lookup: 0,
             page: Page::Home,
             history: Vec::new(),
             forward: Vec::new(),
@@ -3516,6 +3526,7 @@ impl App {
         // the reconciled window. Scroll events do not bump the generation.
         self.cancel_artwork_batch();
         self.artwork_generation = self.artwork_generation.wrapping_add(1);
+        self.artist_lookup = self.artist_lookup.wrapping_add(1);
         self.invalidate_suggestions();
         self.row_menu = None;
         self.row_cursor = None;

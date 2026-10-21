@@ -209,8 +209,21 @@ impl App {
                 Some(Message::OpenSaveDialog(track.clone())),
             ),
         ];
-        // Only the artist and album the catalog named; a track without them gets no "Go to".
-        for (title, page) in super::track_actions::go_to_destinations(track) {
+        // The artist and album the catalog named. An artist it gave no page for is looked up by
+        // name; an album it did not name gets no "Go to".
+        let destinations = super::track_actions::go_to_destinations(track);
+        if !destinations
+            .iter()
+            .any(|(title, _)| *title == "Go to artist")
+            && !track.artist.trim().is_empty()
+        {
+            actions.push((
+                "artist",
+                "Go to artist",
+                Some(Message::FindArtist(track.artist.clone())),
+            ));
+        }
+        for (title, page) in destinations {
             let glyph = if title == "Go to artist" {
                 "artist"
             } else {

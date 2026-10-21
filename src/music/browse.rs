@@ -75,11 +75,13 @@ pub struct Collection {
     pub continuation: Option<Continuation>,
     pub unavailable_tracks: usize,
     pub related: Vec<super::HomeShelf>,
+    /// An artist's page shows a few of their songs; this page has all of them.
+    pub all_songs: Option<Box<BrowseTarget>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BrowsePage {
-    Collection(Collection),
+    Collection(Box<Collection>),
     Unsupported { page_type: Option<String> },
 }
 
@@ -563,12 +565,13 @@ pub(super) fn parse_browse_page(
                     })
                 })
         });
+    let artist = target.page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ARTIST");
     let continuation = if tracks.len() >= super::MAX_COLLECTION_TRACKS {
         None
     } else {
         parse_continuation(shelf)
     };
-    Ok(BrowsePage::Collection(Collection {
+    Ok(BrowsePage::Collection(Box::new(Collection {
         title,
         subtitle: header.get("subtitle").and_then(text_value),
         description: header
@@ -581,12 +584,21 @@ pub(super) fn parse_browse_page(
         tracks,
         continuation,
         unavailable_tracks,
-        related: if target.page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ARTIST") {
+        related: if artist {
             super::parse_home_feed(payload).unwrap_or_default()
         } else {
             Vec::new()
         },
-    }))
+        all_songs: artist
+            .then(|| {
+                ["/bottomEndpoint", "/title/runs/0/navigationEndpoint"]
+                    .into_iter()
+                    .find_map(|pointer| parse_browse_endpoint(shelf.pointer(pointer)?))
+            })
+            .flatten()
+            .filter(BrowseTarget::is_public_collection)
+            .map(Box::new),
+    })))
 }
 
 #[cfg(test)]
@@ -640,7 +652,7 @@ mod tests {
     }
     fn collection(payload: &Value) -> Collection {
         match parse_browse_page(payload, &target()).unwrap() {
-            BrowsePage::Collection(data) => data,
+            BrowsePage::Collection(data) => *data,
             _ => panic!("expected collection"),
         }
     }

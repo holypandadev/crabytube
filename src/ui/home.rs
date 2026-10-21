@@ -92,7 +92,7 @@ pub(super) struct ShelfPicks {
 
 impl ShelfPicks {
     /// The songs and public collections of a shelf, which a card can play or open.
-    fn of(shelf: &crate::music::HomeShelf) -> Self {
+    pub(super) fn of(shelf: &crate::music::HomeShelf) -> Self {
         let items: Vec<HomeItem> = shelf
             .items
             .iter()
@@ -150,12 +150,14 @@ impl HomePicks {
     }
 }
 
-/// A row of cards under the first screen of Home: the user's lists, or one of the feed's other
-/// shelves by its place in `HomePicks::more`.
+/// A row of cards: under the first screen of Home, the user's lists or one of the feed's other
+/// shelves by its place in `HomePicks::more`; on an artist's page, one of the artist's shelves by
+/// its place in `CollectionState::related`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Strip {
     Lists,
     Shelf(usize),
+    Related(usize),
 }
 
 impl Strip {
@@ -164,6 +166,7 @@ impl Strip {
         match self {
             Self::Lists => "home-lists".to_owned(),
             Self::Shelf(position) => format!("home-shelf-{position}"),
+            Self::Related(position) => format!("artist-shelf-{position}"),
         }
     }
 }
@@ -692,7 +695,7 @@ impl App {
         let mut content = column![page.height(layout.hero_height(area.height))];
         for strip in self.home_strips() {
             content = content.push(
-                container(self.strip_view(strip, &layout))
+                container(self.strip_view(strip))
                     .width(Length::Fill)
                     .center_x(Length::Fill),
             );
@@ -713,14 +716,28 @@ impl App {
         )
     }
 
-    /// A row of cards under the first screen: its heading with arrows that page through it, and
-    /// its cards, which scroll sideways.
-    fn strip_view<'a>(&'a self, strip: Strip, layout: &HomeLayout) -> Element<'a, Message> {
-        let size = strip_card(layout.narrow);
-        let width = layout.row_width;
+    /// The card size, the gap between cards and the width of a row of cards.
+    pub(super) fn strip_geometry(&self, strip: Strip) -> (f32, f32, f32) {
+        match strip {
+            Strip::Lists | Strip::Shelf(_) => {
+                let layout = self.home_layout(self.area);
+                (strip_card(layout.narrow), layout.card_gap, layout.row_width)
+            }
+            Strip::Related(_) => {
+                let narrow = self.area.width < NARROW_W;
+                let gap = if narrow { CARD_GAP_NARROW } else { CARD_GAP };
+                (strip_card(narrow), gap, self.area.width.max(CARD_MIN))
+            }
+        }
+    }
+
+    /// A row of cards: its heading with arrows that page through it, and its cards, which scroll
+    /// sideways.
+    pub(super) fn strip_view(&self, strip: Strip) -> Element<'_, Message> {
+        let (size, gap, width) = self.strip_geometry(strip);
         let variant = crate::artwork::variant_for_pixels(size * self.pixel_scale());
         let text_width = size - 4.0;
-        let (title, cards): (String, Vec<Element<'a, Message>>) = match strip {
+        let (title, cards): (String, Vec<Element<'_, Message>>) = match strip {
             Strip::Lists => {
                 let mut cards = Vec::new();
                 for list in self.home_lists() {
@@ -745,8 +762,8 @@ impl App {
                 }
                 (self.tr("Your lists").into_owned(), cards)
             }
-            Strip::Shelf(position) => {
-                let Some(shelf) = self.home_picks.more.get(position) else {
+            Strip::Shelf(_) | Strip::Related(_) => {
+                let Some(shelf) = self.strip_shelf(strip) else {
                     return Space::new().into();
                 };
                 let cards = shelf
@@ -775,7 +792,7 @@ impl App {
         };
         let count = cards.len();
         let offset = self.strip_offset(strip);
-        let max_offset = strip_max_offset(count, size, layout);
+        let max_offset = strip_max_offset(count, size, gap, width);
         let can_back = offset > 1.0;
         let can_forward = offset < max_offset - 1.0;
         let arrow = |name: &'static str, enabled: bool, forward: bool| {
@@ -789,17 +806,14 @@ impl App {
             arrow("chev-right", can_forward, true)
         ]
         .spacing(6);
-        let strip_row =
-            scrollable(iced::widget::Row::with_children(cards).spacing(layout.card_gap))
-                .id(strip.id())
-                .direction(scrollable::Direction::Horizontal(
-                    scrollable::Scrollbar::hidden(),
-                ))
-                .on_scroll(move |viewport| {
-                    Message::StripScrolled(strip, viewport.absolute_offset().x)
-                })
-                .width(width)
-                .height(size + CARD_TEXT_H);
+        let strip_row = scrollable(iced::widget::Row::with_children(cards).spacing(gap))
+            .id(strip.id())
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::hidden(),
+            ))
+            .on_scroll(move |viewport| Message::StripScrolled(strip, viewport.absolute_offset().x))
+            .width(width)
+            .height(size + CARD_TEXT_H);
         column![
             Space::new().height(STRIP_GAP),
             section_heading(
@@ -838,15 +852,20 @@ impl App {
             .collect()
     }
 
+    /// The shelf a row of the feed or of an artist shows.
+    fn strip_shelf(&self, strip: Strip) -> Option<&ShelfPicks> {
+        match strip {
+            Strip::Lists => None,
+            Strip::Shelf(position) => self.home_picks.more.get(position),
+            Strip::Related(position) => self.collection.related.get(position),
+        }
+    }
+
     /// How many cards a row has.
     pub(super) fn strip_len(&self, strip: Strip) -> usize {
         match strip {
             Strip::Lists => self.home_lists().len(),
-            Strip::Shelf(position) => self
-                .home_picks
-                .more
-                .get(position)
-                .map_or(0, |shelf| shelf.items.len()),
+            _ => self.strip_shelf(strip).map_or(0, |shelf| shelf.items.len()),
         }
     }
 
@@ -857,13 +876,10 @@ impl App {
 
     /// The arrows of a row: one screen of its cards on, or back, ending on a card's edge.
     pub(super) fn step_strip(&mut self, strip: Strip, forward: bool) -> Task<Message> {
-        let layout = self.home_layout(self.area);
-        let size = strip_card(layout.narrow);
-        let stride = size + layout.card_gap;
-        let max = strip_max_offset(self.strip_len(strip), size, &layout);
-        let shown = ((layout.row_width + layout.card_gap) / stride)
-            .floor()
-            .max(1.0);
+        let (size, gap, width) = self.strip_geometry(strip);
+        let stride = size + gap;
+        let max = strip_max_offset(self.strip_len(strip), size, gap, width);
+        let shown = ((width + gap) / stride).floor().max(1.0);
         let offset = self.strip_offset(strip);
         let target = if forward {
             (offset + shown * stride).min(max)
@@ -890,23 +906,36 @@ impl App {
     /// The covers of the rows under the first screen that show, or nearly: the rows in the window
     /// and the cards in each row's view.
     pub(super) fn strip_artwork(&self, layout: &HomeLayout) -> Vec<(String, u32)> {
-        let size = strip_card(layout.narrow);
-        let stride = size + layout.card_gap;
-        let height = strip_height(layout.narrow);
-        let variant = crate::artwork::variant_for_pixels(size * self.pixel_scale());
-        let top = self.home_scroll - height;
-        let bottom = self.home_scroll + self.area.height + height;
-        let mut y = layout.hero_height(self.area.height);
+        self.strips_artwork(
+            &self.home_strips(),
+            layout.hero_height(self.area.height),
+            self.home_scroll,
+        )
+    }
+
+    /// The covers of `strips`, laid one under the other from `top` in a page scrolled to `scroll`,
+    /// that show or nearly: the rows in the window and the cards in each row's view.
+    pub(super) fn strips_artwork(
+        &self,
+        strips: &[Strip],
+        top: f32,
+        scroll: f32,
+    ) -> Vec<(String, u32)> {
+        let mut y = top;
         let mut requests = Vec::new();
-        for strip in self.home_strips() {
-            let shown = y + height >= top && y <= bottom;
+        for &strip in strips {
+            let (size, gap, width) = self.strip_geometry(strip);
+            let stride = size + gap;
+            let height = strip_height(size < STRIP_CARD);
+            let shown = y + height >= scroll - height && y <= scroll + self.area.height + height;
             y += height;
             if !shown {
                 continue;
             }
+            let variant = crate::artwork::variant_for_pixels(size * self.pixel_scale());
             let offset = self.strip_offset(strip);
             let first = ((offset / stride).floor() as usize).saturating_sub(1);
-            let count = ((layout.row_width / stride).ceil() as usize) + 3;
+            let count = ((width / stride).ceil() as usize) + 3;
             match strip {
                 Strip::Lists => {
                     for list in self.home_lists().into_iter().skip(first).take(count) {
@@ -918,8 +947,8 @@ impl App {
                         );
                     }
                 }
-                Strip::Shelf(position) => {
-                    if let Some(shelf) = self.home_picks.more.get(position) {
+                Strip::Shelf(_) | Strip::Related(_) => {
+                    if let Some(shelf) = self.strip_shelf(strip) {
                         requests.extend(
                             shelf
                                 .items
@@ -1459,9 +1488,9 @@ impl App {
     }
 }
 
-/// The farthest a row of `count` cards of `size` scrolls.
-fn strip_max_offset(count: usize, size: f32, layout: &HomeLayout) -> f32 {
-    (count as f32 * (size + layout.card_gap) - layout.card_gap - layout.row_width).max(0.0)
+/// The farthest a row of `count` cards of `size`, `gap` apart, scrolls in `width`.
+fn strip_max_offset(count: usize, size: f32, gap: f32, width: f32) -> f32 {
+    (count as f32 * (size + gap) - gap - width).max(0.0)
 }
 
 /// `Title — Artist`, or just the title when the catalog omitted the artist.

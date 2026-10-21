@@ -154,8 +154,8 @@ impl App {
         }
     }
 
-    /// A track's artist name that opens the artist's page when pressed, or searches for the name
-    /// when the catalog gave no page. Plain text when there is no name.
+    /// A track's artist name that opens the artist's page when pressed; when the catalog gave no
+    /// page, the artist is looked up by name. Plain text when there is no name.
     pub(super) fn artist_link(
         &self,
         track: &Track,
@@ -169,8 +169,8 @@ impl App {
             return text(shown).size(size).font(MONO).color(color).into();
         }
         let open = match &track.artist_page {
-            Some(page) => Message::OpenCollection(page.clone()),
-            None => Message::SearchFor(artist.to_owned()),
+            Some(page) if page.is_public_collection() => Message::OpenCollection(page.clone()),
+            _ => Message::FindArtist(artist.to_owned()),
         };
         button(text(shown).size(size).font(MONO))
             .on_press(open)

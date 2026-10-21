@@ -624,6 +624,7 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Filter playlists", "Фильтр плейлистов"),
         ("No playlists match.", "Нет подходящих плейлистов."),
         ("Playlist created: {}", "Плейлист создан: {}"),
+        ("All songs", "Все треки"),
     ],
     templates: &[
         ("Active: {}.", "Активно: {0}."),

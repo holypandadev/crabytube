@@ -54,6 +54,69 @@ impl App {
     }
 }
 
+impl App {
+    /// Looks up the artist of this name, for an artist name pressed on a track the catalog gave no
+    /// artist page for. Of several artists, the first is the one looked up.
+    pub(super) fn find_artist(&mut self, name: String) -> Task<Message> {
+        let first = name
+            .split([',', '&'])
+            .next()
+            .map(str::trim)
+            .filter(|first| !first.is_empty())
+            .unwrap_or(name.as_str())
+            .to_owned();
+        self.artist_lookup = self.artist_lookup.wrapping_add(1);
+        let request = self.artist_lookup;
+        let service = Arc::clone(&self.music_service);
+        Task::perform(
+            async move {
+                let found = service
+                    .search_catalog_filtered(&first, crate::music::CatalogFilter::Artists)
+                    .await
+                    .unwrap_or_default();
+                let artists: Vec<_> = found
+                    .into_iter()
+                    .filter_map(|item| {
+                        let page = item.browse_target?;
+                        (item.kind == crate::music::HomeItemKind::Artist
+                            && page.is_public_collection())
+                        .then_some((item.title, page))
+                    })
+                    .collect();
+                // The artist of exactly this name, or the catalog's best match.
+                let page = artists
+                    .iter()
+                    .find(|(title, _)| title.trim().eq_ignore_ascii_case(&first))
+                    .or(artists.first())
+                    .map(|(_, page)| page.clone());
+                (first, page)
+            },
+            move |(name, page)| Message::ArtistFound {
+                request,
+                name,
+                page,
+            },
+        )
+    }
+
+    /// The artist looked up: their page, or a search for the name. An answer that comes after the
+    /// user went elsewhere is dropped.
+    pub(super) fn artist_found(
+        &mut self,
+        request: u64,
+        name: String,
+        page: Option<BrowseTarget>,
+    ) -> Task<Message> {
+        if request != self.artist_lookup {
+            return Task::none();
+        }
+        match page {
+            Some(page) => self.navigate(Page::CollectionDetail(page)),
+            None => self.update(Message::SearchFor(name)),
+        }
+    }
+}
+
 /// The "Go to" entries of a track menu, in menu order. Only the destinations the catalog named
 /// are offered.
 pub(super) fn go_to_destinations(track: &Track) -> Vec<(&'static str, BrowseTarget)> {
@@ -106,6 +169,41 @@ mod tests {
             .map(|(label, _)| label)
             .collect();
         assert_eq!(labels, ["Go to artist", "Go to album"]);
+    }
+
+    #[test]
+    fn an_artist_found_by_name_opens_unless_the_user_went_elsewhere() {
+        let mut app = App::default();
+        let artist = BrowseTarget {
+            browse_id: "UCartist".into(),
+            params: None,
+            page_type: Some("MUSIC_PAGE_TYPE_ARTIST".into()),
+        };
+        drop(app.find_artist("Someone, Other".into()));
+        let request = app.artist_lookup;
+        // The user opened Settings before the answer came.
+        drop(app.update(Message::Navigate(Page::Settings)));
+        drop(app.update(Message::ArtistFound {
+            request,
+            name: "Someone".into(),
+            page: Some(artist.clone()),
+        }));
+        assert_eq!(app.page, Page::Settings);
+        drop(app.find_artist("Someone".into()));
+        drop(app.update(Message::ArtistFound {
+            request: app.artist_lookup,
+            name: "Someone".into(),
+            page: Some(artist.clone()),
+        }));
+        assert_eq!(app.page, Page::CollectionDetail(artist));
+        // A name the catalog does not know is searched for.
+        drop(app.find_artist("Nobody".into()));
+        drop(app.update(Message::ArtistFound {
+            request: app.artist_lookup,
+            name: "Nobody".into(),
+            page: None,
+        }));
+        assert_eq!(app.committed_query, "Nobody");
     }
 
     #[test]

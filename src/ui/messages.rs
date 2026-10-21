@@ -373,6 +373,14 @@ pub(super) enum Message {
     },
     SearchSubmitted,
     SearchFor(String),
+    /// Opens the page of the artist of this name, looked up in the catalog; a name it does not
+    /// find is searched for.
+    FindArtist(String),
+    ArtistFound {
+        request: u64,
+        name: String,
+        page: Option<BrowseTarget>,
+    },
     SuggestionChosen(String),
     DismissSuggestions,
     KeyPressed(iced::keyboard::Event),

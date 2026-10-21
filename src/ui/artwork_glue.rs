@@ -9,6 +9,8 @@ type CoverRequest = (String, u32);
 /// Rows requested above and below the rows on screen, so a small scroll
 /// finds its covers already on the way.
 const COVER_MARGIN_ROWS: usize = 2;
+/// About how tall the "All songs" button under an artist's songs is.
+const SONGS_FOOTER: f32 = 76.0;
 /// Pause before a cover that failed to download is asked for again.
 const COVER_RETRY_COOLDOWN: Duration = Duration::from_secs(4);
 /// Attempts per cover on one visit to a page. A cover that keeps failing
@@ -240,7 +242,12 @@ impl App {
                     pitch,
                     COVER_MARGIN_ROWS,
                 );
-                // The header is drawn at the card size and comes first.
+                // The header is drawn at the card size and comes first; an artist's rows of cards
+                // follow the songs.
+                let strips: Vec<home::Strip> = (0..self.collection.related.len())
+                    .map(home::Strip::Related)
+                    .collect();
+                let songs_end = data.tracks.len() as f32 * pitch + SONGS_FOOTER;
                 data.thumbnail_url
                     .iter()
                     .map(|url| (url.clone(), crate::artwork::CARD_MAX))
@@ -250,6 +257,7 @@ impl App {
                             crate::artwork::THUMB_MAX,
                         )
                     }))
+                    .chain(self.strips_artwork(&strips, songs_end, self.collection_scroll))
                     .collect()
             }
             _ => Vec::new(),
@@ -650,6 +658,7 @@ mod tests {
             continuation: None,
             unavailable_tracks: 0,
             related: Vec::new(),
+            all_songs: None,
         })
     }
 
