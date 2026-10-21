@@ -2,7 +2,7 @@
 //! and buttons over a strict table of its songs. Rows of both can be dragged to another place.
 
 use super::drag::{drag_area, drag_row};
-use super::messages::{DragList, ListId, PlaylistEditTarget, RowMenu};
+use super::messages::{CoverChoice, DragList, ListId, PlaylistEditTarget, RowMenu};
 use super::shell::{display_title, fit};
 use super::theme::{
     self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_TITLE, hrule,
@@ -267,7 +267,7 @@ impl App {
                 TEXT_BODY
             ),
             Space::new().height(8),
-            self.even_buttons(buttons, room),
+            self.even_buttons(buttons, room, narrow),
         ]
         .spacing(6)
         .width(Length::Fill);
@@ -292,12 +292,13 @@ impl App {
     }
 
     /// Buttons of one size, the size of the widest label among them, in as many rows as `room`
-    /// needs. Where two do not fit side by side, they share the room in two columns and their
-    /// labels are cut.
+    /// needs. With `fill`, as on a phone, or where two do not fit side by side, they share the room
+    /// in two even columns, edge to edge, and a label too long is cut.
     fn even_buttons<'a>(
         &self,
         buttons: Vec<(Option<&'static str>, &'static str, Option<Message>)>,
         room: f32,
+        fill: bool,
     ) -> Element<'a, Message> {
         const PADDING: f32 = 20.0;
         const ICON: f32 = 16.0;
@@ -320,7 +321,7 @@ impl App {
             .fold(0.0_f32, f32::max);
         // A few pixels to spare, so rounding never cuts the widest label.
         let mut width = (widest + 2.0 * PADDING + 6.0).ceil();
-        if 2.0 * width + BUTTON_GAP > room {
+        if fill || 2.0 * width + BUTTON_GAP > room {
             width = ((room - BUTTON_GAP) / 2.0).floor().max(80.0);
         }
         let mut line = row![].spacing(BUTTON_GAP);
@@ -355,47 +356,91 @@ impl App {
         line.wrap().vertical_spacing(BUTTON_GAP).into()
     }
 
-    /// A playlist's name field and the covers it can take: its first songs' together, or one of
-    /// its songs' covers. Save keeps both.
+    /// A playlist's name field and the covers it can take: its first songs' together, one of its
+    /// songs' covers, or a picture from the computer. Save keeps both.
     fn edit_panel<'a>(&'a self, songs: &'a [Track], width: f32) -> Element<'a, Message> {
-        let chosen = self
-            .playlist_editor
-            .as_ref()
-            .and_then(|editor| editor.cover.as_deref());
-        let choice = |content: Element<'a, Message>, cover: Option<&str>| {
+        let Some(editor) = self.playlist_editor.as_ref() else {
+            return Space::new().into();
+        };
+        let chosen = &editor.cover;
+        let choice = |content: Element<'a, Message>, cover: CoverChoice| {
+            let selected = *chosen == cover;
             button(content)
-                .on_press(Message::PlaylistCoverChosen(cover.map(str::to_owned)))
+                .on_press(Message::PlaylistCoverChosen(cover))
                 .padding(4)
-                .style(if chosen == cover {
+                .style(if selected {
                     theme::selected_outline_button
                 } else {
                     theme::outline_button
                 })
         };
-        // The automatic cover, as it is now, says what it is under it.
-        let automatic = column![
+        // A choice with a word under it: the automatic cover, and the computer's.
+        let captioned = |tile: Element<'a, Message>, caption: &'static str| {
+            column![
+                tile,
+                // A caption too long for one line goes on to a second.
+                text(self.tr(caption).into_owned())
+                    .size(TEXT_CAPTION)
+                    .font(MONO)
+                    .color(DIM)
+                    .width(CHOICE_COVER + 24.0)
+                    .align_x(iced::alignment::Horizontal::Center),
+            ]
+            .spacing(6)
+            .width(CHOICE_COVER + 24.0)
+            .align_x(Alignment::Center)
+        };
+        let mut covers = row![captioned(
             choice(
                 self.cover_of(super::playlists::automatic_cover(songs), CHOICE_COVER),
-                None
-            ),
-            label(self.tr("Automatic").into_owned(), TEXT_CAPTION).color(DIM),
-        ]
-        .spacing(6)
-        .align_x(Alignment::Center);
-        let mut covers = row![automatic].spacing(10).align_y(Alignment::Start);
+                CoverChoice::Automatic
+            )
+            .into(),
+            "Automatic"
+        )]
+        .spacing(10)
+        .align_y(Alignment::Start);
+        // The picture chosen from the computer, while it is the one chosen.
+        if let CoverChoice::File(name) = chosen {
+            covers = covers.push(choice(
+                super::playlists::file_cover(name, CHOICE_COVER),
+                CoverChoice::File(name.clone()),
+            ));
+        }
         for url in cover_choices(songs) {
             covers = covers.push(choice(
                 self.cover(Some(url), CHOICE_COVER, crate::artwork::THUMB_MAX),
-                Some(url),
+                CoverChoice::Song(url.to_owned()),
             ));
         }
-        column![
+        let computer = button(
+            container(icon("image", 22.0, INK))
+                .width(CHOICE_COVER)
+                .height(CHOICE_COVER)
+                .center_x(CHOICE_COVER)
+                .center_y(CHOICE_COVER),
+        )
+        .on_press_maybe((!editor.picking).then_some(Message::ChooseCoverFile))
+        .padding(4)
+        .style(theme::outline_button);
+        covers = covers.push(captioned(computer.into(), "From your computer"));
+        let mut panel = column![
             self.playlist_name_field(width, 480.0, "Save"),
             label(self.tr("Cover").into_owned(), TEXT_CAPTION).color(DIM),
             covers.wrap().vertical_spacing(10),
         ]
-        .spacing(12)
-        .into()
+        .spacing(12);
+        if editor.cover_failed {
+            panel = panel.push(
+                label(
+                    self.tr("That picture could not be used. Choose a PNG or JPEG file.")
+                        .into_owned(),
+                    TEXT_CAPTION,
+                )
+                .color(theme::ALERT),
+            );
+        }
+        panel.into()
     }
 
     /// The table of a list: the header, its head, then its songs as a virtual list whose rows can

@@ -569,6 +569,7 @@ fn icon_handle(name: &'static str) -> svg::Handle {
         "arrow-down",
         "trash",
         "note",
+        "image",
     )
 }
 

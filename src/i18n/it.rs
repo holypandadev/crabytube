@@ -375,6 +375,12 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Edit", "Modifica"),
         ("Cover", "Copertina"),
         ("Automatic", "Automatica"),
+        ("From your computer", "Dal tuo computer"),
+        ("Choose a cover", "Scegli una copertina"),
+        (
+            "That picture could not be used. Choose a PNG or JPEG file.",
+            "Impossibile usare questa immagine. Scegli un file PNG o JPEG.",
+        ),
         (
             "Tap the heart on any song and choose this playlist.",
             "Tocca il cuore di un brano e scegli questa playlist.",

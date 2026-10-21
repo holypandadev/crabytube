@@ -369,6 +369,12 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Edit", "編集"),
         ("Cover", "カバー"),
         ("Automatic", "自動"),
+        ("From your computer", "パソコンから"),
+        ("Choose a cover", "カバーを選択"),
+        (
+            "That picture could not be used. Choose a PNG or JPEG file.",
+            "この画像は使用できませんでした。PNG または JPEG ファイルを選んでください。",
+        ),
         (
             "Tap the heart on any song and choose this playlist.",
             "曲のハートをタップして、このプレイリストを選んでください。",

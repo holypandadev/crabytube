@@ -4,6 +4,7 @@
 //! but Favorite songs stays.
 
 use super::drag::{DRAG_START, Edge, landing, slot_at};
+use super::messages::CoverChoice;
 use super::shell::{display_title, fit};
 use super::theme::{
     self, DIM, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, hrule, icon, label,
@@ -98,9 +99,11 @@ impl App {
         let Some(playlist) = self.playlist(id) else {
             return Vec::new();
         };
-        match &playlist.cover {
-            Some(cover) => vec![cover.as_str()],
-            None => automatic_cover(&playlist.tracks),
+        match (&playlist.cover_file, &playlist.cover) {
+            // A picture from the computer is drawn from its file.
+            (Some(_), _) => Vec::new(),
+            (None, Some(cover)) => vec![cover.as_str()],
+            (None, None) => automatic_cover(&playlist.tracks),
         }
     }
 
@@ -119,6 +122,13 @@ impl App {
                 .center_y(size)
                 .style(theme::boxed)
                 .into();
+        }
+        if let ListId::Playlist(id) = list
+            && let Some(name) = self
+                .playlist(id)
+                .and_then(|playlist| playlist.cover_file.as_deref())
+        {
+            return file_cover(name, size);
         }
         self.cover_of(self.list_cover_urls(list), size)
     }
@@ -174,7 +184,9 @@ impl App {
                 self.playlist_editor = Some(PlaylistEditor {
                     target: PlaylistEditTarget::New(track.map(Box::new)),
                     name: String::new(),
-                    cover: None,
+                    cover: CoverChoice::Automatic,
+                    picking: false,
+                    cover_failed: false,
                 });
                 self.playlist_name_typed = true;
                 return operation::focus(PLAYLIST_NAME_FIELD);
@@ -186,7 +198,13 @@ impl App {
                 self.playlist_editor = Some(PlaylistEditor {
                     target: PlaylistEditTarget::Edit(id),
                     name: playlist.name.clone(),
-                    cover: playlist.cover.clone(),
+                    cover: match (&playlist.cover_file, &playlist.cover) {
+                        (Some(name), _) => CoverChoice::File(name.clone()),
+                        (None, Some(url)) => CoverChoice::Song(url.clone()),
+                        (None, None) => CoverChoice::Automatic,
+                    },
+                    picking: false,
+                    cover_failed: false,
                 });
                 self.playlist_name_typed = true;
                 return Task::batch([
@@ -201,15 +219,68 @@ impl App {
                     self.playlist_name_typed = true;
                 }
             }
-            Message::PlaylistCoverChosen(cover) => {
+            Message::PlaylistCoverChosen(cover) => self.choose_cover(cover),
+            Message::ChooseCoverFile => {
                 if let Some(editor) = &mut self.playlist_editor
                     && matches!(editor.target, PlaylistEditTarget::Edit(_))
+                    && !editor.picking
                 {
-                    editor.cover = cover;
+                    editor.picking = true;
+                    editor.cover_failed = false;
+                    let title = self.tr_static("Choose a cover");
+                    return Task::perform(
+                        crate::file_picker::pick_image(title),
+                        Message::CoverFilePicked,
+                    );
                 }
             }
+            Message::CoverFilePicked(picked) => {
+                let Some(editor) = self.editing_cover() else {
+                    return Task::none();
+                };
+                editor.picking = false;
+                match picked {
+                    Ok(Some(path)) => {
+                        return Task::perform(
+                            async move {
+                                tokio::task::spawn_blocking(move || {
+                                    crate::playlist_covers::import(&path)
+                                })
+                                .await
+                                .map_err(|error| error.to_string())?
+                            },
+                            Message::CoverFileImported,
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!(%error, "the Open dialog for a cover failed");
+                        editor.cover_failed = true;
+                    }
+                }
+            }
+            Message::CoverFileImported(imported) => match imported {
+                Ok(name) => {
+                    if self.editing_cover().is_some() {
+                        self.choose_cover(CoverChoice::File(name));
+                    } else {
+                        // The fields closed while the picture was read: nothing will name it.
+                        crate::playlist_covers::remove(&name);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "a picture could not be made a cover");
+                    if let Some(editor) = self.editing_cover() {
+                        editor.cover_failed = true;
+                    }
+                }
+            },
             Message::SubmitPlaylistEditor => return self.submit_playlist_editor(),
-            Message::CancelPlaylistEditor => self.playlist_editor = None,
+            Message::CancelPlaylistEditor => {
+                if let Some(editor) = self.playlist_editor.take() {
+                    self.discard_unsaved_cover(&editor.cover);
+                }
+            }
             Message::RemoveFromList { list, index } => {
                 if self
                     .list_songs(list)
@@ -306,6 +377,70 @@ impl App {
             _ => {}
         }
         Task::none()
+    }
+
+    /// The fields of a playlist being edited, which a cover can be chosen for.
+    fn editing_cover(&mut self) -> Option<&mut PlaylistEditor> {
+        self.playlist_editor
+            .as_mut()
+            .filter(|editor| matches!(editor.target, PlaylistEditTarget::Edit(_)))
+    }
+
+    /// Chooses a cover in the playlist's fields. A picture from the computer chosen there before,
+    /// and not saved, is removed.
+    fn choose_cover(&mut self, cover: CoverChoice) {
+        let Some(editor) = self.editing_cover() else {
+            return;
+        };
+        let before = std::mem::replace(&mut editor.cover, cover);
+        editor.cover_failed = false;
+        if editor.cover != before {
+            self.discard_unsaved_cover(&before);
+        }
+    }
+
+    /// Removes a picture from the computer that was chosen in the fields but is not the cover the
+    /// playlist keeps.
+    fn discard_unsaved_cover(&self, cover: &CoverChoice) {
+        let CoverChoice::File(name) = cover else {
+            return;
+        };
+        let kept = self
+            .playlists
+            .iter()
+            .any(|playlist| playlist.cover_file.as_ref() == Some(name));
+        if !kept {
+            crate::playlist_covers::remove(name);
+        }
+    }
+
+    /// Forgets covers from the computer whose file is gone, as after an import from another
+    /// computer, and removes the files no playlist names.
+    pub(super) fn tidy_playlist_covers(&mut self) {
+        let missing: Vec<usize> = self
+            .playlists
+            .iter()
+            .enumerate()
+            .filter(|(_, playlist)| {
+                playlist
+                    .cover_file
+                    .as_deref()
+                    .is_some_and(|name| !crate::playlist_covers::exists(name))
+            })
+            .map(|(position, _)| position)
+            .collect();
+        if !missing.is_empty() {
+            let playlists = Arc::make_mut(&mut self.playlists);
+            for position in missing {
+                playlists[position].cover_file = None;
+            }
+        }
+        let kept: HashSet<&str> = self
+            .playlists
+            .iter()
+            .filter_map(|playlist| playlist.cover_file.as_deref())
+            .collect();
+        crate::playlist_covers::remove_unused(&kept);
     }
 
     fn close_save_dialog(&mut self) {
@@ -426,8 +561,21 @@ impl App {
                 if let Some(position) = self.playlist_position(id) {
                     let playlist = &mut Arc::make_mut(&mut self.playlists)[position];
                     playlist.name = name;
-                    playlist.cover = editor.cover;
+                    let replaced = playlist.cover_file.take();
+                    (playlist.cover, playlist.cover_file) = match editor.cover {
+                        CoverChoice::Automatic => (None, None),
+                        CoverChoice::Song(url) => (Some(url), None),
+                        CoverChoice::File(name) => (None, Some(name)),
+                    };
+                    // The picture the playlist had before goes when nothing names it any more.
+                    if let Some(replaced) = replaced
+                        && playlist.cover_file.as_ref() != Some(&replaced)
+                    {
+                        crate::playlist_covers::remove(&replaced);
+                    }
                     self.persist();
+                } else {
+                    self.discard_unsaved_cover(&editor.cover);
                 }
                 self.preload_current_page_artwork()
             }
@@ -442,6 +590,7 @@ impl App {
                     name,
                     tracks: Vec::new(),
                     cover: None,
+                    cover_file: None,
                 });
                 match track {
                     // Made in the Save panel: the song goes in, and the panel shows it ticked.
@@ -467,7 +616,15 @@ impl App {
         let Some(position) = self.playlist_position(id) else {
             return Task::none();
         };
-        Arc::make_mut(&mut self.playlists).remove(position);
+        let removed = Arc::make_mut(&mut self.playlists).remove(position);
+        if let Some(name) = &removed.cover_file {
+            crate::playlist_covers::remove(name);
+        }
+        if let Some(editor) = self.playlist_editor.as_ref()
+            && editor.target == PlaylistEditTarget::Edit(id)
+        {
+            self.discard_unsaved_cover(&editor.cover.clone());
+        }
         if self
             .playlist_editor
             .as_ref()
@@ -961,6 +1118,25 @@ impl App {
     }
 }
 
+/// A cover the user chose from their computer, drawn from its file.
+pub(super) fn file_cover<'a>(name: &str, size: f32) -> Element<'a, Message> {
+    let line = theme::hairline();
+    let inner: Element<'a, Message> = match crate::playlist_covers::path(name) {
+        Some(path) => iced::widget::image(iced::widget::image::Handle::from_path(path))
+            .width(size - 2.0 * line)
+            .height(size - 2.0 * line)
+            .content_fit(iced::ContentFit::Cover)
+            .into(),
+        None => Space::new().into(),
+    };
+    container(inner)
+        .width(size)
+        .height(size)
+        .padding(line)
+        .style(theme::boxed)
+        .into()
+}
+
 /// The cover a playlist gets without one chosen: the covers of its first four songs with one, or
 /// that of its first song when fewer have one.
 pub(super) fn automatic_cover(songs: &[Track]) -> Vec<&str> {
@@ -1415,7 +1591,7 @@ mod tests {
         drop(app.update(Message::EditPlaylist(id)));
         assert_eq!(app.playlist_editor.as_ref().unwrap().name, "Mix");
         drop(app.update(Message::PlaylistNameChanged("Night drive".into())));
-        drop(app.update(Message::PlaylistCoverChosen(Some(
+        drop(app.update(Message::PlaylistCoverChosen(CoverChoice::Song(
             "https://covers.test/b.jpg".into(),
         ))));
         drop(app.update(Message::SubmitPlaylistEditor));
@@ -1425,9 +1601,103 @@ mod tests {
         assert_eq!(app.list_cover_urls(list), ["https://covers.test/b.jpg"]);
         // Cancel leaves both as they were.
         drop(app.update(Message::EditPlaylist(id)));
-        drop(app.update(Message::PlaylistCoverChosen(None)));
+        drop(app.update(Message::PlaylistCoverChosen(CoverChoice::Automatic)));
         drop(app.update(Message::CancelPlaylistEditor));
         assert_eq!(app.list_cover_urls(list), ["https://covers.test/b.jpg"]);
+    }
+
+    /// A picture from the computer, made a cover as the Open dialog's answer would be.
+    fn imported_cover(app: &mut App, width: u32) -> String {
+        let dir = std::env::temp_dir().join(format!("crabytube-ui-cover-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join(format!("{width}.png"));
+        ::image::RgbImage::from_pixel(width, width, ::image::Rgb([10, 20, 30]))
+            .save(&source)
+            .unwrap();
+        let name = crate::playlist_covers::import(&source).unwrap();
+        drop(app.update(Message::CoverFileImported(Ok(name.clone()))));
+        name
+    }
+
+    #[test]
+    fn a_picture_from_the_computer_becomes_the_cover_and_goes_with_it() {
+        let _folder = crate::playlist_covers::lock_test_folder();
+        let mut app = library();
+        let id = make(&mut app, "Mix");
+        drop(app.update(Message::EditPlaylist(id)));
+        let first = imported_cover(&mut app, 40);
+        assert_eq!(
+            app.playlist_editor.as_ref().map(|editor| &editor.cover),
+            Some(&CoverChoice::File(first.clone()))
+        );
+        // Another picture before saving: the first is not kept.
+        let second = imported_cover(&mut app, 50);
+        assert!(!crate::playlist_covers::exists(&first));
+        drop(app.update(Message::SubmitPlaylistEditor));
+        assert_eq!(
+            app.playlist(id).unwrap().cover_file.as_deref(),
+            Some(second.as_str())
+        );
+        assert!(app.list_cover_urls(ListId::Playlist(id)).is_empty());
+        // Back to the automatic cover: the picture goes.
+        drop(app.update(Message::EditPlaylist(id)));
+        assert_eq!(
+            app.playlist_editor.as_ref().map(|editor| &editor.cover),
+            Some(&CoverChoice::File(second.clone()))
+        );
+        drop(app.update(Message::PlaylistCoverChosen(CoverChoice::Automatic)));
+        // Not until it is saved: Cancel keeps it.
+        drop(app.update(Message::CancelPlaylistEditor));
+        assert!(crate::playlist_covers::exists(&second));
+        drop(app.update(Message::EditPlaylist(id)));
+        drop(app.update(Message::PlaylistCoverChosen(CoverChoice::Automatic)));
+        drop(app.update(Message::SubmitPlaylistEditor));
+        assert!(app.playlist(id).unwrap().cover_file.is_none());
+        assert!(!crate::playlist_covers::exists(&second));
+    }
+
+    #[test]
+    fn a_picture_chosen_and_cancelled_or_deleted_with_its_playlist_is_removed() {
+        let _folder = crate::playlist_covers::lock_test_folder();
+        let mut app = library();
+        let id = make(&mut app, "Mix");
+        drop(app.update(Message::EditPlaylist(id)));
+        let unsaved = imported_cover(&mut app, 30);
+        drop(app.update(Message::CancelPlaylistEditor));
+        assert!(!crate::playlist_covers::exists(&unsaved));
+        // A picture that arrives after the fields closed is not kept either.
+        let late = imported_cover(&mut app, 31);
+        assert!(!crate::playlist_covers::exists(&late));
+        drop(app.update(Message::EditPlaylist(id)));
+        let kept = imported_cover(&mut app, 32);
+        drop(app.update(Message::SubmitPlaylistEditor));
+        drop(app.update(Message::AskDeletePlaylist(id)));
+        drop(app.update(Message::DeletePlaylist(id)));
+        assert!(!crate::playlist_covers::exists(&kept));
+    }
+
+    #[test]
+    fn a_cover_file_that_is_gone_is_forgotten() {
+        let _folder = crate::playlist_covers::lock_test_folder();
+        let mut app = library();
+        let id = make(&mut app, "Mix");
+        Arc::make_mut(&mut app.playlists)[0].cover_file = Some("00000000deadbeef.jpg".into());
+        app.tidy_playlist_covers();
+        assert!(app.playlist(id).unwrap().cover_file.is_none());
+    }
+
+    #[test]
+    fn a_failed_open_dialog_says_so_and_a_cancelled_one_changes_nothing() {
+        let mut app = library();
+        let id = make(&mut app, "Mix");
+        drop(app.update(Message::EditPlaylist(id)));
+        drop(app.update(Message::CoverFilePicked(Ok(None))));
+        let editor = app.playlist_editor.as_ref().unwrap();
+        assert!(!editor.cover_failed && editor.cover == CoverChoice::Automatic);
+        drop(app.update(Message::CoverFilePicked(Err("no portal".into()))));
+        assert!(app.playlist_editor.as_ref().unwrap().cover_failed);
+        drop(app.update(Message::CoverFileImported(Err("not a picture".into()))));
+        assert!(app.playlist_editor.as_ref().unwrap().cover_failed);
     }
 
     #[test]

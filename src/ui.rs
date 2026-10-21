@@ -414,6 +414,8 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::DragMoved(..)
         | Message::DragTick(_)
         | Message::LoadingPulse
+        | Message::CoverFilePicked(_)
+        | Message::CoverFileImported(_)
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
         | Message::CarouselScrolled(_)
@@ -932,6 +934,9 @@ impl App {
             | Message::EditPlaylist(..)
             | Message::PlaylistNameChanged(..)
             | Message::PlaylistCoverChosen(..)
+            | Message::ChooseCoverFile
+            | Message::CoverFilePicked(..)
+            | Message::CoverFileImported(..)
             | Message::SubmitPlaylistEditor
             | Message::CancelPlaylistEditor
             | Message::RemoveFromList { .. }
@@ -2607,6 +2612,7 @@ impl App {
                 app.favorites_context = Arc::from(app.favorites.as_slice());
                 app.playlists = saved.playlists.clone();
                 app.index_playlist_songs();
+                app.tidy_playlist_covers();
                 app.liked = app.favorites.iter().map(|t| t.video_id.clone()).collect();
                 app.persistence = Some(Persistence::start(path));
             }
@@ -2903,6 +2909,7 @@ impl App {
         self.favorites_context = Arc::from(self.favorites.as_slice());
         self.playlists = snapshot.playlists;
         self.index_playlist_songs();
+        self.tidy_playlist_covers();
         self.playlist_editor = None;
         self.save_dialog = None;
         self.playlist_notice = None;

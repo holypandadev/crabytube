@@ -536,6 +536,10 @@ pub struct Playlist {
     /// songs make it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
+    /// A cover the user chose from their computer, by its name in `playlist_covers`. It comes before
+    /// `cover`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_file: Option<String>,
 }
 
 impl Playlist {
@@ -690,6 +694,10 @@ impl Snapshot {
                         .cover
                         .as_ref()
                         .is_none_or(|cover| !cover.is_empty() && cover.len() <= MAX_COVER_URL_BYTES)
+                    && playlist
+                        .cover_file
+                        .as_deref()
+                        .is_none_or(crate::playlist_covers::valid_name)
                     && clean_playlist_name(&playlist.name).as_deref() == Some(&playlist.name)
                     && playlist.tracks.iter().all(|track| {
                         !track.video_id.is_empty()
@@ -719,6 +727,14 @@ impl Snapshot {
                 .is_some_and(|cover| cover.is_empty() || cover.len() > MAX_COVER_URL_BYTES)
             {
                 playlist.cover = None;
+            }
+            // Only a name the covers module made: never a path into another folder.
+            if playlist
+                .cover_file
+                .as_deref()
+                .is_some_and(|name| !crate::playlist_covers::valid_name(name))
+            {
+                playlist.cover_file = None;
             }
             // Capped first, so two ids that only differ past the cap count as one song.
             for track in &mut playlist.tracks {
@@ -1748,6 +1764,7 @@ mod tests {
             name: name.into(),
             tracks: songs.iter().map(|song| listed(song)).collect(),
             cover: None,
+            cover_file: None,
         }
     }
 
@@ -1856,6 +1873,7 @@ mod tests {
                 name: format!("P{id}"),
                 tracks: songs(&format!("p{id}-"), MAX_PLAYLIST_TRACKS + 10),
                 cover: None,
+                cover_file: None,
             })
             .collect();
         let mut snapshot = Snapshot {
@@ -1899,6 +1917,25 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_cover_file_that_is_a_path_is_dropped() {
+        for (name, kept) in [
+            ("0123456789abcdef.jpg", true),
+            ("../../state.json", false),
+            ("/etc/passwd", false),
+        ] {
+            let mut snapshot = Snapshot {
+                playlists: Arc::new(vec![Playlist {
+                    cover_file: Some(name.into()),
+                    ..playlist(1, "Mix", &["a"])
+                }]),
+                ..Snapshot::default()
+            };
+            snapshot.normalize();
+            assert_eq!(snapshot.playlists[0].cover_file.is_some(), kept, "{name}");
+        }
+    }
+
+    #[test]
     fn a_saved_song_id_too_long_is_cut_and_counted_once() {
         let long = "v".repeat(300);
         let mut snapshot = Snapshot {
@@ -1907,6 +1944,7 @@ mod tests {
                 name: "Mix".into(),
                 tracks: vec![listed(&format!("{long}1")), listed(&format!("{long}2"))],
                 cover: None,
+                cover_file: None,
             }]),
             ..Snapshot::default()
         };

@@ -13,10 +13,12 @@ pub mod ui;
 
 pub mod artwork;
 pub mod background_portal;
+pub mod file_picker;
 pub mod flatpak;
 mod home_cache;
 pub mod local_clock;
 pub mod memory;
+pub mod playlist_covers;
 pub mod preferences;
 pub mod process_stats;
 pub mod runtime_cache;

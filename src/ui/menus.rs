@@ -344,6 +344,7 @@ impl App {
             .spacing(12),
         ]
         .spacing(12)
+        .width(Length::Fill)
         .align_x(Alignment::Center);
         Some(
             container(content)

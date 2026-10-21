@@ -129,7 +129,7 @@ CrabyTube stores everything on your device:
 
 | What | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| Settings, favorites, playlists, queue, search history (`state.json`) | `~/.config/crabytube/` | `~/Library/Application Support/crabytube/` | `%APPDATA%\crabytube\` |
+| Settings, favorites, playlists, queue, search history (`state.json`), and playlist covers from the computer (`covers/`) | `~/.config/crabytube/` | `~/Library/Application Support/crabytube/` | `%APPDATA%\crabytube\` |
 | Caches: artwork, lyrics, Home snapshot, player script, BotGuard snapshot and tokens, streaming buffer, an update being downloaded | `~/.cache/crabytube/` | `~/Library/Caches/crabytube/` | `%LOCALAPPDATA%\crabytube\` |
 
 On Linux, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` are honoured, and "Launch on startup" writes

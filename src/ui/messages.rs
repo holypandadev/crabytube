@@ -53,8 +53,23 @@ pub(super) struct RowDrag {
 pub(super) struct PlaylistEditor {
     pub(super) target: PlaylistEditTarget,
     pub(super) name: String,
-    /// The cover chosen: one of the songs' covers, or `None` for the covers of its first songs.
-    pub(super) cover: Option<String>,
+    pub(super) cover: CoverChoice,
+    /// The Open dialog for a cover from the computer is open.
+    pub(super) picking: bool,
+    /// The last picture chosen could not be made a cover.
+    pub(super) cover_failed: bool,
+}
+
+/// The cover a playlist being edited takes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) enum CoverChoice {
+    /// The covers of its first songs.
+    #[default]
+    Automatic,
+    /// One of its songs' covers, by its address.
+    Song(String),
+    /// A picture from the user's computer, by its name in `playlist_covers`.
+    File(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -436,8 +451,14 @@ pub(super) enum Message {
     /// Opens the fields for a playlist's name and cover.
     EditPlaylist(u64),
     PlaylistNameChanged(String),
-    /// A cover for the playlist being edited: a song's cover, or `None` for its first songs'.
-    PlaylistCoverChosen(Option<String>),
+    /// A cover for the playlist being edited.
+    PlaylistCoverChosen(CoverChoice),
+    /// Opens the system's Open dialog for a cover from the computer.
+    ChooseCoverFile,
+    /// What the Open dialog gave: a picture, nothing when cancelled, or why it failed.
+    CoverFilePicked(Result<Option<std::path::PathBuf>, String>),
+    /// The picture made into a cover, by its name, or why it could not be.
+    CoverFileImported(Result<String, String>),
     /// Makes the playlist, or saves its name and cover.
     SubmitPlaylistEditor,
     CancelPlaylistEditor,

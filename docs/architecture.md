@@ -27,6 +27,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `artwork.rs` | Artwork downloads, size variants, in-memory LRU and disk cache. |
 | `lyrics.rs` | Lyrics lookup, parsing (LRC, TTML, QRC) and cache. |
 | `preferences.rs` | Versioned local state (`state.json`): preferences, queue, favorites, playlists, history; autostart entry. |
+| `playlist_covers.rs`, `file_picker.rs` | Playlist covers chosen from the computer: the system's Open dialog (the FileChooser portal on Linux, `GetOpenFileNameW` on Windows, `NSOpenPanel` on macOS), and the picture cut square, made 600 px and kept as a JPEG beside the state. |
 | `storage.rs`, `temp_cleanup.rs` | Cache usage reporting and selective clearing; removal of leftover temporary files. |
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
 | `i18n/` | Interface translations: English, Spanish, Brazilian Portuguese, French, German, Italian, Russian, Japanese and Simplified Chinese. English is the key; each language has a file of exact entries and templates for text with numbers or names. |
@@ -168,6 +169,7 @@ All paths come from the `dirs` crate (`~/.config/crabytube` and `~/.cache/crabyt
 | Data | Location | Bounds |
 | --- | --- | --- |
 | Preferences, queue, favorites, playlists, search history, lyric offsets | `config/crabytube/state.json` | 16 MiB file; 2,000 queued tracks; 10,000 favorites; 100 playlists of up to 2,000 songs, 10,000 in all; 500 per-track lyric offsets |
+| Playlist covers chosen from the computer | `config/crabytube/covers/` | One 600 px JPEG per playlist; removed with the playlist or when another cover is chosen; not part of an export |
 | Web client values (`ytcfg`) | `cache/crabytube/runtime.json` | Six hours; dropped on HTTP 403 |
 | Home snapshot (public metadata only) | `cache/crabytube/home-v1-<lang>.json` | 2 MiB |
 | Artwork | `cache/crabytube/artwork/` | 64 MiB / 400 files on disk; 16 MiB / 192 decoded images in memory |

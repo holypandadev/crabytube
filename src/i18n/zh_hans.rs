@@ -330,6 +330,12 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Edit", "编辑"),
         ("Cover", "封面"),
         ("Automatic", "自动"),
+        ("From your computer", "从电脑中选择"),
+        ("Choose a cover", "选择封面"),
+        (
+            "That picture could not be used. Choose a PNG or JPEG file.",
+            "无法使用该图片。请选择 PNG 或 JPEG 文件。",
+        ),
         (
             "Tap the heart on any song and choose this playlist.",
             "点按歌曲的爱心，然后选择此播放列表。",

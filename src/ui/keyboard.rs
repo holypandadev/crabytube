@@ -548,6 +548,7 @@ mod tests {
             name: "Mix".into(),
             tracks: vec![song("a"), song("b")],
             cover: None,
+            cover_file: None,
         }]);
         app.page = Page::List(ListId::Playlist(4));
         drop(app.apply_row_key(RowKey::Down, false));

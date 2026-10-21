@@ -366,6 +366,12 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("Edit", "Изменить"),
         ("Cover", "Обложка"),
         ("Automatic", "Авто"),
+        ("From your computer", "С компьютера"),
+        ("Choose a cover", "Выберите обложку"),
+        (
+            "That picture could not be used. Choose a PNG or JPEG file.",
+            "Не удалось использовать это изображение. Выберите файл PNG или JPEG.",
+        ),
         (
             "Tap the heart on any song and choose this playlist.",
             "Нажмите на сердечко у трека и выберите этот плейлист.",
