@@ -203,6 +203,10 @@ impl App {
                     .height(PLAYER_H),
             );
         }
+        // On a phone the tabs are a bar at the foot, under the player, within reach of a thumb.
+        if self.mobile() {
+            body = body.push(hrule(INK)).push(self.tab_bar());
+        }
         let framed = container(body)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -261,7 +265,7 @@ impl App {
     /// side, the wordmark goes and the tabs take a second row of their own.
     fn header(&self) -> Element<'_, Message> {
         let inline = self.tabs_fit_inline();
-        let narrow = self.window_width < super::home::NARROW_W;
+        let narrow = self.mobile();
         let mut brand = row![svg(logo_handle()).width(LOGO_W).height(LOGO_W)]
             .spacing(10)
             .align_y(Alignment::Center);
@@ -284,15 +288,37 @@ impl App {
         };
         let mut left = row![].height(HEADER_H).align_y(Alignment::Center);
         let mut right = row![].height(HEADER_H).align_y(Alignment::Center);
+        // On a phone, Back and Forward sit in the bar, as the tabs have gone to the foot.
+        let arrows = || {
+            row![
+                self.nav_arrow(
+                    "chev-left",
+                    self.back_available().then_some(Message::Back),
+                    HEADER_H
+                ),
+                self.nav_arrow(
+                    "chev-right",
+                    self.forward_available().then_some(Message::Forward),
+                    HEADER_H
+                ),
+            ]
+        };
         if cfg!(target_os = "macos") {
             // The buttons are the ones of the system frame, drawn over the left of the bar.
-            left = left.push(Space::new().width(NATIVE_BUTTONS_W)).push(drag());
+            left = left.push(Space::new().width(NATIVE_BUTTONS_W));
+            if narrow {
+                left = left.push(arrows());
+            }
+            left = left.push(drag());
             right = right
                 .push(drag())
                 .push(brand)
                 .push(Space::new().width(BRAND_INSET));
         } else {
             left = left.push(Space::new().width(BRAND_INSET)).push(brand);
+            if narrow {
+                left = left.push(Space::new().width(6)).push(arrows());
+            }
             left = left.push(drag());
             right = right.push(drag()).push(window_buttons(false));
         }
@@ -302,10 +328,65 @@ impl App {
         }
         bar = bar.push(container(right).width(Length::Fill));
         let mut header = column![bar.height(HEADER_H)];
-        if !inline {
+        if !inline && !narrow {
             header = header.push(hrule(RULE)).push(self.tab_row(true));
         }
         header.push(hrule(INK)).into()
+    }
+
+    /// Whether the window is as narrow as a phone: the tabs go to a bar at its foot, and rows take
+    /// presses as a finger makes them.
+    pub(super) fn mobile(&self) -> bool {
+        self.window_width < super::home::NARROW_W
+    }
+
+    /// The tabs of a phone-width window: a bar at its foot with an icon and a label for each. The
+    /// tab a page belongs to is lit, and a line over it marks the one on screen, dimmer for a page
+    /// opened from it.
+    fn tab_bar(&self) -> Element<'_, Message> {
+        let (origin, current) = self.tab_origin();
+        let tabs = [
+            (Page::Home, Tab::Home, "home"),
+            (Page::Library, Tab::Library, "library"),
+            (Page::Settings, Tab::Settings, "settings"),
+        ]
+        .into_iter()
+        .zip(self.tab_labels())
+        .map(|((page, which, glyph), title)| {
+            let marked = origin == which;
+            let ink = if marked { INK } else { DIM };
+            let line = match (marked, current) {
+                (true, true) => INK,
+                (true, false) => DIM,
+                (false, _) => Color::TRANSPARENT,
+            };
+            button(column![
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(TAB_UNDERLINE)
+                    .style(theme::filled(line)),
+                container(
+                    column![
+                        icon(glyph, 20.0, ink),
+                        text(title).size(TEXT_CAPTION).font(MONO).color(ink),
+                    ]
+                    .spacing(4)
+                    .align_x(Alignment::Center),
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+            ])
+            .on_press(Message::Navigate(page))
+            .width(Length::Fill)
+            .height(TAB_BAR_H)
+            .padding(0)
+            .style(theme::bare_button)
+            .into()
+        });
+        iced::widget::Row::with_children(tabs)
+            .width(Length::Fill)
+            .height(TAB_BAR_H)
+            .into()
     }
 
     /// Whether the tabs fit in the bar between the two side zones, which are equal so that the
@@ -821,6 +902,8 @@ pub(super) const VOLUME_W: f32 = 104.0;
 pub(super) const HEADER_H: f32 = TITLE_BAR_H;
 /// The second row that holds the tabs when they do not fit in the bar.
 pub(super) const TAB_ROW_H: f32 = 36.0;
+/// The bar of tabs at the foot of a phone-width window.
+pub(super) const TAB_BAR_H: f32 = 56.0;
 /// Space between the header and the top of every page.
 const PAGE_TOP: f32 = 20.0;
 const TAB_UNDERLINE: f32 = 2.0;
@@ -1072,6 +1155,9 @@ mod tests {
         assert!(at(1270.0).tabs_fit_inline());
         assert!(!at(390.0).tabs_fit_inline());
         assert!(!at(360.0).tabs_fit_inline());
+        // At a phone's width the tabs are a bar at the foot.
+        assert!(!at(700.0).mobile());
+        assert!(at(390.0).mobile());
     }
 
     #[test]

@@ -82,6 +82,7 @@ impl App {
         track: &Track,
         color: iced::Color,
         current: bool,
+        cover: f32,
         message: Message,
     ) -> Element<'a, Message> {
         let saved = self.is_saved(&track.video_id);
@@ -92,12 +93,33 @@ impl App {
                 color,
             ))
             .on_press(message)
-            .padding(6)
+            .padding(self.row_icon_padding(cover))
             .style(theme::row_icon_button(current, false)),
         )
         .width(HEART_W)
         .center_x(HEART_W)
         .into()
+    }
+
+    /// The padding of a row's ••• and heart. On a phone they are 44 px wide, and as tall as the
+    /// row's cover lets them be, up to 44, so a finger finds them.
+    pub(super) fn row_icon_padding(&self, cover: f32) -> iced::Padding {
+        if self.mobile() {
+            let vertical = ((cover - 18.0) / 2.0).clamp(6.0, 13.0);
+            iced::Padding {
+                top: vertical,
+                bottom: vertical,
+                left: 13.0,
+                right: 13.0,
+            }
+        } else {
+            iced::Padding::new(6.0)
+        }
+    }
+
+    /// The room a row's ••• button takes.
+    pub(super) fn row_more_width(&self) -> f32 {
+        if self.mobile() { 44.0 } else { 30.0 }
     }
 
     /// Notes again which songs are in a playlist, after the playlists changed.
@@ -411,6 +433,19 @@ impl App {
                     start: None,
                 });
                 self.drag_edge = Edge::None;
+            }
+            Message::DragHeld { list, index } => {
+                // A finger lifts the row at once; the row follows it from its first move.
+                self.row_drag = Some(RowDrag {
+                    list,
+                    from: index,
+                    to: index,
+                    moved: true,
+                    pointer: None,
+                    start: None,
+                });
+                self.drag_edge = Edge::None;
+                self.row_menu = None;
             }
             Message::DragMoved(point, height) => return self.drag_moved(point, height),
             Message::DragTick(tick) => {
@@ -1763,6 +1798,40 @@ mod tests {
         assert_eq!(app.queue_index, Some(3));
         drop(app.update(Message::MoveInQueue { index: 0, up: true }));
         assert_eq!(order(&app), ["e", "a", "c", "b", "d"]);
+    }
+
+    #[test]
+    fn a_row_held_by_a_finger_is_lifted_at_once_and_moves_with_it() {
+        let mut app = App {
+            page: Page::NowPlaying,
+            queue: Arc::new(["a", "b", "c", "d"].map(song).to_vec()),
+            queue_index: Some(0),
+            ..App::default()
+        };
+        let pitch = app.preferences.ui_density.queue_row_pitch();
+        let order =
+            |app: &App| -> Vec<String> { app.queue.iter().map(|t| t.video_id.clone()).collect() };
+        // Held and let go without moving: nothing moves, and the row is not played.
+        drop(app.update(Message::DragHeld {
+            list: DragList::Queue,
+            index: 2,
+        }));
+        assert!(matches!(
+            app.row_click(DragList::Queue, Message::PlayQueueIndex(2)),
+            Message::DragReleased
+        ));
+        drop(app.update(Message::PointerHeld(false)));
+        assert_eq!(order(&app), ["a", "b", "c", "d"]);
+        // Held, then moved: the first move already aims the row, with no threshold to pass.
+        drop(app.update(Message::DragHeld {
+            list: DragList::Queue,
+            index: 2,
+        }));
+        point(&mut app, 0.3 * pitch);
+        assert_eq!(app.drag_slot(), Some(0));
+        drop(app.update(Message::PointerHeld(false)));
+        assert_eq!(order(&app), ["c", "a", "b", "d"]);
+        assert_eq!(app.queue_index, Some(1));
     }
 
     #[test]

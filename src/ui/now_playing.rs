@@ -427,7 +427,7 @@ impl App {
             };
             let more = button(super::theme::icon("more", 18.0, ink.icon))
                 .on_press(self.row_click(DragList::Queue, Message::ToggleRowMenu(menu)))
-                .padding(6)
+                .padding(self.row_icon_padding(cover))
                 .style(theme::row_icon_button(current, open));
             let mut names = column![
                 text(fit(&title, text_width, TEXT_BODY))
@@ -457,6 +457,7 @@ impl App {
                         entry,
                         ink.icon,
                         current,
+                        cover,
                         self.row_click(DragList::Queue, Message::OpenSaveDialog(entry.clone()))
                     ),
                 ]
@@ -479,6 +480,10 @@ impl App {
                 drag_row(
                     column![main, hrule(RULE)],
                     Some(Message::DragPressed {
+                        list: DragList::Queue,
+                        index,
+                    }),
+                    Some(Message::DragHeld {
                         list: DragList::Queue,
                         index,
                     }),

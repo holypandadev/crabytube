@@ -21,8 +21,6 @@ use unicode_width::UnicodeWidthStr;
 
 const INDEX_W: f32 = 48.0;
 const DURATION_W: f32 = 96.0;
-/// Width of the ••• button beside the heart.
-const MORE_W: f32 = 30.0;
 const CELL_GAP: f32 = 16.0;
 
 /// The cover of a list on the Library page, and the fixed pitch of its row: the cover, 8 px above
@@ -153,7 +151,7 @@ impl App {
             // The row being dragged stays in its place, faded, while a label follows the pointer.
             let lifted = place.is_some() && place == dragged;
             let ink = if lifted { FADED } else { INK };
-            let text_width = width - LIST_COVER - 16.0 - MORE_W - 40.0;
+            let text_width = width - LIST_COVER - 16.0 - self.row_more_width() - 40.0;
             let mut cells = row![
                 self.list_cover(list, LIST_COVER),
                 column![
@@ -169,7 +167,7 @@ impl App {
                 cells = cells.push(
                     button(icon("more", 18.0, ink))
                         .on_press(self.row_click(lists, Message::ToggleRowMenu(menu)))
-                        .padding(6)
+                        .padding(self.row_icon_padding(LIST_COVER))
                         .style(theme::row_icon_button(false, open)),
                 );
             }
@@ -190,6 +188,9 @@ impl App {
                     place
                         .filter(|_| reorderable)
                         .map(|index| Message::DragPressed { list: lists, index }),
+                    place
+                        .filter(|_| reorderable)
+                        .map(|index| Message::DragHeld { list: lists, index }),
                 ),
             ));
         }
@@ -608,9 +609,10 @@ impl App {
                     .is_some_and(|album| !album.trim().is_empty())
             });
         let show_duration = columns && songs.iter().any(|track| self.duration_of(track).is_some());
+        let more_w = self.row_more_width();
         let fixed = INDEX_W
             + HEART_W
-            + MORE_W
+            + more_w
             + if show_duration {
                 DURATION_W + CELL_GAP
             } else {
@@ -645,7 +647,7 @@ impl App {
         if show_duration {
             table_head = table_head.push(column_head("DURATION", DURATION_W));
         }
-        let table_head = table_head.push(Space::new().width(MORE_W + HEART_W));
+        let table_head = table_head.push(Space::new().width(more_w + HEART_W));
 
         let mut page = column![
             Space::new().height(8),
@@ -793,11 +795,12 @@ impl App {
                 track,
                 ink.icon,
                 current,
+                cover,
                 self.row_click(dragging, Message::OpenSaveDialog(track.clone())),
             );
             let more = button(icon("more", 18.0, ink.icon))
                 .on_press(self.row_click(dragging, Message::ToggleRowMenu(menu)))
-                .padding(6)
+                .padding(self.row_icon_padding(cover))
                 .style(theme::row_icon_button(current, open));
             let play = match list {
                 ListId::Favorites => {
@@ -827,6 +830,10 @@ impl App {
                 drag_row(
                     column![line, hrule(RULE)].height(pitch),
                     Some(Message::DragPressed {
+                        list: dragging,
+                        index,
+                    }),
+                    Some(Message::DragHeld {
                         list: dragging,
                         index,
                     }),

@@ -1,15 +1,17 @@
 //! Dragging rows to another place in their list. A row says when the main button goes down on it,
 //! before what is inside takes the press, so its button still plays it on a click. While a row is
 //! held, the area around the list says where the pointer is, even past its edges, and shows a
-//! closed hand.
+//! closed hand. On a touch screen a finger held still on a row for a moment lifts it, and a finger
+//! that moves sooner scrolls the list as before.
 
 use iced::advanced::layout;
 use iced::advanced::mouse;
 use iced::advanced::overlay;
 use iced::advanced::renderer;
-use iced::advanced::widget::{Operation, Tree};
+use iced::advanced::widget::{Operation, Tree, tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget};
-use iced::{Element, Event, Length, Point, Rectangle, Size, Vector};
+use iced::time::{Duration, Instant};
+use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, touch, window};
 
 type MoveHandler<'a, Message> = Box<dyn Fn(Point, f32) -> Message + 'a>;
 
@@ -17,17 +19,21 @@ type MoveHandler<'a, Message> = Box<dyn Fn(Point, f32) -> Message + 'a>;
 pub(super) struct DragZone<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     on_press: Option<Message>,
+    on_hold: Option<Message>,
     on_move: Option<MoveHandler<'a, Message>>,
 }
 
-/// A row that can be dragged: `on_press` when the main button goes down on it.
+/// A row that can be dragged: `on_press` when the main button goes down on it, and `on_hold` when
+/// a finger has been held still on it for `HOLD`.
 pub(super) fn drag_row<'a, Message, Theme, Renderer>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
     on_press: Option<Message>,
+    on_hold: Option<Message>,
 ) -> DragZone<'a, Message, Theme, Renderer> {
     DragZone {
         content: content.into(),
         on_press,
+        on_hold,
         on_move: None,
     }
 }
@@ -42,7 +48,60 @@ pub(super) fn drag_area<'a, Message, Theme, Renderer>(
     DragZone {
         content: content.into(),
         on_press: None,
+        on_hold: None,
         on_move: on_move.map(|handler| Box::new(handler) as MoveHandler<'a, Message>),
+    }
+}
+
+/// How long a finger stays still on a row before the row is lifted, and how far it may move
+/// meanwhile.
+pub(super) const HOLD: Duration = Duration::from_millis(450);
+pub(super) const HOLD_SLOP: f32 = 10.0;
+
+/// A finger on a row, until it is held long enough to lift the row, moves away or is lifted.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct LongPress {
+    press: Option<(touch::Finger, Point, Instant)>,
+}
+
+impl LongPress {
+    /// A finger went down at `position`, at `now`. Returns when the row would be lifted.
+    pub(super) fn press(
+        &mut self,
+        finger: touch::Finger,
+        position: Point,
+        now: Instant,
+    ) -> Instant {
+        self.press = Some((finger, position, now));
+        now + HOLD
+    }
+
+    /// The finger moved: past the slop it scrolls, and the row is not lifted.
+    pub(super) fn moved(&mut self, finger: touch::Finger, position: Point) {
+        if let Some((held, start, _)) = self.press
+            && held == finger
+            && start.distance(position) > HOLD_SLOP
+        {
+            self.press = None;
+        }
+    }
+
+    /// The finger was lifted or lost.
+    pub(super) fn released(&mut self, finger: touch::Finger) {
+        if self.press.is_some_and(|(held, _, _)| held == finger) {
+            self.press = None;
+        }
+    }
+
+    /// Whether the finger has been held still long enough at `now`; it lifts the row once.
+    pub(super) fn due(&mut self, now: Instant) -> bool {
+        match self.press {
+            Some((_, _, at)) if now >= at + HOLD => {
+                self.press = None;
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -52,6 +111,14 @@ where
     Renderer: renderer::Renderer,
     Message: Clone,
 {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<LongPress>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(LongPress::default())
+    }
+
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.content)]
     }
@@ -112,6 +179,36 @@ where
                 if let Some(on_move) = &self.on_move {
                     let place = Point::new(position.x - bounds.x, position.y - bounds.y);
                     shell.publish(on_move(place, bounds.height));
+                }
+            }
+            Event::Touch(touch::Event::FingerPressed { id, position })
+                if self.on_hold.is_some() && bounds.contains(*position) =>
+            {
+                let due =
+                    tree.state
+                        .downcast_mut::<LongPress>()
+                        .press(*id, *position, Instant::now());
+                shell.request_redraw_at(due);
+            }
+            Event::Touch(touch::Event::FingerMoved { id, position }) => {
+                tree.state.downcast_mut::<LongPress>().moved(*id, *position);
+                // While a row is lifted the finger moves it, and the list under it does not
+                // scroll.
+                if let Some(on_move) = &self.on_move {
+                    let place = Point::new(position.x - bounds.x, position.y - bounds.y);
+                    shell.publish(on_move(place, bounds.height));
+                    shell.capture_event();
+                    return;
+                }
+            }
+            Event::Touch(
+                touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
+            ) => tree.state.downcast_mut::<LongPress>().released(*id),
+            Event::Window(window::Event::RedrawRequested(now)) => {
+                if tree.state.downcast_mut::<LongPress>().due(*now)
+                    && let Some(message) = &self.on_hold
+                {
+                    shell.publish(message.clone());
                 }
             }
             _ => {}
@@ -272,6 +369,29 @@ mod tests {
         assert_eq!(landing(1, 4, 5), 3);
         assert_eq!(landing(1, 5, 5), 4);
         assert_eq!(landing(3, 0, 5), 0);
+    }
+
+    #[test]
+    fn a_finger_held_still_lifts_the_row_once_and_one_that_moves_scrolls() {
+        let finger = touch::Finger(1);
+        let start = Instant::now();
+        let mut hold = LongPress::default();
+        let due = hold.press(finger, Point::new(10.0, 10.0), start);
+        assert_eq!(due, start + HOLD);
+        assert!(!hold.due(start + HOLD / 2));
+        // A little shake is still holding.
+        hold.moved(finger, Point::new(14.0, 13.0));
+        assert!(hold.due(due));
+        assert!(!hold.due(due + HOLD), "a row is lifted once per press");
+        // A finger that moves away before the time scrolls instead.
+        hold.press(finger, Point::new(10.0, 10.0), start);
+        hold.moved(finger, Point::new(10.0, 40.0));
+        assert!(!hold.due(due));
+        // Another finger, or one lifted, does not lift the row either.
+        hold.press(finger, Point::new(10.0, 10.0), start);
+        hold.moved(touch::Finger(2), Point::new(10.0, 90.0));
+        hold.released(finger);
+        assert!(!hold.due(due));
     }
 
     #[test]

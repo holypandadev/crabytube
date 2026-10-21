@@ -193,12 +193,14 @@ fn pointer_held(
     _window: iced::window::Id,
 ) -> Option<Message> {
     match event {
-        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left))
+        | iced::Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
             Some(Message::PointerHeld(true))
         }
-        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-            Some(Message::PointerHeld(false))
-        }
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))
+        | iced::Event::Touch(
+            iced::touch::Event::FingerLifted { .. } | iced::touch::Event::FingerLost { .. },
+        ) => Some(Message::PointerHeld(false)),
         _ => None,
     }
 }

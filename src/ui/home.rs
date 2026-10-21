@@ -1393,7 +1393,7 @@ impl App {
         };
         let more = button(icon("more", 18.0, ink.icon))
             .on_press(Message::ToggleRowMenu(menu))
-            .padding(6)
+            .padding(self.row_icon_padding(cover))
             .style(theme::row_icon_button(playing, open));
         // The ••• button sits inside the row, so the hover fill covers the
         // whole line with even padding on both sides.
@@ -1415,6 +1415,7 @@ impl App {
                     track,
                     ink.icon,
                     playing,
+                    cover,
                     Message::OpenSaveDialog(track.clone())
                 ),
             ]

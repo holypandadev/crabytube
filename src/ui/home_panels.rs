@@ -28,8 +28,6 @@ pub(super) const JUMP_THUMB: f32 = 36.0;
 const JUMP_META_W: f32 = 96.0;
 /// An entry narrower than this leaves the length out.
 const JUMP_META_MIN_W: f32 = 440.0;
-/// Room for the ••• button of a track entry, with its spacing.
-const JUMP_MORE_W: f32 = 42.0;
 /// Gap between the two columns of "Jump back in".
 const JUMP_COLUMN_GAP: f32 = 16.0;
 const CHIP_TEXT_SIZE: f32 = TEXT_CAPTION;
@@ -344,7 +342,7 @@ impl App {
         };
         // A track entry's ••• button and heart take room from the title.
         let more_width = if menu.is_some() && matches!(play, RecentPlay::Track(_)) {
-            JUMP_MORE_W + HEART_W
+            self.row_more_width() + 12.0 + HEART_W
         } else {
             0.0
         };
@@ -373,10 +371,16 @@ impl App {
                 .push(
                     button(icon("more", 18.0, ink))
                         .on_press(Message::ToggleRowMenu(menu))
-                        .padding(6)
+                        .padding(self.row_icon_padding(JUMP_THUMB))
                         .style(theme::row_icon_button(false, open)),
                 )
-                .push(self.row_heart(track, ink, false, Message::OpenSaveDialog(track.clone())));
+                .push(self.row_heart(
+                    track,
+                    ink,
+                    false,
+                    JUMP_THUMB,
+                    Message::OpenSaveDialog(track.clone()),
+                ));
         }
         let entry = button(content)
             .on_press(action)

@@ -155,9 +155,6 @@ impl CollectionState {
     }
 }
 
-/// Width of the ••• button at the end of a track row.
-const ROW_MORE_W: f32 = 30.0;
-
 impl App {
     /// "Save as playlist" on a collection: its songs go in a new playlist once all of them have
     /// loaded.
@@ -440,8 +437,10 @@ impl App {
         } else {
             0.0
         };
-        let title_w =
-            width - index_w - cover - duration_w - ROW_MORE_W - HEART_W - gaps * gap - 8.0;
+        // The ••• button and the heart are as tall as a row's cover, with or without covers.
+        let row_cover = self.preferences.ui_density.collection_cover();
+        let more_w = self.row_more_width();
+        let title_w = width - index_w - cover - duration_w - more_w - HEART_W - gaps * gap - 8.0;
         let mut table_head = row![
             container(label(self.tr("#").into_owned(), TEXT_CAPTION).color(DIM)).width(index_w),
             container(label(self.tr("TITLE").into_owned(), TEXT_CAPTION).color(DIM))
@@ -455,7 +454,7 @@ impl App {
             );
         }
         let table_head = table_head
-            .push(Space::new().width(ROW_MORE_W + gap + HEART_W))
+            .push(Space::new().width(more_w + gap + HEART_W))
             .spacing(gap)
             .padding([0, 4]);
         let mut page = column![
@@ -520,8 +519,8 @@ impl App {
                 .unwrap_or_else(|| "—".into());
             let more = button(icon("more", 18.0, ink.icon))
                 .on_press(Message::ToggleRowMenu(menu))
-                .padding(6)
-                .width(ROW_MORE_W)
+                .padding(self.row_icon_padding(row_cover))
+                .width(more_w)
                 .style(theme::row_icon_button(current, open));
             let mut cells = row![
                 container(
@@ -573,6 +572,7 @@ impl App {
                 track,
                 ink.icon,
                 current,
+                row_cover,
                 Message::OpenSaveDialog(track.clone()),
             );
             let cells = cells

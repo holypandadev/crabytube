@@ -968,6 +968,7 @@ impl App {
             | Message::CancelDeletePlaylist
             | Message::CloseOverlay
             | Message::DragPressed { .. }
+            | Message::DragHeld { .. }
             | Message::DragMoved(..)
             | Message::DragTick(..)
             | Message::DragReleased => return self.update_playlists(message),

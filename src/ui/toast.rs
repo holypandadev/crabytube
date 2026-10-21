@@ -233,14 +233,19 @@ impl App {
         )
     }
 
-    /// The room under the note: the player bar, when it shows, and a margin.
+    /// The room under the note: the player bar, when it shows, the tabs of a phone, and a margin.
     pub(super) fn toast_lift(&self) -> f32 {
         let bar = if self.player_bar_shown() {
             theme::PLAYER_H + theme::hairline()
         } else {
             0.0
         };
-        bar + TOAST_MARGIN
+        let tabs = if self.mobile() {
+            super::shell::TAB_BAR_H + theme::hairline()
+        } else {
+            0.0
+        };
+        bar + tabs + TOAST_MARGIN
     }
 }
 

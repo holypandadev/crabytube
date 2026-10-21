@@ -131,7 +131,8 @@ covers other than the playing track's are dropped and the freed heap is returned
 
 - `ui/shell.rs`: window chrome: title bar, tabs and the player bar. The window is undecorated on
   Linux and Windows; on macOS the system frame stays, with a transparent, untitled bar that the
-  app's bar fills.
+  app's bar fills. At a phone's width the tabs become a bar of icons at the foot, under a smaller
+  player, and the ••• and heart buttons of rows grow to a finger's size.
 - Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`; under its first screen Home scrolls
   to rows of cards: the user's lists and the feed's other shelves), the Library and the page of each
   of the user's lists (`ui/library.rs`), album/artist/playlist detail (`ui/collection.rs`), Now
@@ -139,7 +140,8 @@ covers other than the playing track's are dropped and the freed heap is returned
 - `ui/playlists.rs`: the user's lists. Favorite songs is always there; the user makes, edits,
   orders and deletes playlists. Every heart opens the Save panel, which puts its song in any list
   or in a new one; a playlist or album of YouTube Music, and the queue, can be saved as a playlist.
-  `ui/drag.rs` lets list rows, playlists and Up Next be dragged to another place.
+  `ui/drag.rs` lets list rows, playlists and Up Next be dragged to another place, with the mouse
+  or, on a touch screen, with a finger held still on the row for a moment.
 - `ui/menus.rs`: the panels over the window: the actions of a ••• menu and the question before a
   playlist is deleted. Like Save to, each is a card in the middle of the dimmed window.
 - `ui/toast.rs`: the note at the foot of the window about what an action did, with Undo for a

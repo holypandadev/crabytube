@@ -523,6 +523,11 @@ pub(super) enum Message {
         list: DragList,
         index: usize,
     },
+    /// A finger was held still on a row that can be dragged: the row is lifted at once.
+    DragHeld {
+        list: DragList,
+        index: usize,
+    },
     /// During a press on a row, the pointer moved to this place over the list's area, which is this
     /// tall.
     DragMoved(iced::Point, f32),

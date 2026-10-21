@@ -570,6 +570,9 @@ fn icon_handle(name: &'static str) -> svg::Handle {
         "trash",
         "note",
         "image",
+        "home",
+        "library",
+        "settings",
     )
 }
 
