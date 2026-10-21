@@ -137,6 +137,8 @@ covers other than the playing track's are dropped and the freed heap is returned
 - `ui/playlists.rs`: the user's lists. Favorite songs is always there; the user makes, edits,
   orders and deletes playlists. Every heart opens the Save panel, which puts its song in any list
   or in a new one. `ui/drag.rs` lets list rows and playlists be dragged to another place.
+- `ui/menus.rs`: the panels over the window: the actions of a ••• menu and the question before a
+  playlist is deleted. Like Save to, each is a card in the middle of the dimmed window.
 - `ui/playback_glue.rs`, `ui/artwork_glue.rs`: queue, radio and playback commands; artwork requests
   and fades.
 - `ui/subscriptions.rs`: playback status, timers, window and keyboard events.

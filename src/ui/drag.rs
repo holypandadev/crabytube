@@ -1,83 +1,49 @@
 //! Dragging rows to another place in their list. A row says when the main button goes down on it,
-//! before what is inside takes the press, so its button still plays it on a click; while a drag is
-//! on, it says when the pointer comes onto it. The area around the list says when the pointer
-//! nears its top or bottom edge, so the list scrolls on its own.
+//! before what is inside takes the press, so its button still plays it on a click. While a row is
+//! held, the area around the list says where the pointer is, even past its edges, and shows a
+//! closed hand.
 
 use iced::advanced::layout;
 use iced::advanced::mouse;
 use iced::advanced::overlay;
 use iced::advanced::renderer;
-use iced::advanced::widget::{Operation, Tree, tree};
+use iced::advanced::widget::{Operation, Tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget};
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector};
 
-/// How near the top or bottom of the list the pointer starts the list scrolling.
-const EDGE: f32 = 40.0;
-
-/// Where the pointer is against the list's edges: up, down, or neither.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum Edge {
-    Up,
-    #[default]
-    None,
-    Down,
-}
-
-impl Edge {
-    fn of(position: Point, bounds: Rectangle) -> Self {
-        if position.y < bounds.y + EDGE {
-            Self::Up
-        } else if position.y > bounds.y + bounds.height - EDGE {
-            Self::Down
-        } else {
-            Self::None
-        }
-    }
-}
-
-type EdgeHandler<'a, Message> = Box<dyn Fn(Edge, f32) -> Message + 'a>;
+type MoveHandler<'a, Message> = Box<dyn Fn(Point, f32) -> Message + 'a>;
 
 /// A widget that reports presses and pointer movement over its content without taking them.
 pub(super) struct DragZone<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     on_press: Option<Message>,
-    on_enter: Option<Message>,
-    on_edge: Option<EdgeHandler<'a, Message>>,
+    on_move: Option<MoveHandler<'a, Message>>,
 }
 
-/// A row that can be dragged: `on_press` when the main button goes down on it, and `on_enter`,
-/// set only during a drag, when the pointer comes onto it.
+/// A row that can be dragged: `on_press` when the main button goes down on it.
 pub(super) fn drag_row<'a, Message, Theme, Renderer>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
     on_press: Option<Message>,
-    on_enter: Option<Message>,
 ) -> DragZone<'a, Message, Theme, Renderer> {
     DragZone {
         content: content.into(),
         on_press,
-        on_enter,
-        on_edge: None,
+        on_move: None,
     }
 }
 
-/// The area around a list with draggable rows. During a drag, `on_edge` is told the edge the
-/// pointer is at, and the area's height, each time that edge changes.
+/// The area around a list with draggable rows. While `on_move` is set, a row is held: each move of
+/// the pointer is told with its place over the area and the area's height, and the pointer is a
+/// closed hand.
 pub(super) fn drag_area<'a, Message, Theme, Renderer>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
-    on_edge: Option<impl Fn(Edge, f32) -> Message + 'a>,
+    on_move: Option<impl Fn(Point, f32) -> Message + 'a>,
 ) -> DragZone<'a, Message, Theme, Renderer> {
     DragZone {
         content: content.into(),
         on_press: None,
-        on_enter: None,
-        on_edge: on_edge.map(|handler| Box::new(handler) as EdgeHandler<'a, Message>),
+        on_move: on_move.map(|handler| Box::new(handler) as MoveHandler<'a, Message>),
     }
-}
-
-#[derive(Default)]
-struct State {
-    hovered: bool,
-    edge: Edge,
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -86,14 +52,6 @@ where
     Renderer: renderer::Renderer,
     Message: Clone,
 {
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<State>()
-    }
-
-    fn state(&self) -> tree::State {
-        tree::State::new(State::default())
-    }
-
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.content)]
     }
@@ -140,7 +98,6 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        let state: &mut State = tree.state.downcast_mut();
         let bounds = layout.bounds();
         match event {
             // Seen before the content: a button inside takes the press for itself.
@@ -151,29 +108,13 @@ where
                     shell.publish(message.clone());
                 }
             }
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                let hovered = cursor.is_over(bounds);
-                if hovered
-                    && !state.hovered
-                    && let Some(message) = &self.on_enter
-                {
-                    shell.publish(message.clone());
-                }
-                state.hovered = hovered;
-                if let Some(on_edge) = &self.on_edge {
-                    let edge = cursor
-                        .position()
-                        .map_or(Edge::None, |position| Edge::of(position, bounds));
-                    if edge != state.edge {
-                        state.edge = edge;
-                        shell.publish(on_edge(edge, bounds.height));
-                    }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                if let Some(on_move) = &self.on_move {
+                    let place = Point::new(position.x - bounds.x, position.y - bounds.y);
+                    shell.publish(on_move(place, bounds.height));
                 }
             }
             _ => {}
-        }
-        if self.on_edge.is_none() {
-            state.edge = Edge::None;
         }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
@@ -195,6 +136,9 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        if self.on_move.is_some() {
+            return mouse::Interaction::Grabbing;
+        }
         self.content.as_widget().mouse_interaction(
             &tree.children[0],
             layout,
@@ -255,42 +199,89 @@ where
     }
 }
 
-/// The place of each shown row's item while one is dragged from `from` to `to`: the dragged item
-/// shows at `to` and the ones between close up behind it.
-pub(super) fn shown_item(shown: usize, from: usize, to: usize) -> usize {
-    use std::cmp::Ordering;
-    match from.cmp(&to) {
-        Ordering::Less if (from..to).contains(&shown) => shown + 1,
-        Ordering::Greater if (to + 1..=from).contains(&shown) => shown - 1,
-        _ if shown == to => from,
-        _ => shown,
+/// How far a held row's pointer must move before the row is dragged, so a click that shakes a
+/// little stays a click.
+pub(super) const DRAG_START: f32 = 6.0;
+
+/// How near the top or bottom of the list the pointer starts the list scrolling.
+pub(super) const EDGE: f32 = 48.0;
+
+/// Where the pointer is against the list's edges: up, down, or neither, with how deep into the
+/// edge it is, from 0 to 1.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) enum Edge {
+    Up(f32),
+    #[default]
+    None,
+    Down(f32),
+}
+
+impl Edge {
+    /// The edge of a list `height` tall that `y`, over it, is at.
+    pub(super) fn of(y: f32, height: f32) -> Self {
+        if y < EDGE {
+            Self::Up(((EDGE - y) / EDGE).clamp(0.0, 1.0))
+        } else if y > height - EDGE {
+            Self::Down(((y - (height - EDGE)) / EDGE).clamp(0.0, 1.0))
+        } else {
+            Self::None
+        }
     }
+
+    /// How far the list scrolls on one tick: faster the deeper the pointer is in the edge.
+    pub(super) fn step(self) -> f32 {
+        let speed = |depth: f32| 4.0 + 22.0 * depth;
+        match self {
+            Self::Up(depth) => -speed(depth),
+            Self::Down(depth) => speed(depth),
+            Self::None => 0.0,
+        }
+    }
+}
+
+/// The place a row taken from `from` lands at for an insertion line before row `slot` of `count`
+/// (`slot == count` is after the last).
+pub(super) fn landing(from: usize, slot: usize, count: usize) -> usize {
+    let slot = slot.min(count);
+    if slot > from { slot - 1 } else { slot }
+}
+
+/// The insertion line nearest to `y`, a place in the list's content, for rows `pitch` apart that
+/// start after `lead` rows that cannot move.
+pub(super) fn slot_at(y: f32, pitch: f32, lead: usize, count: usize) -> usize {
+    let row = (y / pitch).round().max(0.0) as usize;
+    row.saturating_sub(lead).min(count)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn shown(count: usize, from: usize, to: usize) -> Vec<usize> {
-        (0..count).map(|row| shown_item(row, from, to)).collect()
+    #[test]
+    fn a_row_lands_on_the_line_nearest_the_pointer() {
+        // Rows 50 apart: the line before row 2 is at 100.
+        assert_eq!(slot_at(90.0, 50.0, 0, 5), 2);
+        assert_eq!(slot_at(-30.0, 50.0, 0, 5), 0);
+        assert_eq!(slot_at(900.0, 50.0, 0, 5), 5);
+        // A first row that stays: its line is not offered.
+        assert_eq!(slot_at(40.0, 50.0, 1, 5), 0);
+        assert_eq!(slot_at(160.0, 50.0, 1, 5), 2);
+        // Taken from 1: the lines just before and after it leave it where it is.
+        assert_eq!(landing(1, 1, 5), 1);
+        assert_eq!(landing(1, 2, 5), 1);
+        assert_eq!(landing(1, 4, 5), 3);
+        assert_eq!(landing(1, 5, 5), 4);
+        assert_eq!(landing(3, 0, 5), 0);
     }
 
     #[test]
-    fn the_dragged_item_shows_where_it_would_land() {
-        assert_eq!(shown(5, 1, 1), [0, 1, 2, 3, 4]);
-        assert_eq!(shown(5, 1, 3), [0, 2, 3, 1, 4]);
-        assert_eq!(shown(5, 3, 1), [0, 3, 1, 2, 4]);
-        assert_eq!(shown(5, 0, 4), [1, 2, 3, 4, 0]);
-        assert_eq!(shown(5, 4, 0), [4, 0, 1, 2, 3]);
-    }
-
-    #[test]
-    fn the_edges_are_the_top_and_bottom_strips() {
-        let bounds = Rectangle::new(Point::new(0.0, 100.0), Size::new(300.0, 400.0));
-        assert_eq!(Edge::of(Point::new(10.0, 110.0), bounds), Edge::Up);
-        assert_eq!(Edge::of(Point::new(10.0, 50.0), bounds), Edge::Up);
-        assert_eq!(Edge::of(Point::new(10.0, 300.0), bounds), Edge::None);
-        assert_eq!(Edge::of(Point::new(10.0, 480.0), bounds), Edge::Down);
-        assert_eq!(Edge::of(Point::new(10.0, 900.0), bounds), Edge::Down);
+    fn the_edges_scroll_faster_the_deeper_the_pointer_goes() {
+        assert_eq!(Edge::of(200.0, 400.0), Edge::None);
+        assert!(matches!(Edge::of(10.0, 400.0), Edge::Up(_)));
+        assert!(matches!(Edge::of(-50.0, 400.0), Edge::Up(depth) if depth == 1.0));
+        assert!(matches!(Edge::of(390.0, 400.0), Edge::Down(_)));
+        assert!(Edge::of(399.0, 400.0).step() > Edge::of(360.0, 400.0).step());
+        assert!(Edge::of(0.0, 400.0).step() < 0.0);
+        assert_eq!(Edge::None.step(), 0.0);
     }
 }

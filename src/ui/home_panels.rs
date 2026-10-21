@@ -300,14 +300,7 @@ impl App {
         menu: RowMenu,
         width: f32,
     ) -> Element<'a, Message> {
-        let open = self.row_menu.as_ref() == Some(&menu);
-        let entry = self.jump_entry(play, width, Some(menu));
-        match play {
-            RecentPlay::Track(track) if open => {
-                column![entry, self.row_actions_with(track, None)].into()
-            }
-            _ => entry,
-        }
+        self.jump_entry(play, width, Some(menu))
     }
 
     fn jump_entry(

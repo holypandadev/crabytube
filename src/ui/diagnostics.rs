@@ -229,11 +229,22 @@ impl App {
                         None => Task::none(),
                     },
                     24 => match diagnostic_playlist(self) {
-                        // The first song dragged two rows down, before it is let go.
+                        // The first song dragged near the third line, before it is let go: the
+                        // line where it would land and the label that follows the pointer.
                         Some(id) => {
                             let list = super::messages::DragList::Songs(ListId::Playlist(id));
+                            let pitch = super::library::song_row_pitch(self.preferences.ui_density);
+                            let height = (self.area.height - 300.0).max(2.0 * pitch);
+                            drop(self.update(Message::CancelDeletePlaylist));
                             drop(self.update(Message::DragPressed { list, index: 0 }));
-                            self.update(Message::DragEntered(2))
+                            drop(self.update(Message::DragMoved(
+                                iced::Point::new(240.0, pitch / 2.0),
+                                height,
+                            )));
+                            self.update(Message::DragMoved(
+                                iced::Point::new(260.0, 3.0 * pitch - 8.0),
+                                height,
+                            ))
                         }
                         None => Task::none(),
                     },

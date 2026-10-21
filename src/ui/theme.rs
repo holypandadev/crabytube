@@ -562,6 +562,13 @@ fn icon_handle(name: &'static str) -> svg::Handle {
         "plus",
         "minus",
         "square",
+        "radio",
+        "artist",
+        "album",
+        "arrow-up",
+        "arrow-down",
+        "trash",
+        "note",
     )
 }
 

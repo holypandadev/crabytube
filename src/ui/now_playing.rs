@@ -470,14 +470,10 @@ impl App {
             } else {
                 theme::row_button
             });
-            let mut block = column![main];
-            if open {
-                block = block.push(self.row_actions_with(entry, (!current).then_some(index)));
-            }
             rows = rows.push(super::keyboard::mark_row(
                 "queue",
                 index,
-                block.push(hrule(RULE)),
+                column![main, hrule(RULE)],
             ));
         }
         let remaining = self.queue.len().saturating_sub(range.end);

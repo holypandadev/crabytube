@@ -35,14 +35,17 @@ pub(super) enum DragList {
 }
 
 /// A row being dragged: the place it was taken from and the place it would land.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct RowDrag {
     pub(super) list: DragList,
     pub(super) from: usize,
     pub(super) to: usize,
-    /// It has left its place once. From then on, letting it go never plays a row, even back where
-    /// it started.
+    /// The pointer moved far enough to start the drag. From then on, letting the row go never plays
+    /// it, even back where it started.
     pub(super) moved: bool,
+    /// Where the pointer is over the list's area, and where it was when it first moved there.
+    pub(super) pointer: Option<iced::Point>,
+    pub(super) start: Option<iced::Point>,
 }
 
 /// The field for a new playlist's name, or for a playlist's name and cover.
@@ -287,10 +290,6 @@ pub(super) enum Message {
     ScrollPreloadDue,
     /// Fires when a failed cover may be requested again; see `schedule_cover_retry`.
     ArtworkRetryDue,
-    /// Puts text on the clipboard and shows a short "Copied" notice.
-    CopyToClipboard(String),
-    /// Hides the "Copied" notice, unless a newer copy has replaced it (the value is that copy's number).
-    CopyNoticeExpired(u64),
     SeekNoticeExpired(u64),
     /// Fires once a resize settles; see the `Resized` handler.
     ResizeWorkDue(u64),
@@ -462,20 +461,24 @@ pub(super) enum Message {
         index: usize,
     },
     ShufflePlaylist(u64),
-    /// The first press on Delete. The playlist goes on the second (`DeletePlaylist`).
+    /// Delete on a playlist: a panel asks first. The playlist goes on its Delete (`DeletePlaylist`).
     AskDeletePlaylist(u64),
     DeletePlaylist(u64),
+    CancelDeletePlaylist,
+    /// Closes the panel over the window: Save to, a ••• menu or the question to delete.
+    CloseOverlay,
     /// The main button went down on a row that can be dragged.
     DragPressed {
         list: DragList,
         index: usize,
     },
-    /// During a drag, the pointer came onto this row.
-    DragEntered(usize),
-    /// During a drag, the pointer reached an edge of the list, which is this tall.
-    DragEdge(super::drag::Edge, f32),
-    /// The list scrolls a row on while the pointer stays at its edge.
+    /// During a press on a row, the pointer moved to this place over the list's area, which is this
+    /// tall.
+    DragMoved(iced::Point, f32),
+    /// The list scrolls on while a dragged row is held at its edge.
     DragTick(u64),
+    /// Redraws the covers that are still loading, which pulse.
+    LoadingPulse,
     /// The press of a drag ended over a row.
     DragReleased,
     /// The first press on Reset. The reset itself waits for the confirmation.
@@ -517,6 +520,4 @@ pub(super) enum Confirmation {
     ClearHistory,
     /// Turns the history off, which also clears "Jump back in".
     TurnOffHistory,
-    /// Deletes this playlist.
-    DeletePlaylist(u64),
 }

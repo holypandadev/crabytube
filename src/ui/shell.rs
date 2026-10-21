@@ -2,7 +2,7 @@
 
 use super::theme::{
     self, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, PLAYER_H, RULE, TEXT_BODY, TEXT_CAPTION,
-    TEXT_SECTION, TEXT_TITLE, TITLE_BAR_H, hrule, icon, label, vrule,
+    TEXT_SECTION, TITLE_BAR_H, hrule, icon, label, vrule,
 };
 use super::{App, Message, Page, Preference, format_duration};
 use crate::music::Track;
@@ -115,8 +115,9 @@ impl App {
         }
     }
 
-    /// Square cover with a 1 px white outline, or an outlined empty square.
-    /// A cover that just arrived fades in over `COVER_FADE`.
+    /// Square cover with a 1 px white outline. One still on its way pulses, and a song without one,
+    /// or whose cover could not be fetched, shows a note. A cover that just arrived fades in over
+    /// `COVER_FADE`.
     pub(super) fn cover<'a>(
         &self,
         url: Option<&str>,
@@ -124,6 +125,12 @@ impl App {
         variant: u32,
     ) -> Element<'a, Message> {
         let found = url.and_then(|url| self.artwork_cache.get_for_with_age(url, variant));
+        if found.is_none()
+            && let Some(url) = url
+            && !self.artwork_failed.keys().any(|(failed, _)| failed == url)
+        {
+            return cover_loading(size, self.loading_shade());
+        }
         let opacity = match found {
             Some((_, age)) if !self.preferences.reduced_motion => {
                 (age.as_secs_f32() / COVER_FADE.as_secs_f32()).clamp(0.0, 1.0)
@@ -203,8 +210,8 @@ impl App {
         {
             layers = layers.push(resize_grips());
         }
-        // The Save panel sits over a dimmed window; a press outside it closes it.
-        if let Some(track) = &self.save_dialog {
+        // A panel sits in the middle of the dimmed window; a press outside it closes it.
+        if let Some(panel) = self.overlay_panel() {
             layers = layers
                 .push(iced::widget::opaque(
                     mouse_area(
@@ -213,18 +220,15 @@ impl App {
                             .height(Length::Fill)
                             .style(theme::scrim),
                     )
-                    .on_press(Message::CloseSaveDialog),
+                    .on_press(Message::CloseOverlay),
                 ))
                 .push(
-                    // Held from the top, so the panel grows down as lists are added to it.
-                    container(iced::widget::opaque(self.save_dialog_view(track)))
+                    container(iced::widget::opaque(panel))
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .center_x(Length::Fill)
-                        .padding(iced::Padding {
-                            top: self.save_panel_top(),
-                            ..iced::Padding::ZERO
-                        }),
+                        .center_y(Length::Fill)
+                        .padding(16),
                 );
         }
         layers.into()
@@ -947,23 +951,54 @@ fn cover_box_faded<'a>(
             .content_fit(iced::ContentFit::Cover)
             .opacity(opacity)
             .into(),
-        None => container(
-            text("◻")
-                .size((size / 4.0).clamp(TEXT_CAPTION, TEXT_TITLE))
-                .font(MONO)
-                .color(FADED),
-        )
-        .width(size - 2.0 * line)
-        .height(size - 2.0 * line)
-        .center_x(size - 2.0 * line)
-        .center_y(size - 2.0 * line)
-        .into(),
+        None => container(icon("note", (size * 0.3).clamp(12.0, 48.0), FADED))
+            .width(size - 2.0 * line)
+            .height(size - 2.0 * line)
+            .center_x(size - 2.0 * line)
+            .center_y(size - 2.0 * line)
+            .into(),
     };
     container(inner)
         .width(size)
         .height(size)
         .padding(theme::hairline())
         .style(theme::boxed)
+        .into()
+}
+
+/// The grey of a cover that is still loading: it pulses slowly, or stays still with reduced motion.
+pub(super) fn pulse_shade(reduced_motion: bool) -> f32 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    if reduced_motion {
+        return 0.1;
+    }
+    let seconds = START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs_f32();
+    let wave = (seconds * std::f32::consts::TAU / LOADING_PULSE_PERIOD).sin();
+    0.07 + 0.05 * (0.5 + 0.5 * wave)
+}
+
+/// The time one pulse of a loading cover takes, in seconds.
+const LOADING_PULSE_PERIOD: f32 = 1.4;
+
+/// A cover still on its way: an outlined square of pulsing grey, the size of the cover.
+fn cover_loading<'a>(size: f32, shade: f32) -> Element<'a, Message> {
+    container(Space::new())
+        .width(size)
+        .height(size)
+        .style(move |_: &iced::Theme| iced::widget::container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb(
+                shade, shade, shade,
+            ))),
+            border: iced::Border {
+                color: theme::RULE,
+                width: theme::hairline(),
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
         .into()
 }
 

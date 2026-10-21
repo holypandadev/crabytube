@@ -13,6 +13,10 @@ const MEDIA_SESSION_TICK: std::time::Duration = std::time::Duration::from_secs(5
 /// thread.
 const SAVE_STATUS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How often covers that are still loading are drawn again, for their pulse. Only while some are
+/// on their way.
+const LOADING_PULSE_TICK: std::time::Duration = std::time::Duration::from_millis(80);
+
 /// The interval of the progress tick on `page`.
 pub(super) fn progress_tick(page: &Page) -> std::time::Duration {
     if *page == Page::NowPlaying {
@@ -91,6 +95,14 @@ impl App {
         } else {
             Subscription::none()
         };
+        let loading = if on_screen
+            && !self.preferences.reduced_motion
+            && !self.artwork_requested.is_empty()
+        {
+            iced::time::every(LOADING_PULSE_TICK).map(|_| Message::LoadingPulse)
+        } else {
+            Subscription::none()
+        };
         let fades = if self.fade_until.is_some() {
             iced::window::frames().map(Message::FadeFrame)
         } else {
@@ -104,6 +116,7 @@ impl App {
             carousel,
             volume_rail,
             fades,
+            loading,
             playback_status,
             playback,
             mpris,

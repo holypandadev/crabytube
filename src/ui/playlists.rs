@@ -3,7 +3,7 @@
 //! the lists (`library.rs`); each list can be played, edited, reordered by dragging, and deleted,
 //! but Favorite songs stays.
 
-use super::drag::Edge;
+use super::drag::{DRAG_START, Edge, landing, slot_at};
 use super::shell::{display_title, fit};
 use super::theme::{
     self, DIM, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_SECTION, hrule, icon, label,
@@ -24,8 +24,9 @@ const NAME_BUTTONS_W: f32 = 250.0;
 /// The narrowest the name field gets beside its buttons; with less room they go under it.
 const NAME_FIELD_MIN_W: f32 = 140.0;
 
-/// How often a list scrolls a row on while a dragged row is held at its edge.
-const DRAG_SCROLL_EVERY: std::time::Duration = std::time::Duration::from_millis(110);
+/// How often a list scrolls on while a dragged row is held at its edge: about 30 times a second,
+/// so the list glides.
+const DRAG_SCROLL_EVERY: std::time::Duration = std::time::Duration::from_millis(33);
 
 /// The Save panel: its widest, and the cover of each list in it.
 const SAVE_PANEL_W: f32 = 440.0;
@@ -273,43 +274,29 @@ impl App {
             }
             Message::AskDeletePlaylist(id) => {
                 if self.playlist(id).is_some() {
-                    return self.ask_confirmation(Confirmation::DeletePlaylist(id));
+                    self.row_menu = None;
+                    self.delete_prompt = Some(id);
                 }
             }
             Message::DeletePlaylist(id) => return self.delete_playlist(id),
+            Message::CancelDeletePlaylist => self.delete_prompt = None,
+            Message::CloseOverlay => {
+                self.close_save_dialog();
+                self.delete_prompt = None;
+                self.row_menu = None;
+            }
             Message::DragPressed { list, index } => {
                 self.row_drag = Some(RowDrag {
                     list,
                     from: index,
                     to: index,
                     moved: false,
+                    pointer: None,
+                    start: None,
                 });
                 self.drag_edge = Edge::None;
             }
-            Message::DragEntered(index) => {
-                let count = self.drag_count();
-                if let Some(drag) = &mut self.row_drag
-                    && count > 0
-                {
-                    drag.to = index.min(count - 1);
-                    if drag.to != drag.from && !drag.moved {
-                        drag.moved = true;
-                        // Rows keep one height while they move, so the list's places hold.
-                        self.row_menu = None;
-                    }
-                }
-            }
-            Message::DragEdge(edge, height) => {
-                self.drag_list_height = height;
-                if self.row_drag.is_none() {
-                    return Task::none();
-                }
-                self.drag_edge = edge;
-                self.drag_tick = self.drag_tick.wrapping_add(1);
-                if edge != Edge::None {
-                    return self.next_drag_tick();
-                }
-            }
+            Message::DragMoved(point, height) => return self.drag_moved(point, height),
             Message::DragTick(tick) => {
                 if tick == self.drag_tick {
                     return self.drag_scroll();
@@ -471,16 +458,10 @@ impl App {
         }
     }
 
-    /// The second press on Delete. The pages of the playlist are dropped from Back and Forward,
+    /// Delete in the panel that asked. The pages of the playlist are dropped from Back and Forward,
     /// and its own page gives way to the Library.
     fn delete_playlist(&mut self, id: u64) -> Task<Message> {
-        if !matches!(
-            self.confirmation.take(),
-            Some(PendingConfirmation {
-                kind: Confirmation::DeletePlaylist(pending),
-                ..
-            }) if pending == id
-        ) {
+        if self.delete_prompt.take() != Some(id) {
             return Task::none();
         }
         let Some(position) = self.playlist_position(id) else {
@@ -529,56 +510,106 @@ impl App {
         )
     }
 
-    /// Scrolls the dragged row's list a row on, toward the edge the pointer is at. The pointer
-    /// stays where it is, so the row under it, where the dragged row lands, is the next one.
-    fn drag_scroll(&mut self) -> Task<Message> {
-        let Some(drag) = self.row_drag else {
-            return Task::none();
-        };
-        let direction = match self.drag_edge {
-            Edge::Up => -1.0,
-            Edge::Down => 1.0,
-            Edge::None => return Task::none(),
-        };
-        let count = self.drag_count();
-        let density = self.preferences.ui_density;
-        let (id, pitch, offset) = match drag.list {
+    /// The scroll id, row pitch, offset and fixed leading rows of a list with draggable rows.
+    fn drag_geometry(&self, list: DragList) -> (&'static str, f32, f32, usize) {
+        match list {
             DragList::Songs(_) => (
                 "library-content",
-                super::library::song_row_pitch(density),
-                &mut self.library_scroll,
+                super::library::song_row_pitch(self.preferences.ui_density),
+                self.library_scroll.y,
+                0,
             ),
+            // Favorite songs is the first row and stays there.
             DragList::Lists => (
                 "library-lists",
                 super::library::LIST_ROW_PITCH,
-                &mut self.lists_scroll,
+                self.lists_scroll.y,
+                1,
             ),
-        };
-        let rows = match drag.list {
-            DragList::Songs(_) => count,
-            // Favorite songs comes before the playlists.
-            DragList::Lists => count + 1,
-        };
-        let furthest = (rows as f32 * pitch - self.drag_list_height).max(0.0);
-        let y = (offset.y + direction * pitch).clamp(0.0, furthest);
-        if (y - offset.y).abs() < 0.5 || count == 0 {
-            return Task::none();
         }
-        offset.y = y;
-        let offset = *offset;
-        if let Some(drag) = &mut self.row_drag {
-            drag.to = if direction > 0.0 {
-                (drag.to + 1).min(count - 1)
-            } else {
-                drag.to.saturating_sub(1)
-            };
-            if drag.to != drag.from && !drag.moved {
-                drag.moved = true;
-                self.row_menu = None;
+    }
+
+    /// The insertion line the held row would go to now, before row `slot` of its list.
+    pub(super) fn drag_slot(&self) -> Option<usize> {
+        let drag = self.row_drag.filter(|drag| drag.moved)?;
+        let pointer = drag.pointer?;
+        let (_, pitch, offset, lead) = self.drag_geometry(drag.list);
+        Some(slot_at(
+            pointer.y + offset,
+            pitch,
+            lead,
+            self.drag_list_count(drag.list),
+        ))
+    }
+
+    /// Works out where the held row lands from the pointer and the list's scroll.
+    fn aim_drag(&mut self) {
+        let slot = self.drag_slot();
+        let count = self.drag_count();
+        if let (Some(drag), Some(slot)) = (&mut self.row_drag, slot) {
+            drag.to = landing(drag.from, slot, count);
+        }
+    }
+
+    /// The pointer moved while a row is held: past a few pixels the row is dragged, and at an edge
+    /// of the list the list starts scrolling.
+    fn drag_moved(&mut self, point: iced::Point, height: f32) -> Task<Message> {
+        self.drag_list_height = height;
+        let Some(drag) = &mut self.row_drag else {
+            return Task::none();
+        };
+        drag.pointer = Some(point);
+        let start = *drag.start.get_or_insert(point);
+        if !drag.moved {
+            if (point.y - start.y).abs().max((point.x - start.x).abs()) < DRAG_START {
+                return Task::none();
+            }
+            drag.moved = true;
+            self.row_menu = None;
+        }
+        self.aim_drag();
+        let edge = Edge::of(point.y, height);
+        let was_still = self.drag_edge == Edge::None;
+        self.drag_edge = edge;
+        match (edge, was_still) {
+            (Edge::None, _) => {
+                self.drag_tick = self.drag_tick.wrapping_add(1);
+                Task::none()
+            }
+            // Ticks already run; they read the depth as it is now.
+            (_, false) => Task::none(),
+            (_, true) => {
+                self.drag_tick = self.drag_tick.wrapping_add(1);
+                self.next_drag_tick()
             }
         }
+    }
+
+    /// Scrolls the held row's list a little toward the edge the pointer is at, and aims the row
+    /// again, as the rows move under the pointer.
+    fn drag_scroll(&mut self) -> Task<Message> {
+        let Some(drag) = self.row_drag.filter(|drag| drag.moved) else {
+            return Task::none();
+        };
+        let step = self.drag_edge.step();
+        if step == 0.0 {
+            return Task::none();
+        }
+        let count = self.drag_count();
+        let (id, pitch, offset, lead) = self.drag_geometry(drag.list);
+        let furthest = ((count + lead) as f32 * pitch - self.drag_list_height).max(0.0);
+        let y = (offset + step).clamp(0.0, furthest);
+        if (y - offset).abs() < 0.5 {
+            return Task::none();
+        }
+        let scrolled = AbsoluteOffset { x: 0.0, y };
+        match drag.list {
+            DragList::Songs(_) => self.library_scroll = scrolled,
+            DragList::Lists => self.lists_scroll = scrolled,
+        }
+        self.aim_drag();
         Task::batch([
-            operation::scroll_to(id, offset),
+            operation::scroll_to(id, scrolled),
             self.next_drag_tick(),
             self.scroll_preload_task(),
         ])
@@ -592,7 +623,7 @@ impl App {
         self.drag_edge = Edge::None;
         self.drag_tick = self.drag_tick.wrapping_add(1);
         let count = self.drag_list_count(drag.list);
-        if drag.from == drag.to || drag.from >= count {
+        if !drag.moved || drag.from == drag.to || drag.from >= count {
             return Task::none();
         }
         let (from, to) = (drag.from, drag.to.min(count - 1));
@@ -613,19 +644,11 @@ impl App {
         Task::none()
     }
 
-    /// Where the row shown at `shown` in `list` comes from while one of its rows is dragged.
-    pub(super) fn dragged_item(&self, list: DragList, shown: usize) -> usize {
-        match self.row_drag {
-            Some(drag) if drag.list == list => super::drag::shown_item(shown, drag.from, drag.to),
-            _ => shown,
-        }
-    }
-
-    /// The row of `list` that is being dragged, where it shows now.
+    /// The row of `list` that is being dragged, which shows faded where it was.
     pub(super) fn dragged_row(&self, list: DragList) -> Option<usize> {
         self.row_drag
             .filter(|drag| drag.list == list && drag.moved)
-            .map(|drag| drag.to)
+            .map(|drag| drag.from)
     }
 
     /// What a press on a row of `list` does: `click`, unless a row of it was dragged, which ends
@@ -641,19 +664,70 @@ impl App {
         }
     }
 
-    /// The message for the pointer coming onto row `index` of `list`, only while one of its rows
-    /// is dragged.
-    pub(super) fn drag_enter(&self, list: DragList, index: usize) -> Option<Message> {
+    /// The pointer reports of a list's area, only while one of its rows is held.
+    pub(super) fn drag_moves(&self, list: DragList) -> Option<fn(iced::Point, f32) -> Message> {
         self.row_drag
             .is_some_and(|drag| drag.list == list)
-            .then_some(Message::DragEntered(index))
+            .then_some(Message::DragMoved as fn(iced::Point, f32) -> Message)
     }
 
-    /// The edge reports of a list's area, only while one of its rows is dragged.
-    pub(super) fn drag_edges(&self, list: DragList) -> Option<fn(Edge, f32) -> Message> {
-        self.row_drag
-            .is_some_and(|drag| drag.list == list)
-            .then_some(Message::DragEdge as fn(Edge, f32) -> Message)
+    /// What shows over a list while one of its rows is dragged: a line where it would land, and a
+    /// label with its name that follows the pointer.
+    pub(super) fn drag_overlay<'a>(
+        &self,
+        list: DragList,
+        width: f32,
+    ) -> Option<Element<'a, Message>> {
+        let drag = self
+            .row_drag
+            .filter(|drag| drag.list == list && drag.moved)?;
+        let pointer = drag.pointer?;
+        let slot = self.drag_slot()?;
+        let (_, pitch, offset, lead) = self.drag_geometry(list);
+        let name = match list {
+            DragList::Songs(songs) => self
+                .list_songs(songs)
+                .and_then(|tracks| tracks.get(drag.from))
+                .map(|track| display_title(&track.title).to_owned()),
+            DragList::Lists => self
+                .playlists
+                .get(drag.from)
+                .map(|playlist| playlist.name.clone()),
+        }?;
+        let height = self.drag_list_height;
+        let mut layers = iced::widget::stack![];
+        // The line is shown only where the row would move to.
+        let line_y = (slot + lead) as f32 * pitch - offset;
+        if drag.to != drag.from && (0.0..=height).contains(&line_y) {
+            layers = layers.push(column![
+                Space::new().height((line_y - 1.0).max(0.0)),
+                container(Space::new().height(2))
+                    .width(Length::Fill)
+                    .style(|_: &iced::Theme| container::Style {
+                        background: Some(iced::Background::Color(INK)),
+                        ..Default::default()
+                    }),
+            ]);
+        }
+        let label_width = (width * 0.5).clamp(140.0, 320.0);
+        let chip = container(
+            row![
+                icon("note", 14.0, INK),
+                label(fit(&name, label_width - 50.0, TEXT_BODY), TEXT_BODY)
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        )
+        .padding([8, 12])
+        .width(label_width)
+        .style(theme::boxed);
+        let left = (pointer.x + 16.0).clamp(0.0, (width - label_width).max(0.0));
+        let top = (pointer.y - 18.0).clamp(0.0, (height - 40.0).max(0.0));
+        layers = layers.push(column![
+            Space::new().height(top),
+            row![Space::new().width(left), chip]
+        ]);
+        Some(layers.into())
     }
 
     /// A notice about the lists in the interface's language.
@@ -730,15 +804,10 @@ impl App {
         }
     }
 
-    /// How far down the window the Save panel starts.
-    pub(super) fn save_panel_top(&self) -> f32 {
-        (self.window_height * 0.14).clamp(24.0, 140.0)
-    }
-
     /// The Save panel over the window: the song, then each list with a box that is filled when the
     /// song is in it, then New playlist. A press on a list puts the song in or takes it out.
     pub(super) fn save_dialog_view<'a>(&'a self, track: &'a Track) -> Element<'a, Message> {
-        let width = SAVE_PANEL_W.min(self.window_width - 32.0).max(200.0);
+        let width = self.panel_width(SAVE_PANEL_W);
         let inner = width - 48.0;
         let song = row![
             self.cover(
@@ -852,7 +921,7 @@ impl App {
                 ))
                 .style(theme::scroll_style),
         )
-        .max_height((self.window_height - self.save_panel_top() - 340.0).clamp(100.0, 420.0));
+        .max_height((self.window_height - 400.0).clamp(100.0, 420.0));
         let mut panel = column![
             row![
                 text(self.tr("Save to"))
@@ -1154,41 +1223,63 @@ mod tests {
         assert_eq!(order, [second, first]);
     }
 
+    /// Moves the pointer over a list's area, 400 px tall, as the drag area reports it.
+    fn point(app: &mut App, y: f32) {
+        drop(app.update(Message::DragMoved(iced::Point::new(200.0, y), 400.0)));
+    }
+
     #[test]
-    fn a_dragged_song_lands_where_it_is_let_go() {
+    fn a_dragged_song_lands_on_the_line_nearest_the_pointer() {
         let mut app = library();
         let list = ListId::Playlist(make(&mut app, "Mix"));
         for id in ["a", "b", "c", "d"] {
             save(&mut app, list, id);
         }
         let songs = DragList::Songs(list);
+        let pitch = super::super::library::song_row_pitch(app.preferences.ui_density);
         drop(app.update(Message::DragPressed {
             list: songs,
             index: 0,
         }));
-        // Before it moves, a row still plays on a click.
+        // A small shake is still a click.
+        point(&mut app, 10.0);
+        point(&mut app, 13.0);
         assert!(matches!(
             app.row_click(songs, Message::PlayPlaylist { id: 0, index: 0 }),
             Message::PlayPlaylist { .. }
         ));
-        drop(app.update(Message::DragEntered(2)));
-        assert_eq!(app.dragged_item(songs, 2), 0);
-        assert_eq!(app.dragged_item(songs, 0), 1);
+        assert!(app.drag_overlay(songs, 800.0).is_none());
+        // Past a few pixels it is a drag: aimed at the line before the fourth row, it lands third.
+        point(&mut app, 3.0 * pitch + 4.0);
         assert!(matches!(
             app.row_click(songs, Message::PlayPlaylist { id: 0, index: 0 }),
             Message::DragReleased
         ));
+        assert_eq!(app.drag_slot(), Some(3));
+        assert_eq!(app.dragged_row(songs), Some(0));
+        assert!(app.drag_overlay(songs, 800.0).is_some());
         drop(app.update(Message::PointerHeld(false)));
         assert_eq!(songs_of(&app, list), ["b", "c", "a", "d"]);
         assert!(app.row_drag.is_none());
-        // Let go where it started, nothing moves.
+        // Let go on a line next to where it started, nothing moves.
         drop(app.update(Message::DragPressed {
             list: songs,
             index: 1,
         }));
-        drop(app.update(Message::DragEntered(3)));
-        drop(app.update(Message::DragEntered(1)));
+        point(&mut app, 1.5 * pitch);
+        point(&mut app, 3.5 * pitch);
+        point(&mut app, 2.0 * pitch);
         drop(app.update(Message::DragReleased));
+        assert_eq!(songs_of(&app, list), ["b", "c", "a", "d"]);
+        // Escape lets go of a drag without moving the row.
+        drop(app.update(Message::DragPressed {
+            list: songs,
+            index: 0,
+        }));
+        point(&mut app, 10.0);
+        point(&mut app, 4.0 * pitch);
+        drop(app.escape_outside_search());
+        drop(app.update(Message::PointerHeld(false)));
         assert_eq!(songs_of(&app, list), ["b", "c", "a", "d"]);
     }
 
@@ -1203,18 +1294,22 @@ mod tests {
                 id
             })
             .collect();
+        let pitch = super::super::library::LIST_ROW_PITCH;
         drop(app.update(Message::DragPressed {
             list: DragList::Lists,
             index: 2,
         }));
-        drop(app.update(Message::DragEntered(0)));
+        point(&mut app, 3.5 * pitch);
+        // Aimed above Favorite songs, it lands first among the playlists.
+        point(&mut app, 0.0);
+        assert_eq!(app.drag_slot(), Some(0));
         drop(app.update(Message::PointerHeld(false)));
         let order: Vec<u64> = app.playlists.iter().map(|playlist| playlist.id).collect();
         assert_eq!(order, [ids[2], ids[0], ids[1]]);
     }
 
     #[test]
-    fn a_drag_at_the_edge_scrolls_the_list_and_carries_the_row_on() {
+    fn a_drag_at_the_edge_scrolls_the_list_and_aims_again() {
         let mut app = library();
         let list = ListId::Playlist(make(&mut app, "Long"));
         for index in 0..40 {
@@ -1225,33 +1320,45 @@ mod tests {
             list: songs,
             index: 3,
         }));
-        drop(app.update(Message::DragEntered(5)));
-        drop(app.update(Message::DragEdge(Edge::Down, 300.0)));
+        point(&mut app, 200.0);
+        let before = app.drag_slot();
+        point(&mut app, 395.0);
         let tick = app.drag_tick;
-        drop(app.update(Message::DragTick(tick)));
-        assert_eq!(app.row_drag.map(|drag| drag.to), Some(6));
+        for _ in 0..5 {
+            drop(app.update(Message::DragTick(app.drag_tick)));
+        }
         assert!(app.library_scroll.y > 0.0);
+        assert!(app.drag_slot() > before);
         // A tick from before the pointer left the edge does nothing.
-        drop(app.update(Message::DragEdge(Edge::None, 300.0)));
+        point(&mut app, 200.0);
+        let scrolled = app.library_scroll.y;
         drop(app.update(Message::DragTick(tick)));
-        assert_eq!(app.row_drag.map(|drag| drag.to), Some(6));
+        assert_eq!(app.library_scroll.y, scrolled);
     }
 
     #[test]
-    fn a_playlist_is_deleted_only_on_the_second_press_and_its_page_goes() {
+    fn a_playlist_is_deleted_from_its_panel_and_its_page_goes() {
         let mut app = library();
         let id = make(&mut app, "Mix");
         assert_eq!(app.page, Page::List(ListId::Playlist(id)));
+        // Delete without the panel's question does nothing.
         drop(app.update(Message::DeletePlaylist(id)));
         assert_eq!(app.playlists.len(), 1);
         drop(app.update(Message::AskDeletePlaylist(id)));
-        // Another press in between drops the question.
-        drop(app.update(Message::EditPlaylist(id)));
+        assert_eq!(app.delete_prompt, Some(id));
+        assert!(app.overlay_panel().is_some());
+        drop(app.update(Message::CancelDeletePlaylist));
+        assert!(app.delete_prompt.is_none());
         drop(app.update(Message::DeletePlaylist(id)));
         assert_eq!(app.playlists.len(), 1);
+        // A press outside the panel closes it too.
+        drop(app.update(Message::AskDeletePlaylist(id)));
+        drop(app.update(Message::CloseOverlay));
+        assert!(app.delete_prompt.is_none());
         drop(app.update(Message::AskDeletePlaylist(id)));
         drop(app.update(Message::DeletePlaylist(id)));
         assert!(app.playlists.is_empty());
+        assert!(app.delete_prompt.is_none());
         assert_eq!(app.page, Page::Library);
         assert!(
             !app.history
@@ -1259,6 +1366,41 @@ mod tests {
                 .chain(&app.forward)
                 .any(|page| *page == Page::List(ListId::Playlist(id)))
         );
+    }
+
+    #[test]
+    fn a_menu_opens_as_a_panel_for_its_row_and_closes_when_the_row_goes() {
+        let mut app = library();
+        let list = ListId::Playlist(make(&mut app, "Mix"));
+        for id in ["a", "b"] {
+            save(&mut app, list, id);
+        }
+        drop(app.update(Message::ToggleRowMenu(RowMenu {
+            list: "playlist",
+            index: 1,
+        })));
+        assert!(app.overlay_panel().is_some());
+        drop(app.update(Message::CloseOverlay));
+        assert!(app.row_menu.is_none());
+        assert!(app.overlay_panel().is_none());
+        // A menu for a row that is not there shows nothing.
+        app.row_menu = Some(RowMenu {
+            list: "playlist",
+            index: 9,
+        });
+        assert!(app.overlay_panel().is_none());
+        // The Library's rows: Favorite songs has no menu, a playlist has one.
+        drop(app.update(Message::Navigate(Page::Library)));
+        app.row_menu = Some(RowMenu {
+            list: "lists",
+            index: 1,
+        });
+        assert!(app.overlay_panel().is_some());
+        app.row_menu = Some(RowMenu {
+            list: "lists",
+            index: 0,
+        });
+        assert!(app.overlay_panel().is_none());
     }
 
     #[test]

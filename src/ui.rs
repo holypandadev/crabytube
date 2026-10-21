@@ -7,6 +7,7 @@ mod home_panels;
 mod keyboard;
 mod layout;
 mod library;
+mod menus;
 mod messages;
 mod now_playing;
 mod playback_glue;
@@ -133,6 +134,8 @@ struct App {
     drag_tick: u64,
     /// Where the Library page's list of lists stood.
     lists_scroll: AbsoluteOffset,
+    /// The playlist the panel asks about deleting.
+    delete_prompt: Option<u64>,
     /// The playlist's name, not the search, is the text typed in last. A text field takes the
     /// Escape that unfocuses it, so this tells whose Escape it was.
     playlist_name_typed: bool,
@@ -249,9 +252,6 @@ struct App {
     artwork_retry_pending: bool,
     /// Whether the player's cover has had its one retry.
     artwork_selected_retried: bool,
-    /// Set while the "Copied" notice shows; the value is the number of the copy that set it.
-    copy_notice: Option<u64>,
-    copy_notice_count: u64,
     /// The engine's seek failures already shown. A new failure shows the short seek notice.
     seek_failures_seen: u32,
     /// Set while the seek notice shows; the value is the number of the failure that set it.
@@ -345,7 +345,6 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ConfirmTurnOffHistory
         | Message::ResetSettings
         | Message::ClearHistory
-        | Message::DeletePlaylist(_)
         | Message::ConfirmationExpired(_)
         | Message::PlaybackTick
         | Message::PlaybackStatusChanged(_)
@@ -407,15 +406,14 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::PersistState
         | Message::VolumeSaveDue(_)
         | Message::PrewarmPlayback
-        | Message::CopyNoticeExpired(_)
         | Message::SeekNoticeExpired(_)
         | Message::LyricsScrolled(_)
         | Message::SearchScrolled { .. }
         | Message::LibraryScrolled(_)
         | Message::LibraryListsScrolled(_)
-        | Message::DragEntered(_)
-        | Message::DragEdge(..)
+        | Message::DragMoved(..)
         | Message::DragTick(_)
+        | Message::LoadingPulse
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
         | Message::CarouselScrolled(_)
@@ -943,9 +941,10 @@ impl App {
             | Message::ShufflePlaylist(..)
             | Message::AskDeletePlaylist(..)
             | Message::DeletePlaylist(..)
+            | Message::CancelDeletePlaylist
+            | Message::CloseOverlay
             | Message::DragPressed { .. }
-            | Message::DragEntered(..)
-            | Message::DragEdge(..)
+            | Message::DragMoved(..)
             | Message::DragTick(..)
             | Message::DragReleased => return self.update_playlists(message),
             Message::CatalogCompleted { request_id, result } => {
@@ -1993,23 +1992,8 @@ impl App {
                 );
                 return Task::batch([navigation, search, release]);
             }
-            Message::CopyToClipboard(text) => {
-                self.copy_notice_count = self.copy_notice_count.wrapping_add(1);
-                let count = self.copy_notice_count;
-                self.copy_notice = Some(count);
-                return Task::batch([
-                    iced::clipboard::write(text),
-                    Task::perform(
-                        async { tokio::time::sleep(Duration::from_millis(1500)).await },
-                        move |()| Message::CopyNoticeExpired(count),
-                    ),
-                ]);
-            }
-            Message::CopyNoticeExpired(count) => {
-                if self.copy_notice == Some(count) {
-                    self.copy_notice = None;
-                }
-            }
+            // Covers that are still loading pulse; the redraw is all this does.
+            Message::LoadingPulse => {}
             Message::SeekNoticeExpired(count) => {
                 if self.seek_notice == Some(count) {
                     self.seek_notice = None;
@@ -2056,8 +2040,8 @@ impl App {
                     if repeat && !(suggestion_arrow && self.show_suggestions) {
                         return Task::none();
                     }
-                    // Escape priority: suggestions > search field > Save panel > playlist name > row
-                    // menu > Now Playing > Settings.
+                    // Escape priority: suggestions > search field > a drag > a panel > playlist
+                    // name > row menu > Now Playing > Settings.
                     if matches!(key, Key::Named(Named::Escape)) {
                         if self.show_suggestions {
                             if let Some(typed) = self.typed_query.take() {
@@ -2481,6 +2465,7 @@ impl App {
             drag_list_height: 0.0,
             drag_tick: 0,
             lists_scroll: AbsoluteOffset::default(),
+            delete_prompt: None,
             playlist_name_typed: false,
             page: Page::Home,
             history: Vec::new(),
@@ -2570,8 +2555,6 @@ impl App {
             artwork_failed: HashMap::new(),
             artwork_retry_pending: false,
             artwork_selected_retried: false,
-            copy_notice: None,
-            copy_notice_count: 0,
             seek_failures_seen: 0,
             seek_notice: None,
             seek_notice_count: 0,
@@ -2714,8 +2697,11 @@ impl App {
     /// Escape when the search field does not have the focus: closes the row menu, or goes back from
     /// Now Playing, Settings or a collection.
     fn escape_outside_search(&mut self) -> Task<Message> {
-        if self.save_dialog.is_some() {
-            return self.update(Message::CloseSaveDialog);
+        if self.row_drag.is_some() {
+            // A drag let go of nowhere: the row stays where it was.
+            self.row_drag = None;
+        } else if self.save_dialog.is_some() || self.delete_prompt.is_some() {
+            return self.update(Message::CloseOverlay);
         } else if self.playlist_editor.is_some() {
             self.playlist_editor = None;
         } else if self.row_menu.is_some() {
@@ -2743,6 +2729,11 @@ impl App {
     /// unreadable state file could not be moved aside.
     fn save_failing(&self) -> bool {
         self.persistence.as_ref().is_none_or(Persistence::failing)
+    }
+
+    /// The grey a loading cover shows now.
+    pub(super) fn loading_shade(&self) -> f32 {
+        shell::pulse_shade(self.preferences.reduced_motion)
     }
 
     fn tr<'a>(&self, source: &'a str) -> std::borrow::Cow<'a, str> {
@@ -2916,6 +2907,7 @@ impl App {
         self.save_dialog = None;
         self.playlist_notice = None;
         self.row_drag = None;
+        self.delete_prompt = None;
         self.liked = self.favorites.iter().map(|t| t.video_id.clone()).collect();
         self.persist();
         let language = self.update(Message::Preference(Preference::UiLanguage(
@@ -3423,9 +3415,11 @@ impl App {
         self.invalidate_suggestions();
         self.row_menu = None;
         self.row_cursor = None;
-        // A playlist's fields belong to the page they were opened on, and a drag to its list.
+        // A playlist's fields belong to the page they were opened on, and a drag or a question to
+        // its list.
         self.playlist_editor = None;
         self.row_drag = None;
+        self.delete_prompt = None;
         self.page = page.clone();
         if self.page == Page::Home {
             self.enter_home();
@@ -5550,21 +5544,6 @@ mod tests {
             Modifiers::empty(),
         )));
         assert_eq!(app.page, Page::Home);
-    }
-
-    #[test]
-    fn copy_notice_hides_only_when_the_latest_copy_expires() {
-        let mut app = App::default();
-        drop(app.update(Message::CopyToClipboard("Title".into())));
-        let first = app.copy_notice_count;
-        drop(app.update(Message::CopyToClipboard("Artist".into())));
-        let latest = app.copy_notice_count;
-        assert!(app.copy_notice.is_some());
-        // The timer of the first copy must not hide the notice of the second.
-        drop(app.update(Message::CopyNoticeExpired(first)));
-        assert!(app.copy_notice.is_some());
-        drop(app.update(Message::CopyNoticeExpired(latest)));
-        assert!(app.copy_notice.is_none());
     }
 
     #[test]

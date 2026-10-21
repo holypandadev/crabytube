@@ -495,16 +495,12 @@ impl App {
                 } else {
                     theme::row_button
                 });
-            // An open menu adds its actions under the row; closed rows keep the fixed pitch the
-            // virtual list counts with.
+            // Rows keep the fixed pitch the virtual list counts with; a ••• menu opens over the
+            // window.
             rows = rows.push(super::keyboard::mark_row(
                 "collection",
                 index,
-                if open {
-                    column![line, self.row_actions(track), hrule(RULE)]
-                } else {
-                    column![line, hrule(RULE)].height(pitch)
-                },
+                column![line, hrule(RULE)].height(pitch),
             ));
         }
         let remaining = data.tracks.len().saturating_sub(range.end);

@@ -2,19 +2,19 @@
 //! and buttons over a strict table of its songs. Rows of both can be dragged to another place.
 
 use super::drag::{drag_area, drag_row};
-use super::home::RowContext;
 use super::messages::{DragList, ListId, PlaylistEditTarget, RowMenu};
 use super::shell::{display_title, fit};
 use super::theme::{
-    self, DIM, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_TITLE, hrule, icon,
-    label,
+    self, DIM, FADED, INK, MONO, RULE, TEXT_BODY, TEXT_CAPTION, TEXT_DISPLAY, TEXT_TITLE, hrule,
+    icon, label,
 };
-use super::{App, Confirmation, Message, Page, format_duration, layout};
+use super::{App, Message, Page, format_duration, layout};
 use crate::music::Track;
 use crate::preferences::UiDensity;
-use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::widget::{Space, button, column, container, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, Size};
 use std::sync::Arc;
+use unicode_width::UnicodeWidthStr;
 
 const INDEX_W: f32 = 48.0;
 const DURATION_W: f32 = 96.0;
@@ -27,6 +27,8 @@ const CELL_GAP: f32 = 16.0;
 /// and below, and a 1 px rule.
 pub(super) const LIST_COVER: f32 = 56.0;
 pub(super) const LIST_ROW_PITCH: f32 = LIST_COVER + 2.0 * 8.0 + 1.0;
+/// The gap between the buttons under a list's name.
+const BUTTON_GAP: f32 = 12.0;
 /// The most song covers a playlist offers to choose from as its own.
 const COVER_CHOICES: usize = 24;
 const CHOICE_COVER: f32 = 56.0;
@@ -106,15 +108,16 @@ impl App {
         let dragged = self.dragged_row(lists);
         let mut rows = column![].width(Length::Fill);
         for shown in 0..=self.playlists.len() {
-            // Favorite songs is the first row and stays there; a dragged playlist lands after it.
-            let (list, name, count) = match shown.checked_sub(1) {
+            // Favorite songs is the first row and stays there.
+            let place = shown.checked_sub(1);
+            let (list, name, count) = match place {
                 None => (
                     ListId::Favorites,
                     self.tr("Favorite songs").into_owned(),
                     self.favorites.len(),
                 ),
                 Some(place) => {
-                    let playlist = &self.playlists[self.dragged_item(lists, place)];
+                    let playlist = &self.playlists[place];
                     (
                         ListId::Playlist(playlist.id),
                         playlist.name.clone(),
@@ -127,12 +130,14 @@ impl App {
                 index: shown,
             };
             let open = self.row_menu.as_ref() == Some(&menu);
-            let lifted = shown > 0 && dragged == Some(shown - 1);
+            // The row being dragged stays in its place, faded, while a label follows the pointer.
+            let lifted = place.is_some() && place == dragged;
+            let ink = if lifted { FADED } else { INK };
             let text_width = width - LIST_COVER - 16.0 - MORE_W - 40.0;
             let mut cells = row![
                 self.list_cover(list, LIST_COVER),
                 column![
-                    label(fit(&name, text_width, TEXT_BODY), TEXT_BODY),
+                    label(fit(&name, text_width, TEXT_BODY), TEXT_BODY).color(ink),
                     label(self.song_count(count, false), TEXT_CAPTION).color(DIM),
                 ]
                 .spacing(6)
@@ -140,10 +145,10 @@ impl App {
             ]
             .spacing(16)
             .align_y(Alignment::Center);
-            if shown > 0 {
+            if place.is_some() {
                 cells = cells.push(
-                    button(icon("more", 18.0, INK))
-                        .on_press(Message::ToggleRowMenu(menu.clone()))
+                    button(icon("more", 18.0, ink))
+                        .on_press(self.row_click(lists, Message::ToggleRowMenu(menu)))
                         .padding(6)
                         .style(theme::row_icon_button(false, open)),
                 );
@@ -152,76 +157,40 @@ impl App {
                 .on_press(self.row_click(lists, Message::Navigate(Page::List(list))))
                 .width(Length::Fill)
                 .padding([8, 4])
-                .style(if lifted || self.row_is_cursor("lists", shown) {
+                .style(if self.row_is_cursor("lists", shown) {
                     theme::row_button_cursor
                 } else {
                     theme::row_button
                 });
-            let block = if open {
-                column![line, self.list_actions(shown - 1), hrule(RULE)]
-            } else {
-                column![line, hrule(RULE)].height(LIST_ROW_PITCH)
-            };
-            let place = shown.saturating_sub(1);
             rows = rows.push(super::keyboard::mark_row(
                 "lists",
                 shown,
                 drag_row(
-                    block,
-                    (shown > 0).then_some(Message::DragPressed {
-                        list: lists,
-                        index: place,
-                    }),
-                    self.drag_enter(lists, place),
+                    column![line, hrule(RULE)].height(LIST_ROW_PITCH),
+                    place.map(|index| Message::DragPressed { list: lists, index }),
                 ),
             ));
+        }
+        let mut area = stack![
+            scrollable(rows)
+                .id("library-lists")
+                .on_scroll(|viewport| Message::LibraryListsScrolled(viewport.absolute_offset()))
+                .direction(theme::vbar())
+                .style(theme::scroll_style)
+                .height(Length::Fill)
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
+        if let Some(overlay) = self.drag_overlay(lists, width) {
+            area = area.push(overlay);
         }
         column![
             Space::new().height(8),
             header,
             Space::new().height(28),
             hrule(INK),
-            drag_area(
-                scrollable(rows)
-                    .id("library-lists")
-                    .on_scroll(|viewport| Message::LibraryListsScrolled(viewport.absolute_offset()))
-                    .direction(theme::vbar())
-                    .style(theme::scroll_style)
-                    .height(Length::Fill),
-                self.drag_edges(lists),
-            ),
+            drag_area(area, self.drag_moves(lists)),
         ]
-        .into()
-    }
-
-    /// The ••• actions of a playlist's row on the Library page: moving it, for the keyboard.
-    fn list_actions(&self, place: usize) -> Element<'_, Message> {
-        let action = |title: &'static str, message: Option<Message>| {
-            button(label(self.tr(title).into_owned(), TEXT_CAPTION))
-                .on_press_maybe(message)
-                .padding([6, 12])
-                .style(theme::outline_button)
-        };
-        container(
-            row![
-                action(
-                    "Move up",
-                    (place > 0).then_some(Message::MovePlaylist {
-                        index: place,
-                        up: true
-                    })
-                ),
-                action(
-                    "Move down",
-                    (place + 1 < self.playlists.len()).then_some(Message::MovePlaylist {
-                        index: place,
-                        up: false
-                    })
-                ),
-            ]
-            .spacing(10),
-        )
-        .padding([4, 76])
         .into()
     }
 
@@ -236,7 +205,7 @@ impl App {
     }
 
     /// A list's cover, name and count, its Play all and Shuffle, and for a playlist Edit, which
-    /// opens its name and cover, and Delete, which asks first.
+    /// opens its name and cover, and Delete, which asks in a panel first.
     fn list_header<'a>(
         &'a self,
         list: ListId,
@@ -267,27 +236,26 @@ impl App {
             (ListId::Playlist(id), Some(editor)) => editor.target == PlaylistEditTarget::Edit(id),
             _ => false,
         };
-        let mut actions = row![
-            self.list_button("play", "Play all", play),
-            self.list_button("shuffle", "Shuffle", shuffle),
-        ]
-        .spacing(16)
-        .align_y(Alignment::Center);
+        let mut buttons: Vec<(Option<&'static str>, &'static str, Option<Message>)> = vec![
+            (Some("play"), "Play all", play),
+            (Some("shuffle"), "Shuffle", shuffle),
+        ];
         if let ListId::Playlist(id) = list {
-            actions = actions
-                .push(
-                    self.text_list_button("Edit", (!editing).then_some(Message::EditPlaylist(id))),
-                )
-                .push(self.text_list_button("Delete", Some(Message::AskDeletePlaylist(id))));
+            buttons.push((
+                None,
+                "Edit",
+                (!editing).then_some(Message::EditPlaylist(id)),
+            ));
+            buttons.push((None, "Delete", Some(Message::AskDeletePlaylist(id))));
         }
-        let title_size = if narrow { TEXT_TITLE } else { TEXT_DISPLAY };
-        let text_width = if narrow {
-            width - 32.0
+        let room = if narrow {
+            width
         } else {
-            width - cover_size - 32.0
+            width - cover_size - 28.0
         };
+        let title_size = if narrow { TEXT_TITLE } else { TEXT_DISPLAY };
         let titles = column![
-            text(fit(&name, text_width, title_size))
+            text(fit(&name, room, title_size))
                 .size(title_size)
                 .font(MONO),
             label(
@@ -299,7 +267,7 @@ impl App {
                 TEXT_BODY
             ),
             Space::new().height(8),
-            actions.wrap().vertical_spacing(12),
+            self.even_buttons(buttons, room),
         ]
         .spacing(6)
         .width(Length::Fill);
@@ -315,29 +283,76 @@ impl App {
         if editing {
             header = header.push(self.edit_panel(songs, width));
         }
-        if let ListId::Playlist(id) = list {
-            let asking = matches!(
-                self.confirmation.as_ref().map(|pending| &pending.kind),
-                Some(Confirmation::DeletePlaylist(pending)) if *pending == id
-            );
-            if asking {
-                header = header.push(
-                    row![
-                        label(self.tr("Delete this playlist?").into_owned(), TEXT_BODY),
-                        Space::new().width(Length::Fill),
-                        self.confirm_buttons("Delete", Message::DeletePlaylist(id)),
-                    ]
-                    .spacing(16)
-                    .align_y(Alignment::Center),
-                );
-            }
-        }
         if self.save_dialog.is_none()
             && let Some(notice) = &self.playlist_notice
         {
             header = header.push(label(self.playlist_notice_text(notice), TEXT_CAPTION).color(DIM));
         }
         header.spacing(20).into()
+    }
+
+    /// Buttons of one size, the size of the widest label among them, in as many rows as `room`
+    /// needs. Where two do not fit side by side, they share the room in two columns and their
+    /// labels are cut.
+    fn even_buttons<'a>(
+        &self,
+        buttons: Vec<(Option<&'static str>, &'static str, Option<Message>)>,
+        room: f32,
+    ) -> Element<'a, Message> {
+        const PADDING: f32 = 20.0;
+        const ICON: f32 = 16.0;
+        const ICON_GAP: f32 = 10.0;
+        let titles: Vec<String> = buttons
+            .iter()
+            .map(|(_, title, _)| self.tr(title).into_owned())
+            .collect();
+        let widest = buttons
+            .iter()
+            .zip(&titles)
+            .map(|((glyph, _, _), title)| {
+                title.width() as f32 * TEXT_BODY * 0.6
+                    + if glyph.is_some() {
+                        ICON + ICON_GAP
+                    } else {
+                        0.0
+                    }
+            })
+            .fold(0.0_f32, f32::max);
+        // A few pixels to spare, so rounding never cuts the widest label.
+        let mut width = (widest + 2.0 * PADDING + 6.0).ceil();
+        if 2.0 * width + BUTTON_GAP > room {
+            width = ((room - BUTTON_GAP) / 2.0).floor().max(80.0);
+        }
+        let mut line = row![].spacing(BUTTON_GAP);
+        for ((glyph, _, message), title) in buttons.into_iter().zip(titles) {
+            let text_room = width
+                - 2.0 * PADDING
+                - if glyph.is_some() {
+                    ICON + ICON_GAP
+                } else {
+                    0.0
+                };
+            let mut content = row![].spacing(ICON_GAP).align_y(Alignment::Center);
+            if let Some(glyph) = glyph {
+                content = content.push(icon(glyph, ICON, INK));
+            }
+            content = content.push(label(
+                fit(&title, text_room.max(16.0), TEXT_BODY),
+                TEXT_BODY,
+            ));
+            line = line.push(
+                button(
+                    container(content)
+                        .width(Length::Fill)
+                        .center_x(Length::Fill),
+                )
+                .on_press_maybe(message)
+                .width(width)
+                .padding([12, 0])
+                .style(theme::outline_button),
+            );
+        }
+        line.wrap().vertical_spacing(BUTTON_GAP).into()
     }
 
     /// A playlist's name field and the covers it can take: its first songs' together, or one of
@@ -381,39 +396,6 @@ impl App {
         ]
         .spacing(12)
         .into()
-    }
-
-    /// An outlined button with an icon, as Play all and Shuffle. Without a message it is off.
-    fn list_button(
-        &self,
-        glyph: &'static str,
-        title: &'static str,
-        message: Option<Message>,
-    ) -> Element<'_, Message> {
-        button(
-            row![
-                icon(glyph, 16.0, INK),
-                label(self.tr(title).into_owned(), TEXT_BODY)
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        )
-        .on_press_maybe(message)
-        .padding([12, 24])
-        .style(theme::outline_button)
-        .into()
-    }
-
-    fn text_list_button(
-        &self,
-        title: &'static str,
-        message: Option<Message>,
-    ) -> Element<'_, Message> {
-        button(label(self.tr(title).into_owned(), TEXT_BODY))
-            .on_press_maybe(message)
-            .padding([12, 24])
-            .style(theme::outline_button)
-            .into()
     }
 
     /// The table of a list: the header, its head, then its songs as a virtual list whose rows can
@@ -489,6 +471,7 @@ impl App {
             );
             return page.into();
         }
+
         let density = self.preferences.ui_density;
         let pitch = song_row_pitch(density);
         let cover = song_cover(density);
@@ -503,16 +486,18 @@ impl App {
             .track
             .as_ref()
             .map(|track| track.video_id.as_str());
-        let lifted = self.dragged_row(dragging);
-        for shown in range.clone() {
-            // While a row is dragged, the songs show in the order they would land in.
-            let index = self.dragged_item(dragging, shown);
+        let dragged = self.dragged_row(dragging);
+        for index in range.clone() {
             let track = &songs[index];
             let current = playing == Some(track.video_id.as_str());
-            // The row under the keyboard cursor is outlined, as the dragged one; the playing row
-            // stays inverted.
-            let cursor = self.row_is_cursor(rows_name, index) || lifted == Some(shown);
-            let ink = theme::row_ink(current);
+            // The row under the keyboard cursor is outlined; the playing row stays inverted.
+            let cursor = self.row_is_cursor(rows_name, index);
+            let mut ink = theme::row_ink(current);
+            // The row being dragged stays in its place, faded, while a label follows the pointer.
+            if dragged == Some(index) {
+                ink.title = FADED;
+                ink.secondary = FADED;
+            }
             let menu = RowMenu {
                 list: rows_name,
                 index,
@@ -529,7 +514,7 @@ impl App {
                         if current {
                             "▶".to_owned()
                         } else {
-                            (shown + 1).to_string()
+                            (index + 1).to_string()
                         },
                         TEXT_BODY
                     )
@@ -647,27 +632,17 @@ impl App {
             } else {
                 theme::row_button
             });
-            // An open menu adds its actions under the row; closed rows keep the fixed pitch the
-            // virtual list counts with.
-            let block = if open {
-                column![
-                    line,
-                    self.row_actions_in(track, RowContext::List { list, index, count }),
-                    hrule(RULE)
-                ]
-            } else {
-                column![line, hrule(RULE)].height(pitch)
-            };
+            // Rows keep the fixed pitch the virtual list counts with; a ••• menu opens over the
+            // window.
             rows = rows.push(super::keyboard::mark_row(
                 rows_name,
                 index,
                 drag_row(
-                    block,
+                    column![line, hrule(RULE)].height(pitch),
                     Some(Message::DragPressed {
                         list: dragging,
                         index,
                     }),
-                    self.drag_enter(dragging, shown),
                 ),
             ));
         }
@@ -675,15 +650,19 @@ impl App {
         if remaining > 0 {
             rows = rows.push(Space::new().height(layout::virtual_spacer_height(remaining, pitch)));
         }
-        page.push(drag_area(
+        let mut area = stack![
             scrollable(rows)
                 .id("library-content")
                 .on_scroll(|viewport| Message::LibraryScrolled(viewport.absolute_offset()))
                 .direction(theme::vbar())
                 .style(theme::scroll_style)
-                .height(Length::Fill),
-            self.drag_edges(dragging),
-        ))
-        .into()
+                .height(Length::Fill)
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
+        if let Some(overlay) = self.drag_overlay(dragging, width) {
+            area = area.push(overlay);
+        }
+        page.push(drag_area(area, self.drag_moves(dragging))).into()
     }
 }

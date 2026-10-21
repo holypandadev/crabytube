@@ -1039,120 +1039,7 @@ impl App {
         } else {
             theme::row_button
         });
-        let mut block = column![main];
-        if open {
-            block = block.push(self.row_actions(track));
-        }
-        super::keyboard::mark_row(list, index, block.push(hrule(RULE)))
-    }
-
-    /// Inline actions under an opened ••• row.
-    pub(super) fn row_actions<'a>(&'a self, track: &'a Track) -> Element<'a, Message> {
-        self.row_actions_in(track, RowContext::Plain)
-    }
-
-    /// Inline actions; `queue_index` adds "Remove from queue" for a row in Up Next.
-    pub(super) fn row_actions_with<'a>(
-        &'a self,
-        track: &'a Track,
-        queue_index: Option<usize>,
-    ) -> Element<'a, Message> {
-        self.row_actions_in(
-            track,
-            queue_index.map_or(RowContext::Plain, RowContext::Queue),
-        )
-    }
-
-    /// Inline actions, with those of the list the row is in.
-    pub(super) fn row_actions_in<'a>(
-        &'a self,
-        track: &'a Track,
-        context: RowContext,
-    ) -> Element<'a, Message> {
-        let action = |title: String, message: Option<Message>| {
-            button(label(title, TEXT_CAPTION))
-                .on_press_maybe(message)
-                .padding([6, 12])
-                .style(theme::outline_button)
-        };
-        // A wrapping row: on a narrow window the actions flow onto a second line
-        // instead of squeezing each label.
-        let mut actions = row![
-            action(
-                self.tr("Play next").into_owned(),
-                Some(Message::PlayNext(track.clone()))
-            ),
-            action(
-                self.tr("Add to queue").into_owned(),
-                Some(Message::AddToQueue(track.clone()))
-            ),
-            action(
-                self.tr("Start radio").into_owned(),
-                Some(Message::StartRadio(track.clone()))
-            ),
-            // The Save panel, as the heart: Favorite songs, the playlists, or a new one.
-            action(
-                self.tr("Add to playlist").into_owned(),
-                Some(Message::OpenSaveDialog(track.clone())),
-            ),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
-        // Only the artist and album the catalog named; a track without them gets no "Go to".
-        for (label, page) in super::track_actions::go_to_destinations(track) {
-            actions = actions.push(action(
-                self.tr(label).into_owned(),
-                Some(Message::OpenCollection(page)),
-            ));
-        }
-        match context {
-            RowContext::Plain => {}
-            RowContext::Queue(index) => {
-                actions = actions.push(action(
-                    self.tr("Remove from queue").into_owned(),
-                    Some(Message::RemoveFromQueue(index)),
-                ));
-            }
-            RowContext::List { list, index, count } => {
-                actions = actions
-                    .push(action(
-                        self.tr("Move up").into_owned(),
-                        (index > 0).then_some(Message::MoveInList {
-                            list,
-                            index,
-                            up: true,
-                        }),
-                    ))
-                    .push(action(
-                        self.tr("Move down").into_owned(),
-                        (index + 1 < count).then_some(Message::MoveInList {
-                            list,
-                            index,
-                            up: false,
-                        }),
-                    ))
-                    .push(action(
-                        self.tr("Remove from playlist").into_owned(),
-                        Some(Message::RemoveFromList { list, index }),
-                    ));
-            }
-        }
-        actions = actions.push(action(
-            self.tr("Copy title").into_owned(),
-            Some(Message::CopyToClipboard(track.title.clone())),
-        ));
-        if !track.artist.trim().is_empty() {
-            actions = actions.push(action(
-                self.tr("Copy artist").into_owned(),
-                Some(Message::CopyToClipboard(track.artist.clone())),
-            ));
-        }
-        if self.copy_notice.is_some() {
-            actions = actions.push(label(self.tr("Copied").into_owned(), TEXT_CAPTION).color(DIM));
-        }
-        container(actions.wrap().vertical_spacing(8))
-            .padding([4, 52])
-            .into()
+        super::keyboard::mark_row(list, index, column![main, hrule(RULE)])
     }
 
     fn collection_grid<'a>(&'a self, items: &[&'a HomeItem], width: f32) -> Element<'a, Message> {
@@ -1207,20 +1094,6 @@ impl App {
         }
         grid.into()
     }
-}
-
-/// The list an opened row is in, for the actions that only it has.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RowContext {
-    Plain,
-    /// A row of Up Next, at this place in the queue.
-    Queue(usize),
-    /// A song of one of the user's lists, at `index` of its `count`.
-    List {
-        list: super::messages::ListId,
-        index: usize,
-        count: usize,
-    },
 }
 
 /// `Title — Artist`, or just the title when the catalog omitted the artist.
