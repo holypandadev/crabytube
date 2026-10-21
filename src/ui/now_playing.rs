@@ -550,12 +550,14 @@ impl App {
             row![
                 container(
                     label(
-                        fit(&status, width - clear_width, TEXT_CAPTION),
+                        fit(&status, width - clear_width - 16.0, TEXT_CAPTION),
                         TEXT_CAPTION
                     )
                     .color(DIM)
+                    .wrapping(iced::widget::text::Wrapping::None)
                 )
-                .width(Length::Fill),
+                .width(Length::Fill)
+                .clip(true),
                 button(label(save_label, TEXT_CAPTION))
                     .on_press_maybe((!self.queue.is_empty()).then_some(Message::SaveQueue))
                     .padding([6, 12])
