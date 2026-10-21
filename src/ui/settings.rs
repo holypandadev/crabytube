@@ -225,7 +225,11 @@ impl App {
     }
 
     /// Cancel and confirm for an inline confirmation. Cancel leaves the setting as it was.
-    fn confirm_buttons(&self, confirm: &'static str, message: Message) -> Element<'_, Message> {
+    pub(super) fn confirm_buttons(
+        &self,
+        confirm: &'static str,
+        message: Message,
+    ) -> Element<'_, Message> {
         row![
             button(label(self.tr("Cancel").into_owned(), TEXT_CAPTION))
                 .on_press(Message::CancelConfirmation)

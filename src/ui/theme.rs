@@ -92,6 +92,14 @@ pub(super) fn boxed(_: &Theme) -> container::Style {
     }
 }
 
+/// The dimmed window behind a panel that sits over it.
+pub(super) fn scrim(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color { a: 0.72, ..BLACK })),
+        ..Default::default()
+    }
+}
+
 pub(super) fn frame(_: &Theme) -> container::Style {
     // The frame of macOS draws its own edge, with rounded corners and a shadow, and an outline
     // of the app beside it looks doubled.
@@ -156,6 +164,20 @@ pub(super) fn outline_button(_: &Theme, status: button::Status) -> button::Style
             } else {
                 INK
             },
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// An outlined button that is on, as the list a page shows or a menu that is open: filled in.
+pub(super) fn selected_outline_button(_: &Theme, _: button::Status) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(INK)),
+        text_color: BLACK,
+        border: Border {
+            color: INK,
             width: hairline(),
             radius: 0.0.into(),
         },

@@ -41,6 +41,11 @@ impl App {
     /// key acts, so typing and submitting a search never move the cursor; the other pages have
     /// none to ask, and an operation on a widget that is not there never answers.
     pub(super) fn row_key_pressed(&mut self, key: RowKey) -> Task<Message> {
+        // The name field of a playlist is not asked: it is not drawn while its row is scrolled
+        // away, and it was typed in last as long as the search has not been since.
+        if self.playlist_editor.is_some() && self.playlist_name_typed {
+            return Task::none();
+        }
         if matches!(self.page, Page::Home | Page::Search) {
             operation::is_focused("search-field").map(move |typing| Message::RowKey { key, typing })
         } else {
@@ -121,9 +126,16 @@ impl App {
             // without songs, there is no row to move to.
             Page::Search if self.home_on_screen() => home(),
             Page::Search => (self.search_row_order(), 1),
+            // Favorite songs, then each playlist.
             Page::Library => (
-                (0..self.favorites.len())
-                    .map(|index| row("favorites", index))
+                (0..=self.playlists.len())
+                    .map(|index| row("lists", index))
+                    .collect(),
+                1,
+            ),
+            Page::List(list) => (
+                (0..self.list_songs(*list).map_or(0, <[Track]>::len))
+                    .map(|index| row(App::song_rows(*list), index))
                     .collect(),
                 1,
             ),
@@ -204,6 +216,23 @@ impl App {
             "favorites" => Some(RowTarget {
                 play: Message::PlayContext(Arc::clone(&self.favorites_context), index),
             }),
+            "playlist" => {
+                let Some(ListId::Playlist(id)) = self.shown_list() else {
+                    return None;
+                };
+                (index < self.list_songs(ListId::Playlist(id))?.len()).then_some(RowTarget {
+                    play: Message::PlayPlaylist { id, index },
+                })
+            }
+            "lists" => {
+                let list = match index.checked_sub(1) {
+                    None => ListId::Favorites,
+                    Some(place) => ListId::Playlist(self.playlists.get(place)?.id),
+                };
+                Some(RowTarget {
+                    play: Message::Navigate(Page::List(list)),
+                })
+            }
             "queue" => Some(RowTarget {
                 play: Message::PlayQueueIndex(index),
             }),
@@ -241,10 +270,11 @@ impl App {
         let density = self.preferences.ui_density;
         let (scroll_id, pitch) = match row.list {
             "songs" | "live" => ("search-content", None),
-            "favorites" => (
+            "favorites" | "playlist" => (
                 "library-content",
-                Some(super::favorites::favorites_row_pitch(density)),
+                Some(super::library::song_row_pitch(density)),
             ),
+            "lists" => ("library-lists", Some(super::library::LIST_ROW_PITCH)),
             "collection" => ("collection-content", Some(density.collection_row_pitch())),
             "queue" => ("queue-content", Some(density.queue_row_pitch())),
             _ => return Task::none(),
@@ -425,7 +455,7 @@ mod tests {
     fn favorites_page(count: usize) -> App {
         let favorites: Vec<Track> = (0..count).map(|index| song(&format!("f{index}"))).collect();
         App {
-            page: Page::Library,
+            page: Page::List(ListId::Favorites),
             liked: favorites
                 .iter()
                 .map(|track| track.video_id.clone())
@@ -508,6 +538,68 @@ mod tests {
         assert!(matches!(target.play, Message::PlayContext(_, 1)));
         drop(app.apply_row_key(RowKey::Enter, false));
         assert_eq!(app.queue_index, Some(1));
+    }
+
+    #[test]
+    fn the_cursor_walks_the_playlist_shown_and_enter_plays_it() {
+        let mut app = favorites_page(1);
+        app.playlists = Arc::new(vec![crate::preferences::Playlist {
+            id: 4,
+            name: "Mix".into(),
+            tracks: vec![song("a"), song("b")],
+            cover: None,
+        }]);
+        app.page = Page::List(ListId::Playlist(4));
+        drop(app.apply_row_key(RowKey::Down, false));
+        drop(app.apply_row_key(RowKey::Down, false));
+        drop(app.apply_row_key(RowKey::Down, false));
+        assert_eq!(cursor_at(&app), Some(("playlist", 1)));
+        let target = app.cursor_target().expect("a row");
+        assert!(matches!(
+            target.play,
+            Message::PlayPlaylist { id: 4, index: 1 }
+        ));
+        drop(app.apply_row_key(RowKey::Enter, false));
+        assert_eq!(app.queue_index, Some(1));
+        assert_eq!(
+            app.queue_source
+                .as_ref()
+                .map(|source| source.title.as_str()),
+            Some("Mix")
+        );
+    }
+
+    #[test]
+    fn the_cursor_walks_the_library_and_enter_opens_a_list() {
+        let mut app = favorites_page(1);
+        app.page = Page::Library;
+        app.playlists = Arc::new(vec![crate::preferences::Playlist {
+            id: 9,
+            name: "Mix".into(),
+            ..Default::default()
+        }]);
+        drop(app.apply_row_key(RowKey::Down, false));
+        assert_eq!(cursor_at(&app), Some(("lists", 0)));
+        assert!(matches!(
+            app.cursor_target().expect("a row").play,
+            Message::Navigate(Page::List(ListId::Favorites))
+        ));
+        drop(app.apply_row_key(RowKey::Down, false));
+        drop(app.apply_row_key(RowKey::Down, false));
+        assert_eq!(cursor_at(&app), Some(("lists", 1)));
+        drop(app.apply_row_key(RowKey::Enter, false));
+        assert_eq!(app.page, Page::List(ListId::Playlist(9)));
+    }
+
+    #[test]
+    fn keys_do_nothing_to_rows_while_a_playlist_is_named() {
+        let mut app = favorites_page(2);
+        drop(app.update(Message::NewPlaylist(None)));
+        drop(app.row_key_pressed(RowKey::Down));
+        assert_eq!(cursor_at(&app), None);
+        drop(app.update(Message::CancelPlaylistEditor));
+        drop(app.row_key_pressed(RowKey::Down));
+        assert_eq!(cursor_at(&app), Some(("favorites", 0)));
     }
 
     #[test]

@@ -107,6 +107,13 @@ impl App {
     /// variant it is drawn at. Lists use the windows their views render, so the
     /// covers requested are the ones on screen.
     pub(super) fn current_page_artwork(&self) -> Vec<CoverRequest> {
+        let mut requests = self.page_artwork();
+        // The Save panel draws over the page.
+        requests.extend(self.save_dialog_artwork());
+        requests
+    }
+
+    fn page_artwork(&self) -> Vec<CoverRequest> {
         match &self.page {
             _ if self.home_on_screen() => {
                 let layout = self.home_layout(self.area);
@@ -130,22 +137,63 @@ impl App {
             }
             Page::Search => self.search_artwork(),
             Page::Library => {
-                let pitch = favorites::favorites_row_pitch(self.preferences.ui_density);
+                // Favorite songs is the first row and has no cover to fetch.
                 let range = layout::virtual_range(
-                    self.favorites.len(),
+                    self.playlists.len() + 1,
+                    self.lists_scroll.y,
+                    self.area.height,
+                    library::LIST_ROW_PITCH,
+                    4,
+                );
+                range
+                    .filter_map(|row| row.checked_sub(1))
+                    .filter_map(|position| self.playlists.get(position))
+                    .flat_map(|playlist| {
+                        let list = ListId::Playlist(playlist.id);
+                        let variant = self.list_cover_variant(list, library::LIST_COVER);
+                        self.list_cover_urls(list)
+                            .into_iter()
+                            .map(move |url| (url.to_owned(), variant))
+                    })
+                    .collect()
+            }
+            Page::List(list) => {
+                let list = *list;
+                let pitch = library::song_row_pitch(self.preferences.ui_density);
+                let songs = self.list_songs(list).unwrap_or_default();
+                let range = layout::virtual_range(
+                    songs.len(),
                     self.library_scroll.y,
                     self.area.height,
                     pitch,
                     8,
                 );
-                self.favorites
-                    .iter()
-                    .skip(range.start)
-                    .take(range.len())
-                    .filter_map(|track| {
+                let size = library::header_cover(self.area.width);
+                let variant = self.list_cover_variant(list, size);
+                let mut requests: Vec<CoverRequest> = self
+                    .list_cover_urls(list)
+                    .into_iter()
+                    .map(|url| (url.to_owned(), variant))
+                    .collect();
+                requests.extend(songs.iter().skip(range.start).take(range.len()).filter_map(
+                    |track| {
                         cover_request(track.thumbnail_url.as_deref(), crate::artwork::THUMB_MAX)
-                    })
-                    .collect()
+                    },
+                ));
+                // The covers to choose from, while the playlist is edited.
+                if self
+                    .playlist_editor
+                    .as_ref()
+                    .is_some_and(|editor| matches!(editor.target, PlaylistEditTarget::Edit(_)))
+                {
+                    requests.extend(
+                        library::cover_choices(songs)
+                            .into_iter()
+                            .chain(playlists::automatic_cover(songs))
+                            .map(|url| (url.to_owned(), crate::artwork::THUMB_MAX)),
+                    );
+                }
+                requests
             }
             Page::NowPlaying => {
                 let pitch = self.preferences.ui_density.queue_row_pitch();

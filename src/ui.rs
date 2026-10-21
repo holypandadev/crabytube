@@ -1,14 +1,16 @@
 mod artwork_glue;
 mod collection;
 mod diagnostics;
-mod favorites;
+mod drag;
 mod home;
 mod home_panels;
 mod keyboard;
 mod layout;
+mod library;
 mod messages;
 mod now_playing;
 mod playback_glue;
+mod playlists;
 mod settings;
 mod shell;
 mod subscriptions;
@@ -25,7 +27,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::preferences::{Persistence, Preferences, RepeatMode, Snapshot};
+use crate::preferences::{Persistence, Playlist, Preferences, RepeatMode, Snapshot};
 use iced::widget::image;
 use iced::{Element, Subscription, Task};
 use rand::{Rng, seq::SliceRandom};
@@ -46,7 +48,8 @@ pub use diagnostics::{
 };
 use iced::widget::operation::{self, AbsoluteOffset};
 use messages::{
-    Confirmation, Message, NowPlayingTab, Page, PendingConfirmation, Preference, RowMenu,
+    Confirmation, DragList, ListId, Message, NowPlayingTab, Page, PendingConfirmation,
+    PlaylistEditTarget, PlaylistEditor, PlaylistNotice, Preference, RowDrag, RowMenu,
 };
 
 /// Where the scrolled lists stood.
@@ -54,6 +57,7 @@ use messages::{
 struct ListScroll {
     search: AbsoluteOffset,
     library: AbsoluteOffset,
+    lists: AbsoluteOffset,
     queue: AbsoluteOffset,
     collection: f32,
 }
@@ -109,7 +113,29 @@ struct App {
     state_recovery: Option<String>,
     favorites: Arc<Vec<Track>>,
     favorites_context: Arc<[Track]>,
-    library_notice: Option<String>,
+    /// The user's playlists, in the order the user put them.
+    playlists: Arc<Vec<Playlist>>,
+    /// The songs in any playlist, so a heart can tell at once that its song is saved.
+    in_playlists: HashSet<String>,
+    /// The fields for a playlist's name and cover, while they are open.
+    playlist_editor: Option<PlaylistEditor>,
+    /// The song whose Save panel is open: the lists it is in, and the others it can go to.
+    save_dialog: Option<Track>,
+    /// Why the last change to a list did nothing, shown in the Save panel or the Library page.
+    playlist_notice: Option<PlaylistNotice>,
+    /// The row being dragged to another place in its list.
+    row_drag: Option<RowDrag>,
+    /// The edge of the dragged row's list the pointer is at, which scrolls the list on its own.
+    drag_edge: drag::Edge,
+    /// The height of the dragged row's list, as its area last reported it.
+    drag_list_height: f32,
+    /// Bumped when the list stops scrolling on its own; only the newest tick scrolls it.
+    drag_tick: u64,
+    /// Where the Library page's list of lists stood.
+    lists_scroll: AbsoluteOffset,
+    /// The playlist's name, not the search, is the text typed in last. A text field takes the
+    /// Escape that unfocuses it, so this tells whose Escape it was.
+    playlist_name_typed: bool,
     page: Page,
     history: Vec<Page>,
     forward: Vec<Page>,
@@ -319,6 +345,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::ConfirmTurnOffHistory
         | Message::ResetSettings
         | Message::ClearHistory
+        | Message::DeletePlaylist(_)
         | Message::ConfirmationExpired(_)
         | Message::PlaybackTick
         | Message::PlaybackStatusChanged(_)
@@ -385,6 +412,10 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::LyricsScrolled(_)
         | Message::SearchScrolled { .. }
         | Message::LibraryScrolled(_)
+        | Message::LibraryListsScrolled(_)
+        | Message::DragEntered(_)
+        | Message::DragEdge(..)
+        | Message::DragTick(_)
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
         | Message::CarouselScrolled(_)
@@ -667,6 +698,7 @@ impl App {
         self.scroll_before_tray = Some(ListScroll {
             search: self.search_scroll,
             library: self.library_scroll,
+            lists: self.lists_scroll,
             queue: self.queue_scroll,
             collection: self.collection_scroll,
         });
@@ -772,6 +804,7 @@ impl App {
         // Held while the message runs, so a change to either list makes a new one to compare.
         let favorites_before = Arc::clone(&self.favorites);
         let recent_before = Arc::clone(&self.recent);
+        let playlists_before = Arc::clone(&self.playlists);
         let task = self.update_inner(message);
         // Rows are numbered within their list: a menu for a row that moved or went is closed.
         if self.queue_generation != queue_before
@@ -779,6 +812,9 @@ impl App {
             || !Arc::ptr_eq(&self.recent, &recent_before)
         {
             self.row_menu = None;
+        }
+        if !Arc::ptr_eq(&self.playlists, &playlists_before) {
+            self.index_playlist_songs();
         }
         // While synced lyrics are on screen the progress tick is off and their wake-ups drive the
         // view, so one must always be on its way. Opening the Lyrics tab, lyrics that arrive and a
@@ -891,6 +927,27 @@ impl App {
             | Message::AddToQueue(..)
             | Message::StartRadio(..)
             | Message::StartRadioLoaded { .. } => return self.update_playback(message),
+            Message::OpenSaveDialog(..)
+            | Message::CloseSaveDialog
+            | Message::ToggleSaved { .. }
+            | Message::NewPlaylist(..)
+            | Message::EditPlaylist(..)
+            | Message::PlaylistNameChanged(..)
+            | Message::PlaylistCoverChosen(..)
+            | Message::SubmitPlaylistEditor
+            | Message::CancelPlaylistEditor
+            | Message::RemoveFromList { .. }
+            | Message::MoveInList { .. }
+            | Message::MovePlaylist { .. }
+            | Message::PlayPlaylist { .. }
+            | Message::ShufflePlaylist(..)
+            | Message::AskDeletePlaylist(..)
+            | Message::DeletePlaylist(..)
+            | Message::DragPressed { .. }
+            | Message::DragEntered(..)
+            | Message::DragEdge(..)
+            | Message::DragTick(..)
+            | Message::DragReleased => return self.update_playlists(message),
             Message::CatalogCompleted { request_id, result } => {
                 if request_id != self.search_request_id {
                     return Task::none();
@@ -1468,38 +1525,6 @@ impl App {
                     return self.navigate(Page::NowPlaying);
                 }
             }
-            Message::ToggleLike(video_id) => {
-                if !self.liked.contains(&video_id)
-                    && self.favorites.len() >= crate::preferences::MAX_LOCAL_FAVORITES
-                {
-                    self.library_notice = Some(format!(
-                        "Local favorites are limited to {} tracks.",
-                        crate::preferences::MAX_LOCAL_FAVORITES
-                    ));
-                    return Task::none();
-                }
-                self.library_notice = None;
-                if self.liked.contains(&video_id) {
-                    self.liked.remove(&video_id);
-                    Arc::make_mut(&mut self.favorites).retain(|t| t.video_id != video_id);
-                    self.favorites_context = Arc::from(self.favorites.as_slice());
-                } else {
-                    // The playing track counts too: after an import it may be in neither list.
-                    let track = self
-                        .queue
-                        .iter()
-                        .chain(self.search_results.iter())
-                        .chain(self.playback_status.track.iter())
-                        .find(|t| t.video_id == video_id)
-                        .cloned();
-                    if let Some(track) = track {
-                        Arc::make_mut(&mut self.favorites).push(track);
-                        self.favorites_context = Arc::from(self.favorites.as_slice());
-                        self.liked.insert(video_id);
-                    }
-                }
-                self.persist();
-            }
             Message::SetNowPlayingTab(tab) => {
                 self.now_playing_tab = tab;
                 if tab == NowPlayingTab::Queue {
@@ -1836,6 +1861,10 @@ impl App {
                 self.library_scroll = offset;
                 return self.scroll_preload_task();
             }
+            Message::LibraryListsScrolled(offset) => {
+                self.lists_scroll = offset;
+                return self.scroll_preload_task();
+            }
             Message::QueueScrolled(offset) => {
                 self.queue_scroll = offset;
                 return self.scroll_preload_task();
@@ -1900,6 +1929,12 @@ impl App {
                     }
                 }
             },
+            Message::SearchFieldEscape { .. }
+                if self.playlist_editor.is_some() && self.playlist_name_typed =>
+            {
+                // Escape in the playlist's name field closes it, unsaved.
+                self.playlist_editor = None;
+            }
             Message::SearchFieldEscape { repeat: true } => {
                 // A held Escape acts once; the field it unfocused again takes the focus back.
                 return operation::focus("search-field");
@@ -1920,6 +1955,7 @@ impl App {
                 }
             }
             Message::SearchChanged(query) => {
+                self.playlist_name_typed = false;
                 // Typing again leaves suggestion browsing.
                 self.typed_query = None;
                 self.suggestion_index = None;
@@ -2020,7 +2056,8 @@ impl App {
                     if repeat && !(suggestion_arrow && self.show_suggestions) {
                         return Task::none();
                     }
-                    // Escape priority: suggestions > search field > row menu > Now Playing > Settings.
+                    // Escape priority: suggestions > search field > Save panel > playlist name > row
+                    // menu > Now Playing > Settings.
                     if matches!(key, Key::Named(Named::Escape)) {
                         if self.show_suggestions {
                             if let Some(typed) = self.typed_query.take() {
@@ -2350,27 +2387,6 @@ impl App {
                     Some(menu)
                 };
             }
-            Message::LikeTrack(mut track) => {
-                self.row_menu = None;
-                let known = self
-                    .queue
-                    .iter()
-                    .chain(self.search_results.iter())
-                    .any(|queued| queued.video_id == track.video_id);
-                if self.liked.contains(&track.video_id) || known {
-                    return self.update(Message::ToggleLike(track.video_id));
-                }
-                if self.favorites.len() >= crate::preferences::MAX_LOCAL_FAVORITES {
-                    return Task::none();
-                }
-                track.duration_secs = track
-                    .duration_secs
-                    .or_else(|| self.stored_duration_secs(&track.video_id));
-                self.liked.insert(track.video_id.clone());
-                Arc::make_mut(&mut self.favorites).push(track);
-                self.favorites_context = Arc::from(self.favorites.as_slice());
-                self.persist();
-            }
             Message::ResetSettings => {
                 self.confirmation = None;
                 let current = std::mem::take(&mut self.preferences);
@@ -2455,7 +2471,17 @@ impl App {
             state_recovery: None,
             favorites: Arc::default(),
             favorites_context: Arc::from([]),
-            library_notice: None,
+            playlists: Arc::default(),
+            in_playlists: HashSet::new(),
+            playlist_editor: None,
+            save_dialog: None,
+            playlist_notice: None,
+            row_drag: None,
+            drag_edge: drag::Edge::None,
+            drag_list_height: 0.0,
+            drag_tick: 0,
+            lists_scroll: AbsoluteOffset::default(),
+            playlist_name_typed: false,
             page: Page::Home,
             history: Vec::new(),
             forward: Vec::new(),
@@ -2596,6 +2622,8 @@ impl App {
                 app.recent = saved.recent.clone();
                 app.favorites = saved.favorites.clone();
                 app.favorites_context = Arc::from(app.favorites.as_slice());
+                app.playlists = saved.playlists.clone();
+                app.index_playlist_songs();
                 app.liked = app.favorites.iter().map(|t| t.video_id.clone()).collect();
                 app.persistence = Some(Persistence::start(path));
             }
@@ -2686,7 +2714,11 @@ impl App {
     /// Escape when the search field does not have the focus: closes the row menu, or goes back from
     /// Now Playing, Settings or a collection.
     fn escape_outside_search(&mut self) -> Task<Message> {
-        if self.row_menu.is_some() {
+        if self.save_dialog.is_some() {
+            return self.update(Message::CloseSaveDialog);
+        } else if self.playlist_editor.is_some() {
+            self.playlist_editor = None;
+        } else if self.row_menu.is_some() {
             self.row_menu = None;
         } else if matches!(self.page, Page::NowPlaying) && !self.back_available() {
             // Nothing to go back to: Now Playing is left for Home, and Forward can return to it.
@@ -2694,7 +2726,7 @@ impl App {
             return self.navigate_internal(Page::Home, false);
         } else if matches!(
             self.page,
-            Page::NowPlaying | Page::Settings | Page::CollectionDetail(_)
+            Page::NowPlaying | Page::Settings | Page::CollectionDetail(_) | Page::List(_)
         ) {
             return self.update(Message::Back);
         }
@@ -2751,6 +2783,7 @@ impl App {
             queue_index: self.queue_index,
             history: Arc::clone(&self.search_history),
             favorites: Arc::clone(&self.favorites),
+            playlists: Arc::clone(&self.playlists),
             recent: Arc::clone(&self.recent),
             autoplay_added: self.radio_track_ids.iter().cloned().collect(),
             unshuffled_order: self.unshuffled_order.clone(),
@@ -2877,7 +2910,12 @@ impl App {
         self.recent = snapshot.recent;
         self.favorites = snapshot.favorites;
         self.favorites_context = Arc::from(self.favorites.as_slice());
-        self.library_notice = None;
+        self.playlists = snapshot.playlists;
+        self.index_playlist_songs();
+        self.playlist_editor = None;
+        self.save_dialog = None;
+        self.playlist_notice = None;
+        self.row_drag = None;
         self.liked = self.favorites.iter().map(|t| t.video_id.clone()).collect();
         self.persist();
         let language = self.update(Message::Preference(Preference::UiLanguage(
@@ -3157,6 +3195,7 @@ impl App {
     fn restore_list_scroll(&mut self, scroll: ListScroll) -> Task<Message> {
         self.search_scroll = scroll.search;
         self.library_scroll = scroll.library;
+        self.lists_scroll = scroll.lists;
         self.queue_scroll = scroll.queue;
         self.collection_scroll = scroll.collection;
         if let Page::CollectionDetail(target) = self.page.clone() {
@@ -3174,6 +3213,7 @@ impl App {
         Task::batch([
             operation::scroll_to("search-content", scroll.search),
             operation::scroll_to("library-content", scroll.library),
+            operation::scroll_to("library-lists", scroll.lists),
             operation::scroll_to("queue-content", scroll.queue),
             operation::scroll_to(
                 "collection-content",
@@ -3383,6 +3423,9 @@ impl App {
         self.invalidate_suggestions();
         self.row_menu = None;
         self.row_cursor = None;
+        // A playlist's fields belong to the page they were opened on, and a drag to its list.
+        self.playlist_editor = None;
+        self.row_drag = None;
         self.page = page.clone();
         if self.page == Page::Home {
             self.enter_home();
@@ -3394,6 +3437,13 @@ impl App {
                 self.preload_current_page_artwork(),
             ])
         } else if self.page == Page::Library {
+            Task::batch([
+                operation::scroll_to("library-lists", self.lists_scroll),
+                self.preload_current_page_artwork(),
+            ])
+        } else if let Page::List(_) = page {
+            // A list opens at its top.
+            self.library_scroll = AbsoluteOffset::default();
             Task::batch([
                 operation::scroll_to("library-content", self.library_scroll),
                 self.preload_current_page_artwork(),
@@ -7050,7 +7100,10 @@ mod tests {
         let mut app = App::default();
         app.playback_status.track = Some(fixture_track("playing"));
         app.playback_status.duration = Some(Duration::from_secs(215));
-        drop(app.update(Message::LikeTrack(fixture_track("playing"))));
+        drop(app.update(Message::ToggleSaved {
+            list: ListId::Favorites,
+            track: fixture_track("playing"),
+        }));
         assert_eq!(app.favorites[0].duration_secs, Some(215));
     }
 

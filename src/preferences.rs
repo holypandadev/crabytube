@@ -14,6 +14,12 @@ use std::{
 pub const MAX_QUEUE_TRACKS: usize = 2_000;
 pub const MAX_LOCAL_FAVORITES: usize = 10_000;
 pub const MAX_RECENT_PLAYS: usize = 12;
+pub const MAX_PLAYLISTS: usize = 100;
+pub const MAX_PLAYLIST_TRACKS: usize = 2_000;
+/// The songs of all playlists together, so that with the favorites and the queue the saved state
+/// stays well under `MAX_STATE_BYTES`.
+pub const MAX_PLAYLIST_TRACKS_TOTAL: usize = 10_000;
+pub const MAX_PLAYLIST_NAME_CHARS: usize = 80;
 pub const MAX_STATE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LYRICS_OFFSETS: usize = 500;
 const MAX_LYRICS_OFFSET_VIDEO_ID_BYTES: usize = 256;
@@ -518,6 +524,52 @@ impl RecentPlay {
     }
 }
 
+/// A list of songs that the user made and named. A song is in it once.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Playlist {
+    /// Tells the playlists apart while the state lasts.
+    pub id: u64,
+    pub name: String,
+    pub tracks: Vec<Track>,
+    /// The cover the user chose among the songs' covers. Without one, the covers of the first
+    /// songs make it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover: Option<String>,
+}
+
+impl Playlist {
+    pub fn contains(&self, video_id: &str) -> bool {
+        self.tracks.iter().any(|track| track.video_id == video_id)
+    }
+}
+
+/// The longest cover address kept, as for a song's cover.
+const MAX_COVER_URL_BYTES: usize = 2_048;
+
+/// A playlist name as it is kept: without the spaces at its ends and with each run of spaces
+/// inside it made one, at most `MAX_PLAYLIST_NAME_CHARS` characters. `None` when nothing is left.
+pub fn clean_playlist_name(name: &str) -> Option<String> {
+    let joined = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let capped: String = joined.chars().take(MAX_PLAYLIST_NAME_CHARS).collect();
+    let capped = capped.trim_end();
+    (!capped.is_empty()).then(|| capped.to_owned())
+}
+
+/// The id for a new playlist: one more than the largest in use, or the smallest free one should
+/// the largest be the last there is.
+pub fn next_playlist_id(playlists: &[Playlist]) -> u64 {
+    let largest = playlists
+        .iter()
+        .map(|playlist| playlist.id)
+        .max()
+        .unwrap_or(0);
+    largest.checked_add(1).unwrap_or_else(|| {
+        let used: HashSet<u64> = playlists.iter().map(|playlist| playlist.id).collect();
+        (1..).find(|id| !used.contains(id)).unwrap_or(1)
+    })
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Snapshot {
@@ -527,6 +579,9 @@ pub struct Snapshot {
     pub queue_index: Option<usize>,
     pub history: Arc<Vec<String>>,
     pub favorites: Arc<Vec<Track>>,
+    /// The user's playlists, in the order they were made.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub playlists: Arc<Vec<Playlist>>,
     /// Newest first, without repeats.
     pub recent: Arc<Vec<RecentPlay>>,
     /// The queued tracks that Autoplay added, by video id. Turning Autoplay off takes the ones that
@@ -614,6 +669,69 @@ impl Snapshot {
         let mut seen = HashSet::new();
         Arc::make_mut(&mut self.favorites).retain(|track| seen.insert(track.video_id.clone()));
         Arc::make_mut(&mut self.favorites).truncate(MAX_LOCAL_FAVORITES);
+        self.normalize_playlists();
+    }
+
+    /// Keeps the playlists within their limits: names cleaned, each id used once, each song once in
+    /// a playlist, and the counts capped. Playlists that come out right are left as they are, so
+    /// the lists the app shares are not copied for nothing.
+    fn normalize_playlists(&mut self) {
+        let mut ids = HashSet::new();
+        let mut total = 0;
+        let in_order = self.playlists.len() <= MAX_PLAYLISTS
+            && self.playlists.iter().all(|playlist| {
+                let mut songs = HashSet::new();
+                let fits = playlist.tracks.len() <= MAX_PLAYLIST_TRACKS
+                    && total + playlist.tracks.len() <= MAX_PLAYLIST_TRACKS_TOTAL;
+                total += playlist.tracks.len();
+                fits && playlist.id != 0
+                    && ids.insert(playlist.id)
+                    && playlist
+                        .cover
+                        .as_ref()
+                        .is_none_or(|cover| !cover.is_empty() && cover.len() <= MAX_COVER_URL_BYTES)
+                    && clean_playlist_name(&playlist.name).as_deref() == Some(&playlist.name)
+                    && playlist.tracks.iter().all(|track| {
+                        !track.video_id.is_empty()
+                            && songs.insert(track.video_id.as_str())
+                            && track_within_caps(track)
+                    })
+            });
+        if in_order {
+            return;
+        }
+        let playlists = Arc::make_mut(&mut self.playlists);
+        playlists.truncate(MAX_PLAYLISTS);
+        let mut ids = HashSet::new();
+        let mut total = 0;
+        for index in 0..playlists.len() {
+            if playlists[index].id == 0 || !ids.insert(playlists[index].id) {
+                let id = next_playlist_id(playlists);
+                playlists[index].id = id;
+                ids.insert(id);
+            }
+            let playlist = &mut playlists[index];
+            playlist.name =
+                clean_playlist_name(&playlist.name).unwrap_or_else(|| "Playlist".to_owned());
+            if playlist
+                .cover
+                .as_ref()
+                .is_some_and(|cover| cover.is_empty() || cover.len() > MAX_COVER_URL_BYTES)
+            {
+                playlist.cover = None;
+            }
+            // Capped first, so two ids that only differ past the cap count as one song.
+            for track in &mut playlist.tracks {
+                cap_track(track);
+            }
+            let mut songs = HashSet::new();
+            playlist
+                .tracks
+                .retain(|track| !track.video_id.is_empty() && songs.insert(track.video_id.clone()));
+            let room = MAX_PLAYLIST_TRACKS.min(MAX_PLAYLIST_TRACKS_TOTAL - total);
+            playlist.tracks.truncate(room);
+            total += playlist.tracks.len();
+        }
     }
 }
 pub fn state_path() -> PathBuf {
@@ -730,6 +848,18 @@ fn write_private_synced(path: &Path, data: &[u8]) -> Result<(), String> {
     let mut file = options.open(path).map_err(|e| e.to_string())?;
     file.write_all(data).map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())
+}
+
+/// Whether `cap_track` would leave the track as it is.
+fn track_within_caps(track: &Track) -> bool {
+    track.video_id.len() <= 256
+        && track.title.len() <= 512
+        && track.artist.len() <= 1_024
+        && track.album.as_ref().is_none_or(|album| album.len() <= 512)
+        && track
+            .thumbnail_url
+            .as_ref()
+            .is_none_or(|url| url.len() <= 2_048)
 }
 
 fn cap_track(track: &mut Track) {
@@ -1597,5 +1727,191 @@ mod tests {
         assert!(!persistence.failing());
         drop(persistence);
         let _ = std::fs::remove_file(path);
+    }
+
+    fn listed(id: &str) -> Track {
+        Track {
+            video_id: id.into(),
+            title: id.into(),
+            artist: String::new(),
+            album: None,
+            artist_page: None,
+            album_page: None,
+            thumbnail_url: None,
+            duration_secs: None,
+        }
+    }
+
+    fn playlist(id: u64, name: &str, songs: &[&str]) -> Playlist {
+        Playlist {
+            id,
+            name: name.into(),
+            tracks: songs.iter().map(|song| listed(song)).collect(),
+            cover: None,
+        }
+    }
+
+    #[test]
+    fn a_playlist_name_is_trimmed_and_cut_and_blank_is_none() {
+        assert_eq!(
+            clean_playlist_name("  Road \t trip\n").as_deref(),
+            Some("Road trip")
+        );
+        assert_eq!(clean_playlist_name(" \n\t "), None);
+        assert_eq!(clean_playlist_name(""), None);
+        let long = format!("{} tail", "x".repeat(MAX_PLAYLIST_NAME_CHARS - 1));
+        // Cut where a space would end the name: the space goes too.
+        assert_eq!(
+            clean_playlist_name(&long),
+            Some("x".repeat(MAX_PLAYLIST_NAME_CHARS - 1))
+        );
+        let wide = "日".repeat(MAX_PLAYLIST_NAME_CHARS + 5);
+        assert_eq!(
+            clean_playlist_name(&wide).map(|name| name.chars().count()),
+            Some(MAX_PLAYLIST_NAME_CHARS)
+        );
+    }
+
+    #[test]
+    fn a_new_playlist_id_is_free() {
+        assert_eq!(next_playlist_id(&[]), 1);
+        assert_eq!(
+            next_playlist_id(&[playlist(3, "a", &[]), playlist(7, "b", &[])]),
+            8
+        );
+        assert_eq!(
+            next_playlist_id(&[playlist(u64::MAX, "a", &[]), playlist(1, "b", &[])]),
+            2
+        );
+    }
+
+    #[test]
+    fn saved_playlists_in_order_are_kept_as_they_are() {
+        let mut snapshot = Snapshot {
+            playlists: Arc::new(vec![
+                playlist(1, "Mix", &["a", "b"]),
+                playlist(2, "Gym", &["a"]),
+            ]),
+            ..Snapshot::default()
+        };
+        let before = Arc::clone(&snapshot.playlists);
+        snapshot.normalize();
+        // Nothing to mend, so nothing is copied.
+        assert!(Arc::ptr_eq(&before, &snapshot.playlists));
+    }
+
+    #[test]
+    fn saved_playlists_are_mended_on_reading() {
+        let mut snapshot = Snapshot {
+            playlists: Arc::new(vec![
+                playlist(0, "  No   id ", &["a", "a", "", "b"]),
+                playlist(5, "", &["c"]),
+                playlist(5, "Same id", &[]),
+            ]),
+            ..Snapshot::default()
+        };
+        snapshot.normalize();
+        let playlists = &snapshot.playlists;
+        let ids: HashSet<u64> = playlists.iter().map(|playlist| playlist.id).collect();
+        assert_eq!(ids.len(), 3, "{playlists:?}");
+        assert!(!ids.contains(&0));
+        assert_eq!(playlists[0].name, "No id");
+        assert_eq!(
+            playlists[0]
+                .tracks
+                .iter()
+                .map(|track| track.video_id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(playlists[1].name, "Playlist");
+        assert_eq!(playlists[1].id, 5);
+        // Mended once, the state reads the same again.
+        let mended = snapshot.playlists.clone();
+        snapshot.normalize();
+        assert_eq!(snapshot.playlists, mended);
+    }
+
+    #[test]
+    fn saved_playlists_are_held_to_their_limits() {
+        let many: Vec<Playlist> = (1..=MAX_PLAYLISTS as u64 + 3)
+            .map(|id| playlist(id, &format!("P{id}"), &[]))
+            .collect();
+        let mut snapshot = Snapshot {
+            playlists: Arc::new(many),
+            ..Snapshot::default()
+        };
+        snapshot.normalize();
+        assert_eq!(snapshot.playlists.len(), MAX_PLAYLISTS);
+
+        let songs = |prefix: &str, count: usize| -> Vec<Track> {
+            (0..count)
+                .map(|index| listed(&format!("{prefix}{index}")))
+                .collect()
+        };
+        let lists = MAX_PLAYLIST_TRACKS_TOTAL / MAX_PLAYLIST_TRACKS + 1;
+        let full: Vec<Playlist> = (1..=lists as u64)
+            .map(|id| Playlist {
+                id,
+                name: format!("P{id}"),
+                tracks: songs(&format!("p{id}-"), MAX_PLAYLIST_TRACKS + 10),
+                cover: None,
+            })
+            .collect();
+        let mut snapshot = Snapshot {
+            playlists: Arc::new(full),
+            ..Snapshot::default()
+        };
+        snapshot.normalize();
+        assert!(
+            snapshot
+                .playlists
+                .iter()
+                .all(|playlist| playlist.tracks.len() <= MAX_PLAYLIST_TRACKS)
+        );
+        let total: usize = snapshot
+            .playlists
+            .iter()
+            .map(|playlist| playlist.tracks.len())
+            .sum();
+        assert_eq!(total, MAX_PLAYLIST_TRACKS_TOTAL);
+        assert!(snapshot.playlists.last().unwrap().tracks.is_empty());
+    }
+
+    #[test]
+    fn a_saved_cover_that_is_empty_or_too_long_is_dropped() {
+        let with_cover = |cover: &str| Playlist {
+            cover: Some(cover.into()),
+            ..playlist(1, "Mix", &["a"])
+        };
+        for (cover, kept) in [
+            ("https://example.com/cover.jpg", true),
+            ("", false),
+            (&"x".repeat(MAX_COVER_URL_BYTES + 1), false),
+        ] {
+            let mut snapshot = Snapshot {
+                playlists: Arc::new(vec![with_cover(cover)]),
+                ..Snapshot::default()
+            };
+            snapshot.normalize();
+            assert_eq!(snapshot.playlists[0].cover.is_some(), kept, "{cover:.20}");
+        }
+    }
+
+    #[test]
+    fn a_saved_song_id_too_long_is_cut_and_counted_once() {
+        let long = "v".repeat(300);
+        let mut snapshot = Snapshot {
+            playlists: Arc::new(vec![Playlist {
+                id: 1,
+                name: "Mix".into(),
+                tracks: vec![listed(&format!("{long}1")), listed(&format!("{long}2"))],
+                cover: None,
+            }]),
+            ..Snapshot::default()
+        };
+        snapshot.normalize();
+        assert_eq!(snapshot.playlists[0].tracks.len(), 1);
+        assert_eq!(snapshot.playlists[0].tracks[0].video_id.len(), 256);
     }
 }

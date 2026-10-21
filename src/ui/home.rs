@@ -1048,7 +1048,7 @@ impl App {
 
     /// Inline actions under an opened ••• row.
     pub(super) fn row_actions<'a>(&'a self, track: &'a Track) -> Element<'a, Message> {
-        self.row_actions_with(track, None)
+        self.row_actions_in(track, RowContext::Plain)
     }
 
     /// Inline actions; `queue_index` adds "Remove from queue" for a row in Up Next.
@@ -1057,10 +1057,21 @@ impl App {
         track: &'a Track,
         queue_index: Option<usize>,
     ) -> Element<'a, Message> {
-        let liked = self.liked.contains(&track.video_id);
-        let action = |title: String, message: Message| {
+        self.row_actions_in(
+            track,
+            queue_index.map_or(RowContext::Plain, RowContext::Queue),
+        )
+    }
+
+    /// Inline actions, with those of the list the row is in.
+    pub(super) fn row_actions_in<'a>(
+        &'a self,
+        track: &'a Track,
+        context: RowContext,
+    ) -> Element<'a, Message> {
+        let action = |title: String, message: Option<Message>| {
             button(label(title, TEXT_CAPTION))
-                .on_press(message)
+                .on_press_maybe(message)
                 .padding([6, 12])
                 .style(theme::outline_button)
         };
@@ -1069,24 +1080,20 @@ impl App {
         let mut actions = row![
             action(
                 self.tr("Play next").into_owned(),
-                Message::PlayNext(track.clone())
+                Some(Message::PlayNext(track.clone()))
             ),
             action(
                 self.tr("Add to queue").into_owned(),
-                Message::AddToQueue(track.clone())
+                Some(Message::AddToQueue(track.clone()))
             ),
             action(
                 self.tr("Start radio").into_owned(),
-                Message::StartRadio(track.clone())
+                Some(Message::StartRadio(track.clone()))
             ),
+            // The Save panel, as the heart: Favorite songs, the playlists, or a new one.
             action(
-                self.tr(if liked {
-                    "Remove favorite"
-                } else {
-                    "Add to favorites"
-                })
-                .into_owned(),
-                Message::LikeTrack(track.clone()),
+                self.tr("Add to playlist").into_owned(),
+                Some(Message::OpenSaveDialog(track.clone())),
             ),
         ]
         .spacing(10)
@@ -1095,23 +1102,49 @@ impl App {
         for (label, page) in super::track_actions::go_to_destinations(track) {
             actions = actions.push(action(
                 self.tr(label).into_owned(),
-                Message::OpenCollection(page),
+                Some(Message::OpenCollection(page)),
             ));
         }
-        if let Some(index) = queue_index {
-            actions = actions.push(action(
-                self.tr("Remove from queue").into_owned(),
-                Message::RemoveFromQueue(index),
-            ));
+        match context {
+            RowContext::Plain => {}
+            RowContext::Queue(index) => {
+                actions = actions.push(action(
+                    self.tr("Remove from queue").into_owned(),
+                    Some(Message::RemoveFromQueue(index)),
+                ));
+            }
+            RowContext::List { list, index, count } => {
+                actions = actions
+                    .push(action(
+                        self.tr("Move up").into_owned(),
+                        (index > 0).then_some(Message::MoveInList {
+                            list,
+                            index,
+                            up: true,
+                        }),
+                    ))
+                    .push(action(
+                        self.tr("Move down").into_owned(),
+                        (index + 1 < count).then_some(Message::MoveInList {
+                            list,
+                            index,
+                            up: false,
+                        }),
+                    ))
+                    .push(action(
+                        self.tr("Remove from playlist").into_owned(),
+                        Some(Message::RemoveFromList { list, index }),
+                    ));
+            }
         }
         actions = actions.push(action(
             self.tr("Copy title").into_owned(),
-            Message::CopyToClipboard(track.title.clone()),
+            Some(Message::CopyToClipboard(track.title.clone())),
         ));
         if !track.artist.trim().is_empty() {
             actions = actions.push(action(
                 self.tr("Copy artist").into_owned(),
-                Message::CopyToClipboard(track.artist.clone()),
+                Some(Message::CopyToClipboard(track.artist.clone())),
             ));
         }
         if self.copy_notice.is_some() {
@@ -1174,6 +1207,20 @@ impl App {
         }
         grid.into()
     }
+}
+
+/// The list an opened row is in, for the actions that only it has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RowContext {
+    Plain,
+    /// A row of Up Next, at this place in the queue.
+    Queue(usize),
+    /// A song of one of the user's lists, at `index` of its `count`.
+    List {
+        list: super::messages::ListId,
+        index: usize,
+        count: usize,
+    },
 }
 
 /// `Title — Artist`, or just the title when the catalog omitted the artist.

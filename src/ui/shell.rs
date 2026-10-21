@@ -85,7 +85,7 @@ pub(super) fn display_title(title: &str) -> &str {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Home,
-    Favorites,
+    Library,
     Settings,
 }
 
@@ -93,7 +93,7 @@ impl Tab {
     /// The tab a page belongs to; pages reached from Home belong to Home.
     fn of_page(page: &Page) -> Self {
         match page {
-            Page::Library => Self::Favorites,
+            Page::Library | Page::List(_) => Self::Library,
             Page::Settings => Self::Settings,
             _ => Self::Home,
         }
@@ -107,7 +107,8 @@ impl App {
     fn tab_origin(&self) -> (Tab, bool) {
         match &self.page {
             Page::Home => (Tab::Home, true),
-            Page::Library => (Tab::Favorites, true),
+            Page::Library => (Tab::Library, true),
+            Page::List(_) => (Tab::Library, false),
             Page::Settings => (Tab::Settings, true),
             Page::NowPlaying => (self.history.last().map_or(Tab::Home, Tab::of_page), false),
             Page::Search | Page::CollectionDetail(_) => (Tab::Home, false),
@@ -138,7 +139,8 @@ impl App {
         match &self.page {
             Page::Search => self.search_page(area),
             Page::Settings => self.settings_page(area),
-            Page::Library => self.favorites_page(area),
+            Page::Library => self.library_page(area),
+            Page::List(list) => self.list_page(*list, area),
             Page::NowPlaying => self.now_playing_page(area),
             Page::CollectionDetail(_) => self.collection_content(area),
             Page::Home => self.home_page(area),
@@ -194,11 +196,38 @@ impl App {
             .height(Length::Fill)
             .padding(theme::hairline())
             .style(theme::frame);
+        #[cfg_attr(target_os = "macos", allow(unused_mut))]
+        let mut layers = iced::widget::stack![framed];
         // The system frame of macOS has its own border to resize by.
-        #[cfg(target_os = "macos")]
-        return framed.into();
         #[cfg(not(target_os = "macos"))]
-        iced::widget::stack![framed, resize_grips()].into()
+        {
+            layers = layers.push(resize_grips());
+        }
+        // The Save panel sits over a dimmed window; a press outside it closes it.
+        if let Some(track) = &self.save_dialog {
+            layers = layers
+                .push(iced::widget::opaque(
+                    mouse_area(
+                        container(Space::new())
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .style(theme::scrim),
+                    )
+                    .on_press(Message::CloseSaveDialog),
+                ))
+                .push(
+                    // Held from the top, so the panel grows down as lists are added to it.
+                    container(iced::widget::opaque(self.save_dialog_view(track)))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .center_x(Length::Fill)
+                        .padding(iced::Padding {
+                            top: self.save_panel_top(),
+                            ..iced::Padding::ZERO
+                        }),
+                );
+        }
+        layers.into()
     }
 
     /// The header: one bar with the brand on the left, Back, the tabs and Forward centred on the window
@@ -272,23 +301,13 @@ impl App {
         } else {
             (brand, buttons)
         };
-        let tabs: f32 = self
-            .tab_labels(false)
-            .iter()
-            .map(|title| tab_width(title))
-            .sum();
+        let tabs: f32 = self.tab_labels().iter().map(|title| tab_width(title)).sum();
         self.window_width >= 2.0 * left.max(right) + tabs + 2.0 * SIDE_GAP
     }
 
-    /// The three tab labels in the interface language. The second row uses the short name for
-    /// Favorites.
-    fn tab_labels(&self, second_row: bool) -> [String; 3] {
-        let favorites = if second_row {
-            "Favorites"
-        } else {
-            "Favorite songs"
-        };
-        ["Home", favorites, "Settings"].map(|title| self.tr(title).into_owned())
+    /// The three tab labels in the interface language.
+    fn tab_labels(&self) -> [String; 3] {
+        ["Home", "Library", "Settings"].map(|title| self.tr(title).into_owned())
     }
 
     /// The tabs as text with an underline: in the bar each is as wide as its label, in the second
@@ -296,10 +315,10 @@ impl App {
     fn tab_row(&self, second_row: bool) -> Element<'_, Message> {
         let (origin, current) = self.tab_origin();
         let height = if second_row { TAB_ROW_H } else { HEADER_H };
-        let labels = self.tab_labels(second_row);
+        let labels = self.tab_labels();
         let tabs = [
             (Page::Home, Tab::Home),
-            (Page::Library, Tab::Favorites),
+            (Page::Library, Tab::Library),
             (Page::Settings, Tab::Settings),
         ]
         .into_iter()
@@ -555,10 +574,12 @@ impl App {
         .into()
     }
 
-    pub(super) fn like_button(&self, video_id: Option<&str>, size: f32) -> Element<'_, Message> {
-        let liked = video_id.is_some_and(|id| self.liked.contains(id));
-        button(icon(if liked { "like-filled" } else { "like" }, size, INK))
-            .on_press_maybe(video_id.map(|id| Message::ToggleLike(id.to_owned())))
+    /// The heart of the playing song: filled when it is in one of the user's lists. It opens the
+    /// Save panel.
+    pub(super) fn like_button(&self, track: Option<&Track>, size: f32) -> Element<'_, Message> {
+        let saved = track.is_some_and(|track| self.is_saved(&track.video_id));
+        button(icon(if saved { "like-filled" } else { "like" }, size, INK))
+            .on_press_maybe(track.map(|track| Message::OpenSaveDialog(track.clone())))
             .padding(6)
             .style(theme::icon_button)
             .into()
@@ -727,12 +748,9 @@ impl App {
         .on_press_maybe(track.map(|_| Message::OpenNowPlaying))
         .padding(0)
         .style(theme::bare_button);
-        let left = row![
-            now,
-            self.like_button(track.map(|t| t.video_id.as_str()), 18.0)
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        let left = row![now, self.like_button(track, 18.0)]
+            .spacing(8)
+            .align_y(Alignment::Center);
         let center = column![
             container(self.transport_controls(18.0, !compact)).center_x(Length::Fill),
             self.seek_row(TEXT_CAPTION),
@@ -991,10 +1009,10 @@ mod tests {
             page: Page::Library,
             ..App::default()
         };
-        assert!(app.tab_origin() == (Tab::Favorites, true));
+        assert!(app.tab_origin() == (Tab::Library, true));
         app.page = Page::NowPlaying;
         app.history = vec![Page::Library];
-        assert!(app.tab_origin() == (Tab::Favorites, false));
+        assert!(app.tab_origin() == (Tab::Library, false));
         app.page = Page::Search;
         assert!(app.tab_origin() == (Tab::Home, false));
     }

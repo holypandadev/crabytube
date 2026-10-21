@@ -72,7 +72,7 @@ add the repository, so later versions arrive as updates. If Flatpak asks for a r
 it comes from Flathub. Then start CrabyTube from your application menu.
 
 A Flatpak of version 0.1.0 or 0.1.1 was installed without the repository. Remove it once and
-install the new one; your settings, favorites and queue stay:
+install the new one; your settings, favorites, playlists and queue stay:
 
 ```bash
 flatpak uninstall dev.holypanda.CrabyTube
@@ -147,7 +147,7 @@ there.
   with `flatpak update`, like those of any Flatpak. Versions before 0.1.2 do not check: install 0.1.2
   as described under [Linux](#linux).
 
-Settings, favorites, the queue and the history are kept apart from the app, so an update leaves
+Settings, favorites, playlists, the queue and the history are kept apart from the app, so an update leaves
 them as they are.
 
 Every release carries `update.json`, which names the version and the size and SHA-256 of the

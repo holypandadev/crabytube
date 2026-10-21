@@ -1072,7 +1072,13 @@ impl App {
                     self.seek_playback(Duration::from_secs_f32(position.max(0.0)));
                 }
             }
-            Message::PointerHeld(held) => self.pointer_held = held,
+            Message::PointerHeld(held) => {
+                self.pointer_held = held;
+                // A drag ends where the button goes up, over a row or not.
+                if !held {
+                    return self.finish_row_drag();
+                }
+            }
             Message::PrewarmPlayback => self.playback.prewarm(),
             Message::PlaybackTick => {
                 self.karaoke_tick_pending = false;

@@ -14,7 +14,8 @@ impl App {
                 self.diagnostic_scroll_step = self.diagnostic_scroll_step.wrapping_add(1);
                 let y = (self.diagnostic_scroll_step % 125) as f32 * 24.0;
                 let content = match self.page {
-                    Page::Library => "library-content",
+                    Page::Library => "library-lists",
+                    Page::List(_) => "library-content",
                     Page::Search => "search-content",
                     _ => "home-content",
                 };
@@ -50,9 +51,12 @@ impl App {
                         let tracks: Vec<Track> =
                             self.search_results.iter().take(4).cloned().collect();
                         for track in tracks {
-                            let _ = self.update(Message::LikeTrack(track));
+                            let _ = self.update(Message::ToggleSaved {
+                                list: ListId::Favorites,
+                                track,
+                            });
                         }
-                        self.update(Message::Navigate(Page::Library))
+                        self.update(Message::Navigate(Page::List(ListId::Favorites)))
                     }
                     6 => self.update(Message::OpenNowPlaying),
                     // Opened without a seek: a seek sends a new status, which would hide a view
@@ -174,6 +178,65 @@ impl App {
                             None => Task::none(),
                         }
                     }
+                    19 => {
+                        // Two playlists made from the songs of the results, then the Save panel
+                        // of the first song: the lists that have it are ticked.
+                        let songs: Vec<Track> = self
+                            .search_songs()
+                            .iter()
+                            .filter_map(|item| item.track.clone())
+                            .take(4)
+                            .collect();
+                        let navigation = self.update(Message::Navigate(Page::Search));
+                        if songs.len() < 4 {
+                            return navigation;
+                        }
+                        for (name, first) in [("Tour mix", &songs[1]), ("Late night", &songs[3])] {
+                            drop(self.update(Message::NewPlaylist(Some(first.clone()))));
+                            drop(self.update(Message::PlaylistNameChanged(name.into())));
+                            drop(self.update(Message::SubmitPlaylistEditor));
+                        }
+                        if let Some(mix) = diagnostic_playlist(self) {
+                            for song in [&songs[0], &songs[2], &songs[3]] {
+                                drop(self.update(Message::ToggleSaved {
+                                    list: ListId::Playlist(mix),
+                                    track: song.clone(),
+                                }));
+                            }
+                        }
+                        let panel = self.update(Message::OpenSaveDialog(songs[0].clone()));
+                        Task::batch([navigation, panel])
+                    }
+                    20 => {
+                        drop(self.update(Message::CloseSaveDialog));
+                        self.update(Message::Navigate(Page::Library))
+                    }
+                    21 => match diagnostic_playlist(self) {
+                        Some(id) => {
+                            self.update(Message::Navigate(Page::List(ListId::Playlist(id))))
+                        }
+                        None => Task::none(),
+                    },
+                    22 => match diagnostic_playlist(self) {
+                        Some(id) => self.update(Message::EditPlaylist(id)),
+                        None => Task::none(),
+                    },
+                    23 => match diagnostic_playlist(self) {
+                        Some(id) => {
+                            drop(self.update(Message::CancelPlaylistEditor));
+                            self.update(Message::AskDeletePlaylist(id))
+                        }
+                        None => Task::none(),
+                    },
+                    24 => match diagnostic_playlist(self) {
+                        // The first song dragged two rows down, before it is let go.
+                        Some(id) => {
+                            let list = super::messages::DragList::Songs(ListId::Playlist(id));
+                            drop(self.update(Message::DragPressed { list, index: 0 }));
+                            self.update(Message::DragEntered(2))
+                        }
+                        None => Task::none(),
+                    },
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -371,7 +434,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 /// `--screenshots <dir>`: page name and the wait before each capture. Steps 7 and 8 open the
 /// lyrics without a seek and check that the position moved on between their captures.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 19] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 25] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -391,7 +454,23 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 19] = [
     ("collection-menu", 1_000),
     ("start-radio", 4_000),
     ("artist-page", 3_000),
+    ("save-panel", 1_500),
+    ("library", 1_500),
+    ("playlist", 2_000),
+    ("playlist-edit", 1_200),
+    ("playlist-delete", 1_000),
+    ("playlist-drag", 1_000),
 ];
+
+/// The playlist the tour made, the last of its name.
+#[cfg(feature = "diagnostics")]
+fn diagnostic_playlist(app: &App) -> Option<u64> {
+    app.playlists
+        .iter()
+        .rev()
+        .find(|playlist| playlist.name == "Tour mix")
+        .map(|playlist| playlist.id)
+}
 
 /// The collection the tour opens last: `CRABYTUBE_TOUR_COLLECTION=<browse id>`
 /// picks one, otherwise the first public collection on Home.

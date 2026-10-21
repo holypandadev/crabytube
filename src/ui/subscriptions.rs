@@ -133,8 +133,9 @@ impl App {
     }
 }
 
-/// Escape in the search field: the field takes the key to give up its focus, so `keyboard::listen`
-/// never sees it. It is the only text field, so a taken Escape is always the search field's.
+/// Escape in a text field: the field takes the key to give up its focus, so `keyboard::listen`
+/// never sees it. Nothing else takes Escape, so a taken one is the search field's, or the
+/// playlist name field's when that is the one typed in last (see `playlist_name_typed`).
 fn search_field_escape(
     event: iced::Event,
     status: iced::event::Status,

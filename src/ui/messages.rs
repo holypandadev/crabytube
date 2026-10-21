@@ -7,10 +7,72 @@ pub(super) enum Page {
     #[default]
     Home,
     Search,
+    /// The user's lists: Favorite songs and the playlists.
     Library,
+    /// One of those lists, with its songs.
+    List(ListId),
     Settings,
     NowPlaying,
     CollectionDetail(BrowseTarget),
+}
+
+/// One of the user's lists: Favorite songs, which is always there, or a playlist they made.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(super) enum ListId {
+    #[default]
+    Favorites,
+    /// A playlist, by id.
+    Playlist(u64),
+}
+
+/// A list whose rows can be dragged to another place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DragList {
+    /// The songs of a list.
+    Songs(ListId),
+    /// The playlists on the Library page. Favorite songs stays first.
+    Lists,
+}
+
+/// A row being dragged: the place it was taken from and the place it would land.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RowDrag {
+    pub(super) list: DragList,
+    pub(super) from: usize,
+    pub(super) to: usize,
+    /// It has left its place once. From then on, letting it go never plays a row, even back where
+    /// it started.
+    pub(super) moved: bool,
+}
+
+/// The field for a new playlist's name, or for a playlist's name and cover.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PlaylistEditor {
+    pub(super) target: PlaylistEditTarget,
+    pub(super) name: String,
+    /// The cover chosen: one of the songs' covers, or `None` for the covers of its first songs.
+    pub(super) cover: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum PlaylistEditTarget {
+    /// A new playlist, which starts with the song of the Save panel that opened the field, if any.
+    New(Option<Box<Track>>),
+    /// A new name and cover for this playlist.
+    Edit(u64),
+}
+
+/// Why the last change to a list did nothing, shown where it was asked for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum PlaylistNotice {
+    /// No more playlists can be made.
+    TooManyPlaylists,
+    /// The playlist has no room for another song.
+    PlaylistFull,
+    /// The playlists together have no room for another song.
+    AllFull,
+    /// Favorite songs has no room for another song.
+    FavoritesFull,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -130,7 +192,6 @@ pub(super) enum Message {
     Navigate(Page),
     OpenCollection(BrowseTarget),
     OpenNowPlaying,
-    ToggleLike(String),
     ToggleShuffle,
     CycleRepeat,
     SetNowPlayingTab(NowPlayingTab),
@@ -198,6 +259,7 @@ pub(super) enum Message {
         near_end: bool,
     },
     LibraryScrolled(AbsoluteOffset),
+    LibraryListsScrolled(AbsoluteOffset),
     QueueScrolled(AbsoluteOffset),
     TogglePlayback,
     NextTrack,
@@ -362,8 +424,60 @@ pub(super) enum Message {
         request: u64,
         result: Result<Vec<Track>, String>,
     },
-    /// Likes or unlikes a track that may not be in the queue or results.
-    LikeTrack(Track),
+    /// Opens the Save panel for a song: the lists it is in, and the others it can go to.
+    OpenSaveDialog(Track),
+    CloseSaveDialog,
+    /// Puts the song in the list, or takes it out when it is there.
+    ToggleSaved {
+        list: ListId,
+        track: Track,
+    },
+    /// Opens the field for a new playlist's name. With a song, the playlist starts with it.
+    NewPlaylist(Option<Track>),
+    /// Opens the fields for a playlist's name and cover.
+    EditPlaylist(u64),
+    PlaylistNameChanged(String),
+    /// A cover for the playlist being edited: a song's cover, or `None` for its first songs'.
+    PlaylistCoverChosen(Option<String>),
+    /// Makes the playlist, or saves its name and cover.
+    SubmitPlaylistEditor,
+    CancelPlaylistEditor,
+    RemoveFromList {
+        list: ListId,
+        index: usize,
+    },
+    /// Moves a list's song one place up or down.
+    MoveInList {
+        list: ListId,
+        index: usize,
+        up: bool,
+    },
+    /// Moves a playlist one place up or down on the Library page.
+    MovePlaylist {
+        index: usize,
+        up: bool,
+    },
+    PlayPlaylist {
+        id: u64,
+        index: usize,
+    },
+    ShufflePlaylist(u64),
+    /// The first press on Delete. The playlist goes on the second (`DeletePlaylist`).
+    AskDeletePlaylist(u64),
+    DeletePlaylist(u64),
+    /// The main button went down on a row that can be dragged.
+    DragPressed {
+        list: DragList,
+        index: usize,
+    },
+    /// During a drag, the pointer came onto this row.
+    DragEntered(usize),
+    /// During a drag, the pointer reached an edge of the list, which is this tall.
+    DragEdge(super::drag::Edge, f32),
+    /// The list scrolls a row on while the pointer stays at its edge.
+    DragTick(u64),
+    /// The press of a drag ended over a row.
+    DragReleased,
     /// The first press on Reset. The reset itself waits for the confirmation.
     AskResetSettings,
     /// Resets the preferences. This is also the second press on the Reset confirmation.
@@ -403,4 +517,6 @@ pub(super) enum Confirmation {
     ClearHistory,
     /// Turns the history off, which also clears "Jump back in".
     TurnOffHistory,
+    /// Deletes this playlist.
+    DeletePlaylist(u64),
 }

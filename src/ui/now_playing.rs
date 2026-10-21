@@ -289,7 +289,7 @@ impl App {
             theme::icon_button
         });
         let group = row![
-            self.like_button(Some(track.video_id.as_str()), END_ICON),
+            self.like_button(Some(track), END_ICON),
             self.transport_controls(TRANSPORT_ICON, true),
             super::keyboard::wheel_volume(volume_button),
         ]

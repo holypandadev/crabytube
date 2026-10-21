@@ -26,7 +26,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `home_cache.rs` | Size-capped snapshot of the public Home feed, painted on the next launch while it refreshes. |
 | `artwork.rs` | Artwork downloads, size variants, in-memory LRU and disk cache. |
 | `lyrics.rs` | Lyrics lookup, parsing (LRC, TTML, QRC) and cache. |
-| `preferences.rs` | Versioned local state (`state.json`): preferences, queue, favorites, history; autostart entry. |
+| `preferences.rs` | Versioned local state (`state.json`): preferences, queue, favorites, playlists, history; autostart entry. |
 | `storage.rs`, `temp_cleanup.rs` | Cache usage reporting and selective clearing; removal of leftover temporary files. |
 | `memory.rs` | Shrinks the app's memory use while a BotGuard helper process is running. |
 | `i18n/` | Interface translations: English, Spanish, Brazilian Portuguese, French, German, Italian, Russian, Japanese and Simplified Chinese. English is the key; each language has a file of exact entries and templates for text with numbers or names. |
@@ -131,9 +131,12 @@ covers other than the playing track's are dropped and the freed heap is returned
 - `ui/shell.rs`: window chrome: title bar, tabs and the player bar. The window is undecorated on
   Linux and Windows; on macOS the system frame stays, with a transparent, untitled bar that the
   app's bar fills.
-- Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`), Favorites (`ui/favorites.rs`),
-  album/artist/playlist detail (`ui/collection.rs`), Now Playing with Up Next and Lyrics
-  (`ui/now_playing.rs`) and Settings (`ui/settings.rs`).
+- Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`), the Library and the page of each
+  of the user's lists (`ui/library.rs`), album/artist/playlist detail (`ui/collection.rs`), Now
+  Playing with Up Next and Lyrics (`ui/now_playing.rs`) and Settings (`ui/settings.rs`).
+- `ui/playlists.rs`: the user's lists. Favorite songs is always there; the user makes, edits,
+  orders and deletes playlists. Every heart opens the Save panel, which puts its song in any list
+  or in a new one. `ui/drag.rs` lets list rows and playlists be dragged to another place.
 - `ui/playback_glue.rs`, `ui/artwork_glue.rs`: queue, radio and playback commands; artwork requests
   and fades.
 - `ui/subscriptions.rs`: playback status, timers, window and keyboard events.
@@ -162,7 +165,7 @@ All paths come from the `dirs` crate (`~/.config/crabytube` and `~/.cache/crabyt
 
 | Data | Location | Bounds |
 | --- | --- | --- |
-| Preferences, queue, favorites, search history, lyric offsets | `config/crabytube/state.json` | 16 MiB file; 2,000 queued tracks; 10,000 favorites; 500 per-track lyric offsets |
+| Preferences, queue, favorites, playlists, search history, lyric offsets | `config/crabytube/state.json` | 16 MiB file; 2,000 queued tracks; 10,000 favorites; 100 playlists of up to 2,000 songs, 10,000 in all; 500 per-track lyric offsets |
 | Web client values (`ytcfg`) | `cache/crabytube/runtime.json` | Six hours; dropped on HTTP 403 |
 | Home snapshot (public metadata only) | `cache/crabytube/home-v1-<lang>.json` | 2 MiB |
 | Artwork | `cache/crabytube/artwork/` | 64 MiB / 400 files on disk; 16 MiB / 192 decoded images in memory |
