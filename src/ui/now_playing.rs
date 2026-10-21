@@ -397,7 +397,15 @@ impl App {
             rows =
                 rows.push(Space::new().height(layout::virtual_spacer_height(range.start, pitch)));
         }
-        let text_width = width - cover - 20.0 - 64.0 - 44.0 - 24.0 - HEART_W - 20.0;
+        // On a phone the rows leave out the length and sit closer, so the title keeps its room
+        // beside the buttons a finger needs.
+        let mobile = self.mobile();
+        let gap = if mobile { 12.0 } else { 20.0 };
+        let text_width = if mobile {
+            width - cover - 3.0 * gap - self.row_more_width() - HEART_W - 24.0
+        } else {
+            width - cover - 20.0 - 64.0 - 44.0 - 24.0 - HEART_W - 20.0
+        };
         let dragged = self.dragged_row(DragList::Queue);
         for index in range.clone() {
             let entry = &self.queue[index];
@@ -443,37 +451,37 @@ impl App {
                         .color(ink.secondary),
                 );
             }
-            let main = button(
-                row![
-                    self.cover(
-                        entry.thumbnail_url.as_deref(),
-                        cover,
-                        crate::artwork::THUMB_MAX
-                    ),
-                    names.spacing(6).width(Length::Fill),
-                    label(duration, TEXT_CAPTION).color(ink.secondary),
-                    more,
-                    self.row_heart(
-                        entry,
-                        ink.icon,
-                        current,
-                        cover,
-                        self.row_click(DragList::Queue, Message::OpenSaveDialog(entry.clone()))
-                    ),
-                ]
-                .spacing(20)
-                .align_y(Alignment::Center),
-            )
-            .on_press(self.row_click(DragList::Queue, Message::PlayQueueIndex(index)))
-            .width(Length::Fill)
-            .padding([padding, 8.0])
-            .style(if current {
-                theme::row_button_current
-            } else if cursor {
-                theme::row_button_cursor
-            } else {
-                theme::row_button
-            });
+            let mut cells = row![
+                self.cover(
+                    entry.thumbnail_url.as_deref(),
+                    cover,
+                    crate::artwork::THUMB_MAX
+                ),
+                names.spacing(6).width(Length::Fill),
+            ]
+            .spacing(gap)
+            .align_y(Alignment::Center);
+            if !mobile {
+                cells = cells.push(label(duration, TEXT_CAPTION).color(ink.secondary));
+            }
+            let cells = cells.push(more).push(self.row_heart(
+                entry,
+                ink.icon,
+                current,
+                cover,
+                self.row_click(DragList::Queue, Message::OpenSaveDialog(entry.clone())),
+            ));
+            let main = button(cells)
+                .on_press(self.row_click(DragList::Queue, Message::PlayQueueIndex(index)))
+                .width(Length::Fill)
+                .padding([padding, 8.0])
+                .style(if current {
+                    theme::row_button_current
+                } else if cursor {
+                    theme::row_button_cursor
+                } else {
+                    theme::row_button
+                });
             rows = rows.push(super::keyboard::mark_row(
                 "queue",
                 index,

@@ -248,6 +248,58 @@ impl App {
                         }
                         None => Task::none(),
                     },
+                    // Up next, with a row dragged two places down before it is let go.
+                    25 => {
+                        drop(self.update(Message::PointerHeld(false)));
+                        let open = self.update(Message::OpenNowPlaying);
+                        let tab = self.update(Message::SetNowPlayingTab(NowPlayingTab::Queue));
+                        let pitch = self.preferences.ui_density.queue_row_pitch();
+                        let from = self.queue_index.map_or(0, |current| current + 1);
+                        if from + 2 < self.queue.len() {
+                            let list = super::messages::DragList::Queue;
+                            let offset = self.queue_scroll.y;
+                            let y = |row: f32| row * pitch - offset;
+                            drop(self.update(Message::DragPressed { list, index: from }));
+                            drop(self.update(Message::DragMoved(
+                                iced::Point::new(200.0, y(from as f32 + 0.5)),
+                                600.0,
+                            )));
+                            drop(self.update(Message::DragMoved(
+                                iced::Point::new(220.0, y(from as f32 + 3.0) - 6.0),
+                                600.0,
+                            )));
+                        }
+                        Task::batch([open, tab])
+                    }
+                    // The note after a song is taken out of Up next, with Undo.
+                    26 => {
+                        drop(self.update(Message::PointerHeld(false)));
+                        let last = self.queue.len().saturating_sub(1);
+                        if self.queue_index == Some(last) {
+                            Task::none()
+                        } else {
+                            self.update(Message::RemoveFromQueue(last))
+                        }
+                    }
+                    // Home scrolled to the rows under its first screen.
+                    27 => {
+                        let home = self.update(Message::Navigate(Page::Home));
+                        let layout = self.home_layout(self.area);
+                        let y = layout.hero_height(self.area.height) - 40.0;
+                        Task::batch([
+                            home,
+                            operation::scroll_to(
+                                super::home::HOME_SCROLL_ID,
+                                AbsoluteOffset { x: 0.0, y },
+                            ),
+                            self.update(Message::HomeScrolled(y)),
+                        ])
+                    }
+                    // The Library filtered to the tour's playlist.
+                    28 => Task::batch([
+                        self.update(Message::Navigate(Page::Library)),
+                        self.update(Message::LibraryFilterChanged("tour".into())),
+                    ]),
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -445,7 +497,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 /// `--screenshots <dir>`: page name and the wait before each capture. Steps 7 and 8 open the
 /// lyrics without a seek and check that the position moved on between their captures.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 25] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 29] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -471,6 +523,10 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 25] = [
     ("playlist-edit", 1_200),
     ("playlist-delete", 1_000),
     ("playlist-drag", 1_000),
+    ("queue-drag", 2_000),
+    ("queue-undo", 1_000),
+    ("home-rows", 3_000),
+    ("library-filter", 1_500),
 ];
 
 /// The playlist the tour made, the last of its name.
