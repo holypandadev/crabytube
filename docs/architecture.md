@@ -133,8 +133,9 @@ covers other than the playing track's are dropped and the freed heap is returned
   Linux and Windows; on macOS the system frame stays, with a transparent, untitled bar that the
   app's bar fills. At a phone's width the tabs become a bar of icons at the foot, under a smaller
   player, and the ••• and heart buttons of rows grow to a finger's size.
-- Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`; under its first screen Home scrolls
-  to rows of cards: the user's lists and the feed's other shelves), the Library and the page of each
+- Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`; Home fits the window without
+  scrolling: the greeting, the search field, Jump back in, one shelf of the feed and the user's
+  lists, sized together from the window's height), the Library and the page of each
   of the user's lists (`ui/library.rs`), album/artist/playlist detail (`ui/collection.rs`), Now
   Playing with Up Next and Lyrics (`ui/now_playing.rs`) and Settings (`ui/settings.rs`).
 - `ui/playlists.rs`: the user's lists. Favorite songs is always there; the user makes, edits,

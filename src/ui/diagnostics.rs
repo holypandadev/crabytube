@@ -281,20 +281,8 @@ impl App {
                             self.update(Message::RemoveFromQueue(last))
                         }
                     }
-                    // Home scrolled to the rows under its first screen.
-                    27 => {
-                        let home = self.update(Message::Navigate(Page::Home));
-                        let layout = self.home_layout(self.area);
-                        let y = layout.hero_height(self.area.height) - 40.0;
-                        Task::batch([
-                            home,
-                            operation::scroll_to(
-                                super::home::HOME_SCROLL_ID,
-                                AbsoluteOffset { x: 0.0, y },
-                            ),
-                            self.update(Message::HomeScrolled(y)),
-                        ])
-                    }
+                    // Home with "Your lists" under the carousel.
+                    27 => self.update(Message::Navigate(Page::Home)),
                     // The Library filtered to the tour's playlist.
                     28 => Task::batch([
                         self.update(Message::Navigate(Page::Library)),
@@ -525,7 +513,7 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 29] = [
     ("playlist-drag", 1_000),
     ("queue-drag", 2_000),
     ("queue-undo", 1_000),
-    ("home-rows", 3_000),
+    ("home-lists", 3_000),
     ("library-filter", 1_500),
 ];
 

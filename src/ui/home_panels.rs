@@ -443,25 +443,16 @@ impl App {
     }
 
     /// Opens Home: the clock is read now.
-    /// Home opens again where it was left: the page, its carousel and its rows.
+    /// Home opens again where it was left: its carousel and "Your lists".
     pub(super) fn enter_home(&mut self) -> iced::Task<Message> {
         self.clock = LocalClock::now();
-        let mut tasks = vec![
-            iced::widget::operation::scroll_to(
-                super::home::HOME_SCROLL_ID,
-                iced::widget::operation::AbsoluteOffset {
-                    x: 0.0,
-                    y: self.home_scroll,
-                },
-            ),
-            iced::widget::operation::scroll_to(
-                super::home::CAROUSEL_ID,
-                iced::widget::operation::AbsoluteOffset {
-                    x: self.carousel.offset,
-                    y: 0.0,
-                },
-            ),
-        ];
+        let mut tasks = vec![iced::widget::operation::scroll_to(
+            super::home::CAROUSEL_ID,
+            iced::widget::operation::AbsoluteOffset {
+                x: self.carousel.offset,
+                y: 0.0,
+            },
+        )];
         for (strip, motion) in &self.strips {
             tasks.push(iced::widget::operation::scroll_to(
                 strip.id(),

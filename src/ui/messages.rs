@@ -436,9 +436,7 @@ pub(super) enum Message {
         forward: bool,
     },
     CarouselScrolled(f32),
-    /// Home scrolled down to the rows under its first screen, or back.
-    HomeScrolled(f32),
-    /// The arrows of a row of cards under Home's first screen.
+    /// The arrows of a row of cards: "Your lists" on Home, or an artist's.
     StripStep {
         strip: super::home::Strip,
         forward: bool,

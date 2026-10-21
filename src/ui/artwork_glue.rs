@@ -135,9 +135,7 @@ impl App {
                         .take(layout.jump)
                         .filter_map(|play| cover_request(play.thumbnail_url(), jump_variant)),
                 );
-                if layout.flow {
-                    requests.extend(self.strip_artwork(&layout));
-                }
+                requests.extend(self.lists_artwork(&layout));
                 requests
             }
             Page::Search => self.search_artwork(),

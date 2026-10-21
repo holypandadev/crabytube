@@ -287,8 +287,7 @@ struct App {
     home_picks: home::HomePicks,
     /// Smooth scrolling of the Home carousel.
     carousel: home::Carousel,
-    /// How far Home is scrolled down, and the rows of cards under its first screen.
-    home_scroll: f32,
+    /// The rows of cards: "Your lists" on Home and an artist's shelves.
     strips: HashMap<home::Strip, home::Carousel>,
     volume_rail: now_playing::VolumeRail,
     /// Size of the page area below the tabs, as laid out (see `shell_view`).
@@ -435,7 +434,6 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::QueueScrolled(_)
         | Message::CollectionScrolled(_)
         | Message::CarouselScrolled(_)
-        | Message::HomeScrolled(_)
         | Message::StripScrolled(..)
         | Message::ChipHovered(_) => true,
         Message::KeyPressed(
@@ -2459,10 +2457,6 @@ impl App {
                     self.carousel.offset = x;
                 }
             }
-            Message::HomeScrolled(y) => {
-                self.home_scroll = y;
-                return self.scroll_preload_task();
-            }
             Message::StripStep { strip, forward } => return self.step_strip(strip, forward),
             Message::StripScrolled(strip, x) => {
                 let motion = self.strips.entry(strip).or_default();
@@ -2685,7 +2679,6 @@ impl App {
             home_more_cancel: None,
             home_picks: home::HomePicks::default(),
             carousel: home::Carousel::default(),
-            home_scroll: 0.0,
             strips: HashMap::new(),
             volume_rail: now_playing::VolumeRail::default(),
             area: estimated_area(1024.0, 768.0),
@@ -5310,8 +5303,8 @@ mod tests {
 
         let task = app.preload_current_page_artwork();
 
-        // Every card of the shelf at the top, and of the rows near the first screen only, at
-        // sizes the cache can hold.
+        // Every card of the one Home shelf, at a size the cache can hold; the feed's other
+        // shelves are not on Home.
         for item in 0..20 {
             let url = format!("cover-0-{item}");
             assert!(
@@ -5321,10 +5314,10 @@ mod tests {
             );
         }
         assert!(
-            !app.artwork_requested
+            app.artwork_requested
                 .iter()
-                .any(|(url, _)| url.starts_with("cover-9-")),
-            "a row far down the page waits until it is scrolled to"
+                .all(|(url, _)| url.starts_with("cover-0-")),
+            "only the one Home shelf asks for covers"
         );
         assert!(app.artwork_requested.len() <= crate::artwork::MAX_ARTWORK_ENTRIES);
         let requested_bytes: usize = app
