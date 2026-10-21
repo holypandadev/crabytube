@@ -622,6 +622,14 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("No playlists match.", "一致するプレイリストはありません。"),
         ("Playlist created: {}", "プレイリストを作成しました：{}"),
         ("All songs", "すべての曲"),
+        (
+            "Tap the heart on any song to keep it in Favorite songs.",
+            "曲のハートをタップすると、お気に入りの曲に保存されます。",
+        ),
+        (
+            "The songs you play and the playlists you make will show here.",
+            "再生した曲と作成したプレイリストがここに表示されます。",
+        ),
     ],
     templates: &[
         ("Active: {}.", "使用中：{0}。"),

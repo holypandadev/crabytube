@@ -625,6 +625,14 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("No playlists match.", "Нет подходящих плейлистов."),
         ("Playlist created: {}", "Плейлист создан: {}"),
         ("All songs", "Все треки"),
+        (
+            "Tap the heart on any song to keep it in Favorite songs.",
+            "Нажмите на сердечко у трека, чтобы сохранить его в «Избранные треки».",
+        ),
+        (
+            "The songs you play and the playlists you make will show here.",
+            "Здесь появятся треки, которые вы слушаете, и плейлисты, которые вы создаёте.",
+        ),
     ],
     templates: &[
         ("Active: {}.", "Активно: {0}."),

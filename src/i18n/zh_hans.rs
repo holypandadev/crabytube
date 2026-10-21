@@ -550,6 +550,14 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("No playlists match.", "没有匹配的播放列表。"),
         ("Playlist created: {}", "已创建播放列表：{}"),
         ("All songs", "全部歌曲"),
+        (
+            "Tap the heart on any song to keep it in Favorite songs.",
+            "点按任意歌曲的爱心，即可收藏到“收藏的歌曲”。",
+        ),
+        (
+            "The songs you play and the playlists you make will show here.",
+            "你播放的歌曲和创建的播放列表会显示在这里。",
+        ),
     ],
     templates: &[
         ("Active: {}.", "当前：{0}。"),

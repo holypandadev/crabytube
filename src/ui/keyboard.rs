@@ -123,7 +123,7 @@ impl App {
         let home = || {
             let layout = self.home_layout(self.area);
             let count = layout.jump.min(self.recent.len());
-            let step = if layout.narrow { 1 } else { 2 };
+            let step = layout.jump_columns.max(1);
             ((0..count).map(|index| row("recent", index)).collect(), step)
         };
         match &self.page {

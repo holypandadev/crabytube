@@ -24,18 +24,13 @@ const CARD_GAP_NARROW: f32 = 14.0;
 pub(super) const NARROW_W: f32 = 600.0;
 /// Smallest and largest card edge.
 const CARD_MIN: f32 = 104.0;
-const CARD_MAX: f32 = 280.0;
-/// The most cards the carousel shows at once.
-const MAX_ACROSS: usize = 10;
-/// The covers shrink to these before any panel is hidden: 130 px on desktop, 110 px on phones.
-const CARD_FLOOR: f32 = 130.0;
-/// With "Your lists" under the carousel, the covers may shrink this far before a panel goes.
-const CARD_FLOOR_LISTS: f32 = 96.0;
-const CARD_FLOOR_NARROW: f32 = 110.0;
-/// Share of the page height the search field and carousel aim to fill.
-const BLOCK_SHARE: f32 = 0.74;
+const CARD_MAX: f32 = 240.0;
+/// The covers shrink to these before any section is given up: 150 px on desktop, 130 px on
+/// phones; only a page too short for the bare block takes them to the last size.
+const CARD_FLOOR: f32 = 150.0;
+const CARD_FLOOR_NARROW: f32 = 130.0;
+const LAST_RESORT_CARD: f32 = 96.0;
 const SEARCH_H: f32 = 54.0;
-const SEARCH_MAX_W: f32 = 640.0;
 /// From this content width the top result sits beside the first songs.
 const TOP_RESULT_SPLIT_W: f32 = 1100.0;
 const TOP_RESULT_GAP: f32 = 24.0;
@@ -47,8 +42,6 @@ const SEARCH_TOP: f32 = 8.0;
 const SEARCH_MARGIN: f32 = 24.0;
 /// Scroll start of the results: the field's rectangle and its margin stay clear of the first row.
 const SEARCH_HEADER: f32 = SEARCH_TOP + SEARCH_H + SEARCH_MARGIN;
-/// Heading row, its gap, and the two caption lines under each cover.
-const CAROUSEL_CHROME_H: f32 = 24.0 + 18.0 + 10.0 + 20.0 + 18.0;
 const CAROUSEL_DURATION_MS: f32 = 320.0;
 /// YouTube Music's "All-time essentials" shelf, by its title in English and Spanish. In the other
 /// languages Home takes the first shelf of collections instead (see `HomePicks::rebuild`).
@@ -62,12 +55,8 @@ const STRIP_HEADING_H: f32 = 24.0;
 const STRIP_HEADING_GAP: f32 = 14.0;
 /// The room under a card's cover: the gap, the title and the subtitle.
 const CARD_TEXT_H: f32 = 10.0 + 20.0 + 18.0;
-/// The covers of "Your lists" on Home, against those of the carousel above them.
-const LIST_CARD_SHARE: f32 = 0.65;
-/// The least room between a list's name and the next cover in "Your lists".
-const LIST_NAME_GAP: f32 = 10.0;
-/// The height of the "Your lists" row besides its covers.
-const LISTS_CHROME_H: f32 = STRIP_GAP + STRIP_HEADING_H + STRIP_HEADING_GAP + CARD_TEXT_H;
+/// The height of an artist's row of cards besides its covers.
+const STRIP_CHROME_H: f32 = STRIP_GAP + STRIP_HEADING_H + STRIP_HEADING_GAP + CARD_TEXT_H;
 /// Songs, and collections of each kind, the results page lists.
 const SEARCH_SONGS_SHOWN: usize = 8;
 const SEARCH_COLLECTIONS_SHOWN: usize = 6;
@@ -142,11 +131,10 @@ impl HomePicks {
     }
 }
 
-/// A row of cards: the user's lists on Home, under the carousel, or one of an artist's shelves by
-/// its place in `CollectionState::related`.
+/// A row of cards on an artist's page: one of the artist's shelves by its place in
+/// `CollectionState::related`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Strip {
-    Lists,
     Related(usize),
 }
 
@@ -154,7 +142,6 @@ impl Strip {
     /// The id of the row's scrollable.
     pub(super) fn id(self) -> String {
         match self {
-            Self::Lists => "home-lists".to_owned(),
             Self::Related(position) => format!("artist-shelf-{position}"),
         }
     }
@@ -172,7 +159,7 @@ fn strip_card(narrow: bool) -> f32 {
 /// The height of a row of cards of `size`: the gap above it, its heading, and its cards with their
 /// two lines.
 fn strip_height(size: f32) -> f32 {
-    LISTS_CHROME_H + size
+    STRIP_CHROME_H + size
 }
 
 /// Smooth horizontal scrolling of the Home carousel.
@@ -218,21 +205,23 @@ impl Carousel {
     }
 }
 
-/// What the Home page shows around the search field and the carousel, as far as the layout
-/// needs to know. The lists themselves stay in the App.
+/// What the Home page has to show besides the carousel, as far as the layout needs to know. The
+/// lists themselves stay in the App.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct HomeExtras {
     /// Recent searches that fit on one line, before any are dropped for lack of height.
     pub chips: usize,
-    /// Entries in "Jump back in", before any are dropped for lack of height.
+    /// Entries "Jump back in" has.
     pub jump: usize,
-    /// The user has lists, which "Your lists" shows under the carousel.
-    pub lists: bool,
+    /// Lists "Your lists" has: Favorite songs while it has songs, and the playlists. With none,
+    /// a short welcome stands in their place.
+    pub lists: usize,
     /// The line that says Home could not be refreshed shows under the greeting.
     pub notice: bool,
 }
 
-/// The greeting is two lines while the page has room, and one line when it does not.
+/// The greeting: large, over the date, while the page has room; one line beside the date when it
+/// does not. On a phone it is always small, over the date.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GreetingSize {
     Full,
@@ -242,62 +231,85 @@ pub(super) enum GreetingSize {
 /// Geometry of the Home page for a given content area.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct HomeLayout {
-    /// Cards shown at once.
+    /// Cards the carousel shows whole at once.
     pub visible: usize,
     pub card: f32,
     pub card_gap: f32,
-    /// Width of the page's one column, centred: the card strip, the search field and every panel
-    /// start and end at its edges.
+    /// Width of the page's one column, centred: the search field, every section and the status
+    /// line start and end at its edges. It follows the window, not the number of cards.
     pub row_width: f32,
     pub search_width: f32,
     pub narrow: bool,
-    /// Space above the greeting, or above the search field when the block is centered.
+    /// Space above the greeting: what the page has left over, partly, so a tall page keeps the
+    /// block a little above its middle.
     pub top: f32,
-    /// Space between the search field and the carousel; the chips take part of it.
-    pub gap: f32,
     pub greeting: GreetingSize,
-    pub greeting_font: f32,
     /// Chips shown under the search field (0 hides the row).
     pub chips: usize,
-    /// Entries shown in "Jump back in" (0 hides the section).
+    /// Entries shown in "Jump back in" (0 hides the section), and how many share a row.
     pub jump: usize,
-    /// Whether "Your lists" shows, and the side of its covers.
-    pub lists: bool,
-    pub list_card: f32,
+    pub jump_columns: usize,
+    /// Lists shown in "Your lists" (0 hides the section), and how many share a row.
+    pub lists: usize,
+    pub list_columns: usize,
+    /// The welcome that stands in for "Your lists" while the user has none.
+    pub welcome: bool,
     /// Whether the line that says Home could not be refreshed shows.
     pub notice: bool,
 }
 
 /// Space between the greeting and the search field.
-pub(super) const GREETING_GAP: f32 = 24.0;
+pub(super) const GREETING_GAP: f32 = 18.0;
+/// The greeting's sizes: large over the date, one line beside it, and a phone's.
+pub(super) const GREETING_FULL_FONT: f32 = 40.0;
+pub(super) const GREETING_SMALL_FONT: f32 = 30.0;
+pub(super) const GREETING_PHONE_FONT: f32 = 22.0;
+/// Space between the greeting and the date under it.
 pub(super) const GREETING_SUBLINE_GAP: f32 = 6.0;
-const GREETING_SUBLINE_H: f32 = 18.0;
-const SMALL_GREETING_H: f32 = 18.0;
+const GREETING_SUBLINE_H: f32 = 16.0;
 /// Space between the search field and the chips, and the chips' height.
 pub(super) const CHIPS_GAP: f32 = 8.0;
 pub(super) const CHIPS_H: f32 = 30.0;
 pub(super) const MAX_CHIPS: usize = 5;
-/// Space above "Jump back in", its heading, and each row of entries.
-pub(super) const JUMP_GAP: f32 = 16.0;
-const JUMP_HEADING_H: f32 = 22.0;
-pub(super) const JUMP_HEADING_GAP: f32 = 8.0;
-pub(super) const JUMP_ROW_H: f32 = 40.0;
-pub(super) const JUMP_ROW_GAP: f32 = 4.0;
-pub(super) const MAX_JUMP: usize = 4;
+/// Space above each section, the height of its heading and the space under it.
+pub(super) const SECTION_GAP: f32 = 22.0;
+pub(super) const HEADING_H: f32 = 24.0;
+pub(super) const HEADING_GAP: f32 = 10.0;
+/// The space between the carousel's heading and its cards.
+const CAROUSEL_HEADING_GAP: f32 = 12.0;
+/// A row of "Jump back in" or "Your lists": a cover with two lines beside it, and the space between
+/// rows.
+pub(super) const ROW_H: f32 = 48.0;
+pub(super) const ROW_COVER: f32 = 40.0;
+pub(super) const ROW_GAP: f32 = 4.0;
+/// "Jump back in" shows at most two rows of entries.
+pub(super) const MAX_JUMP_ROWS: usize = 2;
+/// On a phone "Your lists" is a grid of outlined tiles, two across.
+pub(super) const TILE_H: f32 = 52.0;
+pub(super) const TILE_COVER: f32 = 38.0;
+pub(super) const TILE_GAP: f32 = 8.0;
+/// The narrowest a list takes in "Your lists" on a wide window.
+const LIST_COLUMN_W: f32 = 300.0;
+/// The welcome that stands in for "Your lists": one line high on a wide window, a few on a phone.
+pub(super) const WELCOME_H: f32 = 56.0;
+const WELCOME_H_PHONE: f32 = 128.0;
 /// Height of the line that says Home could not be refreshed, with the room under it.
 pub(super) const NOTICE_H: f32 = 40.0;
 /// Height of the status line at the foot of the page, rule included.
 pub(super) const STATUS_H: f32 = 34.0;
-/// Clear space kept above and below the Home block.
-const EDGE_GAP: f32 = 8.0;
+/// The widest the page's column gets, centred on a wider window.
+const MAX_COLUMN: f32 = 1600.0;
+/// The most room a tall page leaves above the greeting.
+const MAX_TOP: f32 = 64.0;
 
-/// Height of the greeting block, including the gap that follows it.
-fn greeting_height(size: GreetingSize, font: f32) -> f32 {
-    match size {
-        GreetingSize::Full => {
-            (font * 1.3).ceil() + GREETING_SUBLINE_GAP + GREETING_SUBLINE_H + GREETING_GAP
+/// Height of the greeting, without the space under it.
+fn greeting_height(size: GreetingSize, narrow: bool) -> f32 {
+    match (size, narrow) {
+        (_, true) => (GREETING_PHONE_FONT * 1.3).ceil() + GREETING_SUBLINE_GAP + GREETING_SUBLINE_H,
+        (GreetingSize::Full, false) => {
+            (GREETING_FULL_FONT * 1.3).ceil() + GREETING_SUBLINE_GAP + GREETING_SUBLINE_H
         }
-        GreetingSize::Small => SMALL_GREETING_H + GREETING_GAP,
+        (GreetingSize::Small, false) => 40.0,
     }
 }
 
@@ -305,172 +317,158 @@ fn chips_height(count: usize) -> f32 {
     if count == 0 { 0.0 } else { CHIPS_GAP + CHIPS_H }
 }
 
-fn jump_height(count: usize, narrow: bool) -> f32 {
+/// Height of a section of `count` rows of `row` height, `columns` across, its heading included.
+fn rows_height(count: usize, columns: usize, row: f32, gap: f32) -> f32 {
     if count == 0 {
         return 0.0;
     }
-    let rows = (if narrow { count } else { count.div_ceil(2) }) as f32;
-    JUMP_GAP + JUMP_HEADING_H + JUMP_HEADING_GAP + rows * JUMP_ROW_H + (rows - 1.0) * JUMP_ROW_GAP
+    let rows = count.div_ceil(columns.max(1)) as f32;
+    SECTION_GAP + HEADING_H + HEADING_GAP + rows * row + (rows - 1.0) * gap
+}
+
+/// What a Home page shows: the greeting's size, how much of each section, and whether the last
+/// one, "Your lists" or the welcome in its place, shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Shown {
+    greeting: GreetingSize,
+    chips: usize,
+    jump: usize,
+    lists: bool,
 }
 
 impl HomeLayout {
     /// The greeting, the search field, the chips, "Jump back in", the carousel and "Your lists"
-    /// form one block, centered on the page (a little above the middle), with the status line at
-    /// its foot; nothing scrolls. Cards grow with the height until the block fills about three
-    /// quarters of the page, then as many as fit across share the width exactly, so neither axis
-    /// is left mostly empty. The covers of "Your lists" are a share of the carousel's and shrink
-    /// with them. On a short page the covers shrink first, down to their floor. Then the greeting
-    /// takes one line, "Jump back in" keeps two entries and, with "Your lists", the covers shrink
-    /// a little more; only then do "Jump back in" and the chips go, and "Your lists" last, when not
-    /// even the smallest covers leave room for it. The search field is never resized.
+    /// stack in one column as wide as the window, with the status line at the foot; nothing
+    /// scrolls. The covers take the height the rest leaves, up to a size that keeps about five of
+    /// them across (two and a bit on a phone). When the rest leaves them too little, the page
+    /// gives up, in turn: the large greeting, the second row of "Jump back in", "Jump back in",
+    /// the chips, and last "Your lists".
     pub fn new(area: Size, items: usize, extras: HomeExtras) -> Self {
-        let layout = Self::fit(area, items, extras);
-        // A page too short for "Your lists" is laid out as if there were none, so the column
-        // and the covers take the whole room.
-        if extras.lists && !layout.lists {
-            return Self::fit(
-                area,
-                items,
-                HomeExtras {
-                    lists: false,
-                    ..extras
-                },
-            );
-        }
-        layout
-    }
-
-    fn fit(area: Size, items: usize, extras: HomeExtras) -> Self {
         let width = area.width.max(CARD_MIN);
         let page_h = (area.height - STATUS_H).max(0.0);
-        // Before Home has loaded, or when it failed, the page has the column a full row of cards
-        // would give it, so the search field keeps its width.
-        let items = if items == 0 {
-            8
-        } else {
-            items.clamp(1, MAX_ACROSS)
-        } as f32;
         let narrow = width < NARROW_W;
+        let column = width.min(MAX_COLUMN).floor();
         let card_gap = if narrow { CARD_GAP_NARROW } else { CARD_GAP };
-        let gap = (page_h * 0.06).clamp(24.0, 56.0).floor();
-        let fixed = SEARCH_H + gap + CAROUSEL_CHROME_H;
-        // "Your lists" takes its chrome, and covers a share of the carousel's: the two rows of
-        // covers count as one row that much taller.
-        let lists_fixed = |lists: bool| if lists { LISTS_CHROME_H } else { 0.0 };
-        let rows = |lists: bool| if lists { 1.0 + LIST_CARD_SHARE } else { 1.0 };
-        // Largest card the height allows.
-        let tallest = ((page_h * BLOCK_SHARE - fixed - lists_fixed(extras.lists))
-            / rows(extras.lists))
-        .clamp(CARD_MIN, CARD_MAX);
-        // As many cards as needed for that size to fill the width (at least
-        // two on narrow screens, so the row reads as a carousel).
-        let mut across = ((width + card_gap) / (tallest + card_gap)).ceil();
-        if narrow {
-            across = across.max(2.0);
+        // The largest cover: five and a bit across on a wide window, two and a bit on a phone, so
+        // the next one shows at the edge.
+        let widest = if narrow {
+            (column - card_gap * 1.35) / 2.35
+        } else {
+            (column - 4.3 * card_gap) / 5.3
         }
-        across = across.clamp(1.0, items);
-        let mut card = ((width - card_gap * (across - 1.0)) / across).min(tallest);
-        while card < CARD_MIN && across > 1.0 {
-            across -= 1.0;
-            card = ((width - card_gap * (across - 1.0)) / across).min(tallest);
-        }
-        card = card
-            .min(
-                ((page_h - fixed - lists_fixed(extras.lists) - 32.0) / rows(extras.lists))
-                    .max(CARD_MIN * 0.75),
-            )
-            .floor();
-        // The card row at this size sets the one column every part of the page shares. Covers
-        // that shrink later for the panels leave it as it is: the strip keeps the column's width
-        // and shows more of the next card.
-        let column = (across * (card + card_gap) - card_gap).min(width).floor();
-        // The covers never grow back past this size, once panels have made room.
-        let widest = card;
-        let greeting_font = (width * 0.035)
-            .clamp(28.0, 44.0)
-            .min(page_h * 0.06)
-            .max(20.0)
-            .floor();
-        let chips_n = extras.chips.min(MAX_CHIPS);
-        let jump_n = extras.jump.min(MAX_JUMP);
-        let budget = page_h - 2.0 * EDGE_GAP;
-        let notice = if extras.notice { NOTICE_H } else { 0.0 };
-        let block = |greeting: GreetingSize, chips: usize, jump: usize, lists: bool, card: f32| {
-            greeting_height(greeting, greeting_font)
-                + notice
-                + chips_height(chips)
-                + fixed
-                + card * rows(lists)
-                + lists_fixed(lists)
-                + jump_height(jump, narrow)
-        };
-        // The covers that make a block too tall by `over` give that room back together.
-        let shrink = |card: f32, over: f32, lists: bool| card - over / rows(lists);
-        // 1. The covers give room, down to their floor, while the greeting keeps two lines.
+        .clamp(CARD_MIN, CARD_MAX)
+        .floor();
         let floor = if narrow {
             CARD_FLOOR_NARROW
         } else {
             CARD_FLOOR
         }
-        .min(card);
-        let lists_n = extras.lists;
-        let full = block(GreetingSize::Full, chips_n, jump_n, lists_n, card);
-        if full > budget {
-            card = shrink(card, full - budget, lists_n).max(floor).floor();
-        }
-        // 2. Then the greeting takes one line.
-        let mut greeting = GreetingSize::Full;
-        if block(greeting, chips_n, jump_n, lists_n, card) > budget {
-            greeting = GreetingSize::Small;
-        }
-        // 3. Then "Jump back in" keeps two entries, and with "Your lists" the covers shrink a
-        // little more, so every panel still shows.
-        let mut jump = jump_n;
-        if block(greeting, chips_n, jump, lists_n, card) > budget {
-            jump = jump.min(2);
-        }
-        let over = block(greeting, chips_n, jump, lists_n, card) - budget;
-        if lists_n && over > 0.0 {
-            card = shrink(card, over, lists_n)
-                .max(CARD_FLOOR_LISTS.min(card))
-                .floor();
-        }
-        // 4. Then "Jump back in" goes, and then the chips.
-        let (mut chips, mut lists) = (chips_n, lists_n);
-        if block(greeting, chips, jump, lists, card) > budget {
-            jump = 0;
-        }
-        if block(greeting, chips, jump, lists, card) > budget {
-            chips = 0;
-        }
-        // 5. "Your lists" stays while the covers can shrink below their floor for it; only a
-        // window too short even for that loses it.
-        let last_resort = (CARD_MIN * 0.75).min(card);
-        let over = block(greeting, chips, jump, lists, card) - budget;
-        if lists && over > 0.0 && shrink(card, over, lists).floor() < last_resort {
-            lists = false;
-        }
-        // 6. The covers then take the height the panels left, up to the size the width gave
-        // them; only a window too short even for the bare block takes them below their floor.
-        let room = (budget - block(greeting, chips, jump, lists, 0.0)) / rows(lists);
-        card = room.min(widest).max(last_resort).floor();
-        let total = block(greeting, chips, jump, lists, card);
-        let top = ((page_h - total) / 2.0 * 0.9).max(EDGE_GAP).floor();
+        .min(widest);
+        let jump_columns = if narrow { 1 } else { 2 };
+        let list_columns = if narrow {
+            2
+        } else {
+            ((column / LIST_COLUMN_W).floor() as usize).clamp(2, 5)
+        };
+        // A phone shows four lists in two rows of tiles; a wide window one row of them.
+        let lists_n = extras.lists.min(if narrow { 4 } else { list_columns });
+        let welcome_n = extras.lists == 0;
+        let notice = if extras.notice { NOTICE_H } else { 0.0 };
+        let fixed = notice + GREETING_GAP + SEARCH_H;
+        let around = |shown: Shown| {
+            let lists = match (shown.lists, welcome_n) {
+                (false, _) => 0.0,
+                (true, true) => SECTION_GAP + if narrow { WELCOME_H_PHONE } else { WELCOME_H },
+                (true, false) if narrow => rows_height(lists_n, 2, TILE_H, TILE_GAP),
+                (true, false) => rows_height(lists_n, list_columns, ROW_H, ROW_GAP),
+            };
+            greeting_height(shown.greeting, narrow)
+                + fixed
+                + chips_height(shown.chips)
+                + rows_height(shown.jump, jump_columns, ROW_H, ROW_GAP)
+                + SECTION_GAP
+                + HEADING_H
+                + CAROUSEL_HEADING_GAP
+                + CARD_TEXT_H
+                + lists
+        };
+        let room = |shown: Shown| page_h - around(shown);
+        let chips = extras.chips.min(MAX_CHIPS);
+        let jump = extras.jump.min(MAX_JUMP_ROWS * jump_columns);
+        let small = GreetingSize::Small;
+        // In order of preference; the large greeting only while the covers are as large as they
+        // get anyway.
+        let choices = [
+            Shown {
+                greeting: GreetingSize::Full,
+                chips,
+                jump,
+                lists: true,
+            },
+            Shown {
+                greeting: small,
+                chips,
+                jump,
+                lists: true,
+            },
+            Shown {
+                greeting: small,
+                chips,
+                jump: jump.min(jump_columns),
+                lists: true,
+            },
+            Shown {
+                greeting: small,
+                chips,
+                jump: 0,
+                lists: true,
+            },
+            Shown {
+                greeting: small,
+                chips: 0,
+                jump: 0,
+                lists: true,
+            },
+            Shown {
+                greeting: small,
+                chips: 0,
+                jump: 0,
+                lists: false,
+            },
+        ];
+        let shown = choices
+            .iter()
+            .enumerate()
+            .find(|(place, shown)| {
+                let need = if *place == 0 { widest } else { floor };
+                // A phone's greeting is the same at any height.
+                !(narrow && *place == 0) && room(**shown) >= need
+            })
+            .map_or(choices[choices.len() - 1], |(_, shown)| *shown);
+        let card = room(shown)
+            .min(widest)
+            .max(LAST_RESORT_CARD.min(widest))
+            .floor();
+        let left = (page_h - around(shown) - card).max(0.0);
+        let top = (left * 0.4).min(MAX_TOP).floor();
+        // Before Home has loaded, the carousel counts as full.
+        let items = if items == 0 { 8 } else { items };
+        let visible = (((column + card_gap) / (card + card_gap)).floor() as usize).clamp(1, items);
         Self {
-            visible: across as usize,
+            visible,
             card,
             card_gap,
             row_width: column,
             search_width: column,
             narrow,
             top,
-            gap,
-            greeting,
-            greeting_font,
-            chips,
-            jump,
-            lists,
-            list_card: (card * LIST_CARD_SHARE).floor(),
+            greeting: shown.greeting,
+            chips: shown.chips,
+            jump: shown.jump,
+            jump_columns,
+            lists: if shown.lists { lists_n } else { 0 },
+            list_columns,
+            welcome: welcome_n && shown.lists,
             notice: extras.notice,
         }
     }
@@ -484,33 +482,47 @@ impl HomeLayout {
         (count as f32 * self.stride() - self.card_gap - self.row_width).max(0.0)
     }
 
-    /// Height of the greeting block, gap included.
+    /// Height of the greeting, without the space under it.
     pub fn greeting_height(&self) -> f32 {
-        greeting_height(self.greeting, self.greeting_font)
+        greeting_height(self.greeting, self.narrow)
     }
 
     /// Y of the search field from the top of the page, under the greeting and the line that says
     /// Home could not be refreshed.
     pub fn search_top(&self) -> f32 {
-        self.top + self.greeting_height() + if self.notice { NOTICE_H } else { 0.0 }
+        self.top + self.greeting_height() + GREETING_GAP + if self.notice { NOTICE_H } else { 0.0 }
     }
 
     /// Y of the bottom edge of the whole block, from the top of the page. The tests check the
     /// whole stack against the page; the app itself only needs the parts.
     #[cfg(test)]
     pub fn block_bottom(&self) -> f32 {
+        let lists = if self.lists > 0 {
+            if self.narrow {
+                rows_height(self.lists, 2, TILE_H, TILE_GAP)
+            } else {
+                rows_height(self.lists, self.list_columns, ROW_H, ROW_GAP)
+            }
+        } else if self.welcome {
+            SECTION_GAP
+                + if self.narrow {
+                    WELCOME_H_PHONE
+                } else {
+                    WELCOME_H
+                }
+        } else {
+            0.0
+        };
         self.search_top()
             + SEARCH_H
             + chips_height(self.chips)
-            + self.gap
-            + CAROUSEL_CHROME_H
+            + rows_height(self.jump, self.jump_columns, ROW_H, ROW_GAP)
+            + SECTION_GAP
+            + HEADING_H
+            + CAROUSEL_HEADING_GAP
             + self.card
-            + if self.lists {
-                LISTS_CHROME_H + self.list_card
-            } else {
-                0.0
-            }
-            + jump_height(self.jump, self.narrow)
+            + CARD_TEXT_H
+            + lists
     }
 }
 
@@ -537,16 +549,16 @@ impl App {
     pub(super) fn home_layout(&self, area: Size) -> HomeLayout {
         let width = area.width.max(CARD_MIN);
         let narrow = width < NARROW_W;
-        let search_width = width.min(SEARCH_MAX_W);
+        let column = width.min(MAX_COLUMN).floor();
         let chips = if self.preferences.remember_history {
-            super::home_panels::chip_queries(&self.search_history, search_width, narrow).len()
+            super::home_panels::chip_queries(&self.search_history, column, narrow).len()
         } else {
             0
         };
         let extras = HomeExtras {
             chips,
-            jump: self.recent.len().min(MAX_JUMP),
-            lists: !self.home_lists().is_empty(),
+            jump: self.recent.len(),
+            lists: self.home_lists().len(),
             notice: self.refresh_error().is_some(),
         };
         HomeLayout::new(area, self.home_picks.items.len(), extras)
@@ -716,16 +728,18 @@ impl App {
         }
         if layout.jump > 0 {
             page = page
-                .push(Space::new().height(JUMP_GAP))
+                .push(Space::new().height(SECTION_GAP))
                 .push(self.jump_view(&layout));
         }
-        page = page.push(Space::new().height(layout.gap)).push(carousel);
-        if layout.lists {
-            page = page.push(
-                container(self.strip_view(Strip::Lists))
-                    .width(Length::Fill)
-                    .center_x(Length::Fill),
-            );
+        page = page.push(Space::new().height(SECTION_GAP)).push(carousel);
+        if layout.lists > 0 {
+            page = page
+                .push(Space::new().height(SECTION_GAP))
+                .push(self.lists_view(&layout));
+        } else if layout.welcome {
+            page = page
+                .push(Space::new().height(SECTION_GAP))
+                .push(self.welcome_view(&layout));
         }
         page = page
             .height(Length::Fill)
@@ -740,18 +754,10 @@ impl App {
     }
 
     /// The card size, the gap between cards and the width of a row of cards.
-    pub(super) fn strip_geometry(&self, strip: Strip) -> (f32, f32, f32) {
-        match strip {
-            Strip::Lists => {
-                let layout = self.home_layout(self.area);
-                (layout.list_card, layout.card_gap, layout.row_width)
-            }
-            Strip::Related(_) => {
-                let narrow = self.area.width < NARROW_W;
-                let gap = if narrow { CARD_GAP_NARROW } else { CARD_GAP };
-                (strip_card(narrow), gap, self.area.width.max(CARD_MIN))
-            }
-        }
+    pub(super) fn strip_geometry(&self, _strip: Strip) -> (f32, f32, f32) {
+        let narrow = self.area.width < NARROW_W;
+        let gap = if narrow { CARD_GAP_NARROW } else { CARD_GAP };
+        (strip_card(narrow), gap, self.area.width.max(CARD_MIN))
     }
 
     /// A row of cards: its heading with arrows that page through it, and its cards, which scroll
@@ -761,33 +767,6 @@ impl App {
         let variant = crate::artwork::variant_for_pixels(size * self.pixel_scale());
         let text_width = size - 4.0;
         let (title, cards): (String, Vec<Element<'_, Message>>) = match strip {
-            Strip::Lists => {
-                let mut cards = Vec::new();
-                for list in self.home_lists() {
-                    let (name, count) = match list {
-                        super::messages::ListId::Favorites => {
-                            (self.tr("Favorite songs").into_owned(), self.favorites.len())
-                        }
-                        super::messages::ListId::Playlist(id) => {
-                            let Some(playlist) = self.playlist(id) else {
-                                continue;
-                            };
-                            (playlist.name.clone(), playlist.tracks.len())
-                        }
-                    };
-                    // A list's name may run on into the gap after its cover, where the next one
-                    // starts; the covers keep their places.
-                    let wide = size + gap - LIST_NAME_GAP;
-                    cards.push(card(
-                        self.list_cover(list, size),
-                        fit(&name, wide - 4.0, TEXT_BODY),
-                        fit(&self.song_count(count, false), wide - 4.0, TEXT_CAPTION),
-                        wide,
-                        Message::Navigate(super::Page::List(list)),
-                    ));
-                }
-                (self.tr("Your lists").into_owned(), cards)
-            }
             Strip::Related(_) => {
                 let Some(shelf) = self.strip_shelf(strip) else {
                     return Space::new().into();
@@ -832,12 +811,7 @@ impl App {
             arrow("chev-right", can_forward, true)
         ]
         .spacing(6);
-        let spacing = if strip == Strip::Lists {
-            LIST_NAME_GAP
-        } else {
-            gap
-        };
-        let strip_row = scrollable(iced::widget::Row::with_children(cards).spacing(spacing))
+        let strip_row = scrollable(iced::widget::Row::with_children(cards).spacing(gap))
             .id(strip.id())
             .direction(scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::hidden(),
@@ -858,8 +832,8 @@ impl App {
         .into()
     }
 
-    /// The lists the "Your lists" row shows: Favorite songs while it has songs, then the
-    /// playlists in the Library's order.
+    /// The lists "Your lists" shows: Favorite songs while it has songs, then the playlists in the
+    /// Library's order.
     pub(super) fn home_lists(&self) -> Vec<super::messages::ListId> {
         let favorites = (!self.favorites.is_empty()).then_some(super::messages::ListId::Favorites);
         favorites
@@ -875,17 +849,13 @@ impl App {
     /// The shelf an artist's row shows.
     fn strip_shelf(&self, strip: Strip) -> Option<&ShelfPicks> {
         match strip {
-            Strip::Lists => None,
             Strip::Related(position) => self.collection.related.get(position),
         }
     }
 
     /// How many cards a row has.
     pub(super) fn strip_len(&self, strip: Strip) -> usize {
-        match strip {
-            Strip::Lists => self.home_lists().len(),
-            _ => self.strip_shelf(strip).map_or(0, |shelf| shelf.items.len()),
-        }
+        self.strip_shelf(strip).map_or(0, |shelf| shelf.items.len())
     }
 
     /// How far a row is scrolled.
@@ -922,12 +892,19 @@ impl App {
         ])
     }
 
-    /// The covers of "Your lists" in its view, when it shows.
+    /// The covers of the lists "Your lists" shows.
     pub(super) fn lists_artwork(&self, layout: &HomeLayout) -> Vec<(String, u32)> {
-        if !layout.lists {
-            return Vec::new();
-        }
-        self.strips_artwork(&[Strip::Lists], 0.0, 0.0)
+        let size = if layout.narrow { TILE_COVER } else { ROW_COVER };
+        self.home_lists()
+            .into_iter()
+            .take(layout.lists)
+            .flat_map(|list| {
+                let variant = self.list_cover_variant(list, size);
+                self.list_cover_urls(list)
+                    .into_iter()
+                    .map(move |url| (url.to_owned(), variant))
+            })
+            .collect()
     }
 
     /// The covers of `strips`, laid one under the other from `top` in a page scrolled to `scroll`,
@@ -954,16 +931,6 @@ impl App {
             let first = ((offset / stride).floor() as usize).saturating_sub(1);
             let count = ((width / stride).ceil() as usize) + 3;
             match strip {
-                Strip::Lists => {
-                    for list in self.home_lists().into_iter().skip(first).take(count) {
-                        let variant = self.list_cover_variant(list, size);
-                        requests.extend(
-                            self.list_cover_urls(list)
-                                .into_iter()
-                                .map(|url| (url.to_owned(), variant)),
-                        );
-                    }
-                }
                 Strip::Related(_) => {
                     if let Some(shelf) = self.strip_shelf(strip) {
                         requests.extend(
@@ -1046,7 +1013,7 @@ impl App {
                 ),
                 Some(arrows.into())
             ),
-            Space::new().height(18),
+            Space::new().height(CAROUSEL_HEADING_GAP),
             strip,
         ]
         .width(layout.row_width)
@@ -1578,254 +1545,114 @@ mod tests {
         assert_eq!(subtitle_duration("Song • 3:4"), None);
     }
 
+    /// The extras of a user with history, lists and recent searches.
+    fn full(chips: usize, jump: usize, lists: usize) -> HomeExtras {
+        HomeExtras {
+            chips,
+            jump,
+            lists,
+            notice: false,
+        }
+    }
+
     #[test]
-    fn home_layout_fills_the_page_without_overflowing() {
-        for ((width, height), lists) in [
-            (326.0, 650.0),
-            (480.0, 500.0),
-            (960.0, 600.0),
-            (1206.0, 1250.0),
-            (1214.0, 600.0),
-            (1270.0, 1040.0),
-            (1856.0, 860.0),
-            (2496.0, 1300.0),
-        ]
-        .into_iter()
-        .flat_map(|size| [(size, false), (size, true)])
-        {
-            let layout = HomeLayout::new(
-                Size::new(width, height),
-                12,
-                // The worst case: "Your lists" and the notice that Home could not be refreshed.
-                HomeExtras {
-                    chips: 5,
-                    jump: 4,
-                    lists,
-                    notice: lists,
-                },
-            );
-            // The covers never grow past their limit, and "Your lists" keeps its share of them.
-            assert!(layout.card <= CARD_MAX, "{width}x{height}: {layout:?}");
-            if layout.lists {
-                assert_eq!(
-                    layout.list_card,
-                    (layout.card * LIST_CARD_SHARE).floor(),
-                    "{width}x{height}: {layout:?}"
-                );
-            }
-            let page_h = height - STATUS_H;
-            assert!(
-                layout.block_bottom() <= page_h + 0.5,
-                "{width}x{height}: {layout:?}"
-            );
-            assert!(
-                layout.row_width <= width + 0.5,
-                "{width}x{height}: {layout:?}"
-            );
-            assert!(
-                layout.card >= CARD_MIN * 0.75,
-                "{width}x{height}: {layout:?}"
-            );
-            // The block is centered: the space below is never much smaller
-            // than the space above, and neither dwarfs the block.
-            let below = page_h - layout.block_bottom();
-            assert!(below + 1.0 >= layout.top, "{width}x{height}: {layout:?}");
-            assert!(layout.top <= page_h, "{width}x{height}: {layout:?}");
-            // The cards span the width unless the height caps them, which is the case at or
-            // below the cover floor, or there are as many across as there can be.
-            if layout.card > CARD_FLOOR + 0.5 && layout.visible < MAX_ACROSS {
-                assert!(
-                    layout.row_width >= width - layout.card - layout.card_gap,
-                    "{width}x{height}: {layout:?}"
-                );
+    fn home_fits_the_page_at_any_size() {
+        for width in [326.0, 358.0, 480.0, 960.0, 1214.0, 1354.0, 1856.0, 2496.0] {
+            for height in (300..=1300).step_by(20) {
+                for extras in [
+                    full(5, 4, 6),
+                    full(0, 0, 0),
+                    HomeExtras {
+                        notice: true,
+                        ..full(5, 4, 6)
+                    },
+                ] {
+                    let area = Size::new(width, height as f32);
+                    let layout = HomeLayout::new(area, 12, extras);
+                    let label = format!("{width}x{height} {extras:?}: {layout:?}");
+                    let page_h = area.height - STATUS_H;
+                    // Nothing runs under the status line unless the page is too short for even
+                    // the bare block with the smallest covers.
+                    if layout.card > LAST_RESORT_CARD.min(layout.card) + 0.5
+                        || layout.chips + layout.jump + layout.lists > 0
+                    {
+                        assert!(layout.block_bottom() <= page_h + 0.5, "{label}");
+                    }
+                    assert!(layout.card <= CARD_MAX, "{label}");
+                    // The column follows the window, whatever the number of cards.
+                    assert_eq!(layout.row_width, width.min(MAX_COLUMN).floor(), "{label}");
+                }
             }
         }
-        // Phone width: at least two cards, so the row reads as a carousel.
-        assert!(HomeLayout::new(Size::new(326.0, 650.0), 12, HomeExtras::default()).visible >= 2);
     }
 
     #[test]
-    fn a_window_of_the_usual_size_shows_every_panel_with_your_lists() {
-        // The page area of a 1418x797 window: the header, the player bar and the gutters gone.
-        let area = Size::new(1354.0, 671.0);
-        let layout = HomeLayout::new(
-            area,
-            30,
-            HomeExtras {
-                chips: 1,
-                jump: 4,
-                lists: true,
-                notice: false,
-            },
-        );
-        assert!(layout.lists, "{layout:?}");
-        assert!(layout.jump >= 2, "{layout:?}");
-        assert_eq!(layout.chips, 1, "{layout:?}");
-        assert!(layout.card >= CARD_FLOOR_LISTS, "{layout:?}");
-        assert!(
-            layout.block_bottom() <= area.height - STATUS_H + 0.5,
-            "{layout:?}"
-        );
-    }
-
-    #[test]
-    fn a_home_that_has_not_loaded_keeps_the_column_of_a_full_row() {
-        let area = Size::new(1024.0, 720.0);
-        let empty = HomeLayout::new(area, 0, HomeExtras::default());
-        let loaded = HomeLayout::new(area, 12, HomeExtras::default());
-        assert_eq!(empty.search_width, loaded.search_width);
-        assert_eq!(empty.row_width, loaded.row_width);
-        assert!(empty.search_width > area.width * 0.8);
-    }
-
-    #[test]
-    fn short_pages_shrink_covers_then_the_greeting_then_hide_jump_then_chips() {
-        for width in [360.0, 390.0, 1206.0, 1354.0, 1856.0] {
-            let narrow = width < NARROW_W;
-            let floor = if narrow {
-                CARD_FLOOR_NARROW
-            } else {
-                CARD_FLOOR
-            };
-            for height in (560..=1100).step_by(4) {
-                // The page area is the window minus the title bar, the navigation row, the
-                // player bar and the status line's rule.
-                let area = Size::new(width, height as f32 - 195.0);
-                let layout = HomeLayout::new(
-                    area,
-                    12,
-                    HomeExtras {
-                        chips: 5,
-                        jump: 4,
-                        lists: false,
-                        notice: false,
-                    },
-                );
-                let page_h = area.height - STATUS_H;
+    fn sections_go_in_order_when_the_page_is_short() {
+        for width in [358.0, 1354.0] {
+            for height in (300..=1100).step_by(10) {
+                let layout = HomeLayout::new(Size::new(width, height as f32), 12, full(3, 4, 4));
                 let label = format!("{width}x{height}: {layout:?}");
-                assert!(layout.block_bottom() <= page_h + 0.5, "{label}");
+                // "Your lists" goes last, the chips before it, and "Jump back in" first.
+                if layout.lists == 0 {
+                    assert_eq!((layout.chips, layout.jump), (0, 0), "{label}");
+                }
                 if layout.chips == 0 {
                     assert_eq!(layout.jump, 0, "{label}");
                 }
-                // A panel goes only when it does not fit beside covers at their floor: with it
-                // back, the block would not fit.
-                if layout.jump == 0 {
-                    let with_jump = HomeLayout::new(
-                        area,
-                        12,
-                        HomeExtras {
-                            chips: layout.chips,
-                            jump: 2,
-                            lists: false,
-                            notice: false,
-                        },
-                    );
-                    assert!(with_jump.jump == 0 || with_jump.card < floor, "{label}");
+                // The large greeting only while the covers are as large as they get anyway.
+                if layout.greeting == GreetingSize::Full {
+                    assert_eq!(layout.jump, if width < NARROW_W { 2 } else { 4 }, "{label}");
                 }
-                // The greeting takes one line only when two would not fit beside covers at their
-                // floor.
-                if layout.greeting == GreetingSize::Small && layout.jump == 4 {
-                    let saved = greeting_height(GreetingSize::Full, layout.greeting_font)
-                        - greeting_height(GreetingSize::Small, layout.greeting_font);
-                    assert!(layout.card - saved < floor + 0.5, "{label}");
-                }
-                // The covers take the room the panels leave: the block fills the page, or the
-                // covers are as large as the width lets them be.
-                let bare = HomeLayout::new(area, 12, HomeExtras::default());
-                assert!(
-                    layout.top <= EDGE_GAP + 1.0 || layout.card >= bare.card - 0.5,
-                    "{label}"
-                );
             }
         }
     }
 
     #[test]
-    fn the_panels_only_shrink_the_covers_down_to_their_floor() {
-        for (width, height) in [(390.0, 649.0), (1206.0, 525.0), (1354.0, 602.0)] {
-            let area = Size::new(width, height);
-            let bare = HomeLayout::new(area, 12, HomeExtras::default());
-            let full = HomeLayout::new(
-                area,
-                12,
-                HomeExtras {
-                    chips: 5,
-                    jump: 4,
-                    lists: false,
-                    notice: false,
-                },
-            );
-            let floor = if width < NARROW_W {
-                CARD_FLOOR_NARROW
-            } else {
-                CARD_FLOOR
-            };
-            assert_eq!(bare.gap, full.gap, "{width}x{height}");
-            assert_eq!(bare.search_width, full.search_width, "{width}x{height}");
-            assert!(full.card <= bare.card, "{width}x{height}: {full:?}");
-            assert!(
-                full.card >= floor.min(bare.card),
-                "{width}x{height}: {full:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn reference_windows_show_chips_and_jump_back_in_with_history() {
-        // Page areas: the window minus the chrome, for the sizes the owner uses.
-        for (width, height) in [
-            (1206.0, 525.0),
-            (1354.0, 602.0),
-            (1856.0, 885.0),
-            (358.0, 649.0),
-        ] {
-            let area = Size::new(width, height);
-            let layout = HomeLayout::new(
-                area,
-                12,
-                HomeExtras {
-                    chips: 1,
-                    jump: 1,
-                    lists: false,
-                    notice: false,
-                },
-            );
-            let floor = if width < NARROW_W {
-                CARD_FLOOR_NARROW
-            } else {
-                CARD_FLOOR
-            };
-            let label = format!("{width}x{height}: {layout:?}");
-            assert_eq!((layout.chips, layout.jump), (1, 1), "{label}");
-            assert!(layout.card >= floor, "{label}");
-            assert!(
-                layout.block_bottom() <= area.height - STATUS_H + 0.5,
-                "{label}"
-            );
-        }
-    }
-
-    #[test]
-    fn tall_windows_show_every_panel_and_keep_the_block_centered() {
-        let layout = HomeLayout::new(
-            Size::new(1920.0, 1080.0),
-            12,
-            HomeExtras {
-                chips: 5,
-                jump: 4,
-                lists: false,
-                notice: false,
-            },
+    fn the_usual_window_shows_every_section_with_large_covers() {
+        // The page area of a 1418x797 window: the header, the player bar and the gutters gone.
+        let layout = HomeLayout::new(Size::new(1354.0, 671.0), 30, full(4, 2, 4));
+        assert_eq!(layout.greeting, GreetingSize::Small, "{layout:?}");
+        assert_eq!(
+            (layout.chips, layout.jump, layout.lists),
+            (4, 2, 4),
+            "{layout:?}"
         );
-        assert_eq!(layout.greeting, GreetingSize::Full);
-        assert_eq!((layout.chips, layout.jump), (5, 4), "{layout:?}");
-        let page_h = 1080.0 - STATUS_H;
-        let below = page_h - layout.block_bottom();
-        assert!(below >= layout.top, "{layout:?}");
-        assert!(below - layout.top <= page_h * 0.2, "{layout:?}");
-        // The search field sits below the greeting, and the status line is never covered.
-        assert!(layout.search_top() > layout.top, "{layout:?}");
-        assert!(layout.block_bottom() <= page_h, "{layout:?}");
+        assert_eq!(layout.list_columns, 4, "{layout:?}");
+        assert!(layout.card >= 165.0, "{layout:?}");
+        assert!(layout.visible >= 6, "{layout:?}");
+    }
+
+    #[test]
+    fn a_tall_window_has_the_large_greeting_and_the_largest_covers() {
+        let layout = HomeLayout::new(Size::new(1214.0, 954.0), 30, full(4, 2, 4));
+        assert_eq!(layout.greeting, GreetingSize::Full, "{layout:?}");
+        // Five covers across, and the next one showing at the edge.
+        assert!(layout.card >= 205.0, "{layout:?}");
+        assert_eq!(layout.visible, 5, "{layout:?}");
+        assert!(layout.max_offset(30) > 0.0, "{layout:?}");
+        // The leftover room sits partly above the block, never more than its limit.
+        assert!(layout.top > 0.0 && layout.top <= MAX_TOP, "{layout:?}");
+    }
+
+    #[test]
+    fn a_phone_keeps_your_lists_and_gives_up_jump_back_in() {
+        // The page area of a 390x844 window: the header, the mini player and the tab bar gone.
+        let layout = HomeLayout::new(Size::new(358.0, 661.0), 30, full(4, 2, 4));
+        assert_eq!(layout.jump, 0, "{layout:?}");
+        assert_eq!((layout.chips, layout.lists), (4, 4), "{layout:?}");
+        // Two covers and the start of a third.
+        assert_eq!(layout.visible, 2, "{layout:?}");
+        assert!(layout.card >= 140.0, "{layout:?}");
+    }
+
+    #[test]
+    fn a_new_user_sees_the_welcome_and_the_largest_covers() {
+        let layout = HomeLayout::new(Size::new(1354.0, 740.0), 30, HomeExtras::default());
+        assert!(layout.welcome, "{layout:?}");
+        assert_eq!(layout.lists, 0, "{layout:?}");
+        assert_eq!(layout.greeting, GreetingSize::Full, "{layout:?}");
+        // As large as five and a bit across allow.
+        assert!(layout.card >= 230.0, "{layout:?}");
     }
 
     #[test]

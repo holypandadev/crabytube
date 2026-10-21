@@ -92,6 +92,34 @@ pub(super) fn boxed(_: &Theme) -> container::Style {
     }
 }
 
+/// A box outlined by a faint line, as the welcome on Home.
+pub(super) fn faint_box(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(BLACK)),
+        border: Border {
+            color: RULE,
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// A tile outlined by a faint line that fills while hovered, as the lists on a phone's Home.
+pub(super) fn tile_button(_: &Theme, status: button::Status) -> button::Style {
+    let active = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    button::Style {
+        background: Some(Background::Color(if active { HOVER } else { BLACK })),
+        text_color: INK,
+        border: Border {
+            color: RULE,
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 /// The dimmed window behind a panel that sits over it.
 pub(super) fn scrim(_: &Theme) -> container::Style {
     container::Style {

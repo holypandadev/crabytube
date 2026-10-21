@@ -226,9 +226,16 @@ impl App {
             Message::CloseSaveDialog => self.close_save_dialog(),
             Message::ToggleSaved { list, track } => self.toggle_saved(list, track),
             Message::NewPlaylist(track) => {
+                // Asked for from Home, the name is typed on the Library page, where the new
+                // playlist shows.
+                let library = if track.is_none() && self.home_on_screen() {
+                    self.navigate(Page::Library)
+                } else {
+                    Task::none()
+                };
                 if self.playlists.len() >= MAX_PLAYLISTS {
                     self.playlist_notice = Some(PlaylistNotice::TooManyPlaylists);
-                    return Task::none();
+                    return library;
                 }
                 self.playlist_notice = None;
                 self.playlist_editor = Some(PlaylistEditor {
@@ -239,7 +246,7 @@ impl App {
                     cover_failed: false,
                 });
                 self.playlist_name_typed = true;
-                return operation::focus(PLAYLIST_NAME_FIELD);
+                return Task::batch([library, operation::focus(PLAYLIST_NAME_FIELD)]);
             }
             Message::EditPlaylist(id) => {
                 let Some(playlist) = self.playlist(id) else {

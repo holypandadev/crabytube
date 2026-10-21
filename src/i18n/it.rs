@@ -631,6 +631,14 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("No playlists match.", "Nessuna playlist corrisponde."),
         ("Playlist created: {}", "Playlist creata: {}"),
         ("All songs", "Tutti i brani"),
+        (
+            "Tap the heart on any song to keep it in Favorite songs.",
+            "Tocca il cuore di un brano per tenerlo in Brani preferiti.",
+        ),
+        (
+            "The songs you play and the playlists you make will show here.",
+            "Qui compariranno i brani che ascolti e le playlist che crei.",
+        ),
     ],
     templates: &[
         ("Active: {}.", "Attiva: {0}."),

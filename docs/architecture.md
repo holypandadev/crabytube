@@ -135,7 +135,8 @@ covers other than the playing track's are dropped and the freed heap is returned
   player, and the ••• and heart buttons of rows grow to a finger's size.
 - Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`; Home fits the window without
   scrolling: the greeting, the search field, Jump back in, one shelf of the feed and the user's
-  lists, sized together from the window's height), the Library and the page of each
+  lists, or a welcome while there are none, in one column as wide as the window; the covers take
+  the height the rest leaves), the Library and the page of each
   of the user's lists (`ui/library.rs`), album/artist/playlist detail (`ui/collection.rs`), Now
   Playing with Up Next and Lyrics (`ui/now_playing.rs`) and Settings (`ui/settings.rs`).
 - `ui/playlists.rs`: the user's lists. Favorite songs is always there; the user makes, edits,

@@ -1,10 +1,13 @@
-//! The Home panels around the carousel: the greeting, recent searches, "Jump back in" and the
-//! status line. `HomeLayout` decides which of them fit; this module draws them.
+//! The Home panels around the carousel: the greeting, recent searches, "Jump back in", "Your
+//! lists" or the welcome in its place, and the status line. `HomeLayout` decides which of them fit;
+//! this module draws them.
 
 use super::home::{
-    CHIPS_H, GREETING_GAP, GREETING_SUBLINE_GAP, GreetingSize, HomeLayout, JUMP_HEADING_GAP,
-    JUMP_ROW_GAP, MAX_CHIPS, STATUS_H,
+    CHIPS_H, GREETING_FULL_FONT, GREETING_GAP, GREETING_PHONE_FONT, GREETING_SMALL_FONT,
+    GREETING_SUBLINE_GAP, GreetingSize, HEADING_GAP, HomeLayout, MAX_CHIPS, ROW_COVER, ROW_GAP,
+    ROW_H, STATUS_H, TILE_COVER, TILE_GAP, TILE_H, WELCOME_H,
 };
+use super::messages::ListId;
 use super::messages::RowMenu;
 use super::playlists::HEART_W;
 use super::shell::{fit, section_heading};
@@ -23,13 +26,19 @@ use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
 /// Edge of the thumbnails in "Jump back in".
-pub(super) const JUMP_THUMB: f32 = 36.0;
-/// Width of the duration or track count at the end of a "Jump back in" entry.
-const JUMP_META_W: f32 = 96.0;
+pub(super) const JUMP_THUMB: f32 = ROW_COVER;
+/// Width of the length at the end of a "Jump back in" entry.
+const JUMP_META_W: f32 = 44.0;
 /// An entry narrower than this leaves the length out.
 const JUMP_META_MIN_W: f32 = 440.0;
-/// Gap between the two columns of "Jump back in".
-const JUMP_COLUMN_GAP: f32 = 16.0;
+/// Gap between the columns of "Jump back in", and of "Your lists".
+const JUMP_COLUMN_GAP: f32 = 40.0;
+const LIST_COLUMN_GAP: f32 = 24.0;
+/// The type of a list's name and count on a phone's tiles.
+const TILE_NAME: f32 = 13.0;
+const TILE_COUNT: f32 = 11.0;
+/// Height of a row's two lines: the title, the gap and the line under it.
+const TWO_LINES_GAP: f32 = 3.0;
 const CHIP_TEXT_SIZE: f32 = TEXT_CAPTION;
 /// Estimated advance of one monospace character at chip size, and the chip's padding and border.
 const CHIP_CHAR_W: f32 = 8.0;
@@ -141,18 +150,25 @@ impl App {
         let twelve_hour = uses_twelve_hour_clock(self.preferences.ui_language);
         let stamp = clock_line(clock, twelve_hour, self.preferences.ui_language);
         let greeting = self.tr_static(greeting_for(day_part(clock.hour)));
-        let content: Element<'_, Message> = match layout.greeting {
-            GreetingSize::Full => column![
-                text(greeting).size(layout.greeting_font).font(MONO_BOLD),
+        // Large over the date while there is room, one line beside it when there is not; a
+        // phone's is small, over the date.
+        let over_date = |size: f32| -> Element<'_, Message> {
+            column![
+                text(greeting).size(size).font(MONO_BOLD),
                 Space::new().height(GREETING_SUBLINE_GAP),
-                label(stamp, TEXT_BODY).color(DIM),
+                label(stamp.clone(), TEXT_CAPTION).color(DIM),
             ]
-            .into(),
-            GreetingSize::Small => row![
-                text(greeting).size(TEXT_BODY).font(MONO_BOLD),
-                label(stamp, TEXT_CAPTION).color(DIM),
+            .into()
+        };
+        let content: Element<'_, Message> = match (layout.narrow, layout.greeting) {
+            (true, _) => over_date(GREETING_PHONE_FONT),
+            (false, GreetingSize::Full) => over_date(GREETING_FULL_FONT),
+            (false, GreetingSize::Small) => row![
+                text(greeting).size(GREETING_SMALL_FONT).font(MONO_BOLD),
+                Space::new().width(Length::Fill),
+                label(stamp.clone(), TEXT_CAPTION).color(DIM),
             ]
-            .spacing(12)
+            .height(layout.greeting_height())
             .align_y(Alignment::Center)
             .into(),
         };
@@ -259,17 +275,14 @@ impl App {
             .into()
     }
 
-    /// "Jump back in": the last things started, as one-line entries in two columns (one on a
-    /// phone). Tracks play; collections open.
+    /// "Jump back in": the last things started, as rows of a cover and two lines, in two columns
+    /// (one on a phone). Tracks play; collections open.
     pub(super) fn jump_view(&self, layout: &HomeLayout) -> Element<'_, Message> {
-        let per_row = if layout.narrow { 1 } else { 2 };
-        let cell_width = if layout.narrow {
-            layout.search_width
-        } else {
-            (layout.search_width - JUMP_COLUMN_GAP) / 2.0
-        };
+        let per_row = layout.jump_columns.max(1);
+        let cell_width =
+            (layout.search_width - JUMP_COLUMN_GAP * (per_row - 1) as f32) / per_row as f32;
         let entries: Vec<&RecentPlay> = self.recent.iter().take(layout.jump).collect();
-        let mut grid = column![].spacing(JUMP_ROW_GAP);
+        let mut grid = column![].spacing(ROW_GAP);
         for (chunk_index, chunk) in entries.chunks(per_row).enumerate() {
             let cells: Vec<Element<'_, Message>> = chunk
                 .iter()
@@ -286,8 +299,7 @@ impl App {
         }
         let heading = section_heading(self.tr_static("Jump back in").to_owned(), None);
         container(
-            column![heading, Space::new().height(JUMP_HEADING_GAP), grid]
-                .width(layout.search_width),
+            column![heading, Space::new().height(HEADING_GAP), grid].width(layout.search_width),
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
@@ -335,10 +347,10 @@ impl App {
                 Message::OpenCollection(collection.browse.clone()),
             ),
         };
-        let line = if detail.trim().is_empty() {
-            title
-        } else {
-            format!("{title} — {detail}")
+        // A collection says what it is, and how many songs it has, under its title.
+        let (detail, meta) = match play {
+            RecentPlay::Track(_) => (detail, meta),
+            RecentPlay::Collection(_) => (format!("{detail} · {meta}"), String::new()),
         };
         // A track entry's ••• button and heart take room from the title.
         let more_width = if menu.is_some() && matches!(play, RecentPlay::Track(_)) {
@@ -347,17 +359,25 @@ impl App {
             0.0
         };
         // On a phone the length gives its room to the title.
-        let show_meta = width >= JUMP_META_MIN_W;
-        let meta_width = if show_meta { JUMP_META_W } else { 0.0 };
-        let text_width = (width - JUMP_THUMB - meta_width - 36.0 - more_width).max(40.0);
-        let mut content = row![
-            self.cover(url, JUMP_THUMB, variant),
-            container(label(fit(&line, text_width, TEXT_BODY), TEXT_BODY)).width(Length::Fill),
-        ]
-        .spacing(12)
-        .align_y(Alignment::Center);
+        let show_meta = width >= JUMP_META_MIN_W && !meta.is_empty();
+        let meta_width = if show_meta { JUMP_META_W + 12.0 } else { 0.0 };
+        let text_width = (width - 12.0 - JUMP_THUMB - 12.0 - meta_width - more_width).max(40.0);
+        let mut lines = column![label(fit(&title, text_width, TEXT_BODY), TEXT_BODY)]
+            .spacing(TWO_LINES_GAP)
+            .width(Length::Fill);
+        if !detail.trim().is_empty() {
+            lines =
+                lines.push(label(fit(&detail, text_width, TEXT_CAPTION), TEXT_CAPTION).color(DIM));
+        }
+        let mut content = row![self.cover(url, JUMP_THUMB, variant), lines]
+            .spacing(12)
+            .align_y(Alignment::Center);
         if show_meta {
-            content = content.push(label(meta, TEXT_CAPTION).color(DIM));
+            content = content.push(
+                container(label(meta, TEXT_CAPTION).color(DIM))
+                    .width(JUMP_META_W)
+                    .align_right(JUMP_META_W),
+            );
         }
         // The entry under the keyboard cursor is outlined.
         let index = menu.as_ref().map_or(0, |menu| menu.index);
@@ -385,13 +405,189 @@ impl App {
         let entry = button(content)
             .on_press(action)
             .width(Length::Fill)
-            .padding([2, 6])
+            .height(ROW_H)
+            .padding([4, 6])
             .style(if cursor {
                 theme::row_button_cursor
             } else {
                 theme::row_button
             });
         super::keyboard::mark_row("recent", index, entry)
+    }
+
+    /// "Your lists": a row of the user's lists, each its cover, its name and its song count, with a
+    /// link to the Library; on a phone, a grid of outlined tiles two across. A list opens its page.
+    pub(super) fn lists_view(&self, layout: &HomeLayout) -> Element<'_, Message> {
+        let per_row = if layout.narrow {
+            2
+        } else {
+            layout.list_columns.max(1)
+        };
+        let gap = if layout.narrow {
+            TILE_GAP
+        } else {
+            LIST_COLUMN_GAP
+        };
+        let cell = (layout.search_width - gap * (per_row - 1) as f32) / per_row as f32;
+        let lists: Vec<ListId> = self.home_lists().into_iter().take(layout.lists).collect();
+        let mut grid = column![].spacing(if layout.narrow { TILE_GAP } else { ROW_GAP });
+        for chunk in lists.chunks(per_row) {
+            let cells: Vec<Element<'_, Message>> = chunk
+                .iter()
+                .map(|list| self.list_entry(*list, cell, layout.narrow))
+                .collect();
+            grid = grid.push(row(cells).spacing(gap));
+        }
+        let library = button(
+            row![
+                label(self.tr("Library").into_owned(), TEXT_CAPTION),
+                icon("chev-right", 12.0, DIM),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::Navigate(super::Page::Library))
+        .padding([2, 4])
+        .style(theme::text_link(DIM));
+        let heading = section_heading(
+            self.tr_static("Your lists").to_owned(),
+            Some(library.into()),
+        );
+        container(
+            column![heading, Space::new().height(HEADING_GAP), grid].width(layout.search_width),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    }
+
+    /// One list of "Your lists", `width` wide: a row on a wide window, a tile on a phone.
+    fn list_entry(&self, list: ListId, width: f32, tile: bool) -> Element<'_, Message> {
+        let (name, count) = match list {
+            ListId::Favorites => (self.tr("Favorite songs").into_owned(), self.favorites.len()),
+            ListId::Playlist(id) => self
+                .playlist(id)
+                .map(|playlist| (playlist.name.clone(), playlist.tracks.len()))
+                .unwrap_or_default(),
+        };
+        let (cover, name_size, count_size, padding, spacing) = if tile {
+            (
+                TILE_COVER,
+                TILE_NAME,
+                TILE_COUNT,
+                Padding {
+                    top: 6.0,
+                    right: 8.0,
+                    bottom: 6.0,
+                    left: 6.0,
+                },
+                10.0,
+            )
+        } else {
+            (
+                ROW_COVER,
+                TEXT_BODY,
+                TEXT_CAPTION,
+                Padding::from([4.0, 6.0]),
+                12.0,
+            )
+        };
+        let text_width = (width - padding.left - padding.right - cover - spacing - 2.0).max(40.0);
+        let lines = column![
+            text(fit(&name, text_width, name_size))
+                .size(name_size)
+                .font(MONO),
+            text(self.song_count(count, false))
+                .size(count_size)
+                .font(MONO)
+                .color(DIM),
+        ]
+        .spacing(if tile { 2.0 } else { TWO_LINES_GAP })
+        .width(Length::Fill);
+        button(
+            row![self.list_cover(list, cover), lines]
+                .spacing(spacing)
+                .align_y(Alignment::Center),
+        )
+        .on_press(Message::Navigate(super::Page::List(list)))
+        .width(width)
+        .height(if tile { TILE_H } else { ROW_H })
+        .padding(padding)
+        .style(if tile {
+            theme::tile_button
+        } else {
+            theme::row_button
+        })
+        .into()
+    }
+
+    /// The welcome that stands in for "Your lists" while the user has no list: how to start one,
+    /// and a button that makes a playlist.
+    pub(super) fn welcome_view(&self, layout: &HomeLayout) -> Element<'_, Message> {
+        let first = self
+            .tr("Tap the heart on any song to keep it in Favorite songs.")
+            .into_owned();
+        let second = self
+            .tr("The songs you play and the playlists you make will show here.")
+            .into_owned();
+        let new = button(
+            row![
+                icon("plus", 12.0, theme::INK),
+                label(self.tr("New playlist").into_owned(), TEXT_CAPTION),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::NewPlaylist(None))
+        .padding([9, 16])
+        .style(theme::outline_button);
+        let content: Element<'_, Message> = if layout.narrow {
+            column![
+                row![
+                    icon("like", 18.0, theme::INK),
+                    column![
+                        text(first).size(TILE_NAME).font(MONO),
+                        text(second).size(TILE_COUNT).font(MONO).color(DIM),
+                    ]
+                    .spacing(4)
+                    .width(Length::Fill),
+                ]
+                .spacing(12),
+                new,
+            ]
+            .spacing(12)
+            .padding(14)
+            .into()
+        } else {
+            row![
+                icon("like", 18.0, theme::INK),
+                column![
+                    label(first, TEXT_BODY),
+                    label(second, TEXT_CAPTION).color(DIM)
+                ]
+                .spacing(TWO_LINES_GAP)
+                .width(Length::Fill),
+                new,
+            ]
+            .spacing(16)
+            .align_y(Alignment::Center)
+            .padding(Padding {
+                top: 0.0,
+                right: 12.0,
+                bottom: 0.0,
+                left: 18.0,
+            })
+            .height(WELCOME_H)
+            .into()
+        };
+        container(
+            container(content)
+                .width(layout.search_width)
+                .style(theme::faint_box),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
     }
 
     /// The status line at the foot of Home: memory and CPU of this process on the left, the
