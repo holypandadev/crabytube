@@ -48,6 +48,15 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-10-22">
+      <description>
+        <p>Playlists: Favorite songs and your own lists in a Library, a Save to panel on every
+        heart, covers from your computer and dragging to reorder; a Home that fits the window
+        with Jump back in, All-time essentials and Your lists; artist pages with albums, singles
+        and artists alike; notes with Undo; Up next reordered by dragging; and a layout for
+        phone-width windows with the tabs at the foot.</p>
+      </description>
+    </release>
     <release version="0.1.2" date="2026-10-18">
       <description>
         <p>A tray icon on Windows and macOS, updates offered in the Flatpak, and Discord Rich
