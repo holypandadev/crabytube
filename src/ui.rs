@@ -2264,7 +2264,11 @@ impl App {
                             "YouTube Music Home feed loaded"
                         );
                         self.home_shelves = shelves;
-                        self.home_picks.rebuild(&self.home_shelves);
+                        // Without "All-time essentials" Home keeps what it shows until the
+                        // supplemental sections bring it, rather than flash a stand-in shelf.
+                        if home::HomePicks::has_essentials(&self.home_shelves) {
+                            self.home_picks.rebuild(&self.home_shelves);
+                        }
                         self.learn_shelf_durations();
                         self.home_error = None;
                         let shelves = self.home_shelves.clone();
@@ -2300,12 +2304,8 @@ impl App {
                     return Task::none();
                 };
                 match result {
-                    Ok(shelves) => {
-                        if shelves.is_empty() {
-                            return Task::none();
-                        }
+                    Ok(shelves) if !shelves.is_empty() => {
                         crate::music::append_unique_shelves(&mut self.home_shelves, shelves);
-                        self.home_picks.rebuild(&self.home_shelves);
                         self.learn_shelf_durations();
                         tracing::info!(
                             shelves = self.home_shelves.len(),
@@ -2320,12 +2320,15 @@ impl App {
                         drop(tokio::task::spawn_blocking(move || {
                             crate::home_cache::save(&shelves)
                         }));
-                        return self.preload_current_page_artwork();
                     }
+                    Ok(_) => {}
                     Err(error) => {
                         tracing::debug!(%error, "supplemental Home sections unavailable");
                     }
                 }
+                // Without them Home falls back to a shelf of the first feed.
+                self.home_picks.rebuild(&self.home_shelves);
+                return self.preload_current_page_artwork();
             }
             Message::WindowFocusChanged(focused) => {
                 self.window_focused = Some(focused);
@@ -5937,6 +5940,60 @@ mod tests {
 
         assert_eq!(app.home_shelves.len(), 1);
         assert_eq!(app.home_shelves[0].title, "Current shelf");
+    }
+
+    #[tokio::test]
+    async fn home_keeps_its_shelf_until_the_supplemental_sections_bring_the_essentials() {
+        let mut app = App {
+            home_generation: 7,
+            home_shelves: vec![shelf_with_artwork(0)],
+            ..App::default()
+        };
+        app.home_picks.rebuild(&app.home_shelves);
+        let loaded = app.update(Message::HomeLoaded {
+            generation: 7,
+            result: Some(Ok(vec![shelf_with_artwork(1)])),
+        });
+        assert_eq!(app.home_picks.title, "All-time essentials");
+        let more = app.update(Message::HomeMoreLoaded {
+            generation: 7,
+            result: Some(Ok(vec![shelf_with_artwork(0)])),
+        });
+        assert_eq!(app.home_shelves.len(), 2);
+        assert_eq!(app.home_picks.title, "All-time essentials");
+        drop((loaded, more));
+    }
+
+    #[tokio::test]
+    async fn home_falls_back_to_the_first_feed_without_the_supplemental_sections() {
+        let mut app = App {
+            home_generation: 7,
+            home_loading: true,
+            ..App::default()
+        };
+        // The stand-in is the first shelf of collections.
+        let mut playlists = shelf_with_artwork(1);
+        for item in &mut playlists.items {
+            item.browse_target = Some(crate::music::BrowseTarget {
+                browse_id: format!("VL{}", item.title),
+                params: None,
+                page_type: Some("MUSIC_PAGE_TYPE_PLAYLIST".into()),
+            });
+        }
+        let loaded = app.update(Message::HomeLoaded {
+            generation: 7,
+            result: Some(Ok(vec![playlists])),
+        });
+        // Still waiting for the supplemental sections, so Home says it is loading.
+        assert!(app.home_picks.items.is_empty());
+        assert!(app.home_more_cancel.is_some());
+        let more = app.update(Message::HomeMoreLoaded {
+            generation: 7,
+            result: Some(Err("offline".into())),
+        });
+        assert_eq!(app.home_picks.title, "Shelf 1");
+        assert!(app.home_more_cancel.is_none());
+        drop((loaded, more));
     }
 
     #[test]

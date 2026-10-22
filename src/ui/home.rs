@@ -104,22 +104,27 @@ impl ShelfPicks {
     }
 }
 
+fn is_essentials(shelf: &crate::music::HomeShelf) -> bool {
+    ESSENTIALS_TITLES.contains(&shelf.title.trim().to_lowercase().as_str())
+}
+
 impl HomePicks {
+    /// Whether `shelves` include "All-time essentials" itself, which YouTube Music usually sends
+    /// with the supplemental sections rather than the first feed.
+    pub fn has_essentials(shelves: &[crate::music::HomeShelf]) -> bool {
+        shelves.iter().any(is_essentials)
+    }
+
     pub fn rebuild(&mut self, shelves: &[crate::music::HomeShelf]) {
-        let first = shelves
-            .iter()
-            .position(|shelf| {
-                ESSENTIALS_TITLES.contains(&shelf.title.trim().to_lowercase().as_str())
-            })
-            .or_else(|| {
-                shelves.iter().position(|shelf| {
-                    shelf.items.iter().any(|item| {
-                        item.browse_target
-                            .as_ref()
-                            .is_some_and(|target| target.is_public_collection())
-                    })
+        let first = shelves.iter().position(is_essentials).or_else(|| {
+            shelves.iter().position(|shelf| {
+                shelf.items.iter().any(|item| {
+                    item.browse_target
+                        .as_ref()
+                        .is_some_and(|target| target.is_public_collection())
                 })
-            });
+            })
+        });
         let Some(first) = first else {
             *self = Self::default();
             return;
@@ -677,7 +682,9 @@ impl App {
         let layout = self.home_layout(area);
         let search_x = ((area.width - layout.search_width) / 2.0).max(0.0);
         let carousel: Element<'_, Message> = if self.home_picks.items.is_empty() {
-            let status: Element<'_, Message> = if self.home_loading {
+            // The supplemental sections may still bring "All-time essentials".
+            let loading = self.home_loading || self.home_more_cancel.is_some();
+            let status: Element<'_, Message> = if loading {
                 label(self.tr("[ LOADING YOUTUBE MUSIC ]").into_owned(), TEXT_BODY)
                     .color(DIM)
                     .into()
