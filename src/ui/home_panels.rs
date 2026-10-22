@@ -3,9 +3,9 @@
 //! this module draws them.
 
 use super::home::{
-    CHIPS_H, GREETING_FULL_FONT, GREETING_GAP, GREETING_PHONE_FONT, GREETING_SMALL_FONT,
-    GREETING_SUBLINE_GAP, GreetingSize, HEADING_GAP, HomeLayout, MAX_CHIPS, ROW_COVER, ROW_GAP,
-    ROW_H, STATUS_H, TILE_COVER, TILE_GAP, TILE_H, WELCOME_H,
+    CHIPS_H, GREETING_FULL_FONT, GREETING_PHONE_FONT, GREETING_SMALL_FONT, GREETING_SUBLINE_GAP,
+    GreetingSize, HomeLayout, MAX_CHIPS, ROW_COVER, ROW_GAP, ROW_H, STATUS_H, TILE_COVER, TILE_GAP,
+    TILE_H, WELCOME_H,
 };
 use super::messages::ListId;
 use super::messages::RowMenu;
@@ -19,7 +19,7 @@ use crate::local_clock::LocalClock;
 use crate::preferences::{RecentPlay, UiLanguage};
 use crate::process_stats::{self, ProcessReading};
 use futures_util::{SinkExt, Stream};
-use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
+use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::{Alignment, Color, Element, Length, Padding};
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,9 +40,11 @@ const TILE_COUNT: f32 = 11.0;
 /// Height of a row's two lines: the title, the gap and the line under it.
 const TWO_LINES_GAP: f32 = 3.0;
 const CHIP_TEXT_SIZE: f32 = TEXT_CAPTION;
-/// Estimated advance of one monospace character at chip size, and the chip's padding and border.
+/// Estimated advance of one monospace character at chip size, and the chip's padding and border:
+/// a wide window's chips keep room for their × too; a phone's, which have none, are narrower.
 const CHIP_CHAR_W: f32 = 8.0;
-const CHIP_PADDING: f32 = 26.0 + CHIP_CLOSE + CHIP_CLOSE_GAP;
+const CHIP_PADDING_NARROW: f32 = 26.0;
+const CHIP_PADDING: f32 = CHIP_PADDING_NARROW + CHIP_CLOSE + CHIP_CLOSE_GAP;
 /// The × that removes a recent search; its room is kept even while it is hidden.
 const CHIP_CLOSE: f32 = 10.0;
 const CHIP_CLOSE_GAP: f32 = 8.0;
@@ -121,19 +123,24 @@ fn uses_twelve_hour_clock(language: UiLanguage) -> bool {
     language == UiLanguage::English
 }
 
-/// The recent searches that get a chip, in order and at most `MAX_CHIPS`. On a desktop width
-/// only the ones that fit on one line; on a phone the row scrolls, so all of them count.
+/// The recent searches that get a chip: in order, at most `MAX_CHIPS`, and only the ones that fit
+/// on one line. A phone's chips have no ×, so they are narrower.
 pub(super) fn chip_queries(searches: &[String], width: f32, narrow: bool) -> Vec<String> {
+    let padding = if narrow {
+        CHIP_PADDING_NARROW
+    } else {
+        CHIP_PADDING
+    };
     let mut chips: Vec<String> = Vec::new();
     let mut used = 0.0;
     for query in searches.iter().take(MAX_CHIPS) {
-        let chip = query.width() as f32 * CHIP_CHAR_W + CHIP_PADDING;
+        let chip = query.width() as f32 * CHIP_CHAR_W + padding;
         let next = if chips.is_empty() {
             chip
         } else {
             used + CHIP_GAP + chip
         };
-        if !narrow && next > width {
+        if next > width {
             break;
         }
         used = next;
@@ -176,7 +183,7 @@ impl App {
             .width(Length::Fill)
             .center_x(Length::Fill)
             .padding(Padding {
-                bottom: GREETING_GAP,
+                bottom: layout.spacing.greeting,
                 ..Padding::ZERO
             })
             .into()
@@ -225,15 +232,25 @@ impl App {
         )
     }
 
-    /// The recent searches as outlined chips. A click searches for that query again.
+    /// The recent searches as outlined chips. A click searches for that query again. On a wide
+    /// window a chip inverts while hovered, and only then shows the × that forgets the search; a
+    /// phone has no hover, so its chips have no ×.
     pub(super) fn recent_chips_view(&self, layout: &HomeLayout) -> Element<'_, Message> {
         let chips: Vec<Element<'_, Message>> =
             chip_queries(&self.search_history, layout.search_width, layout.narrow)
                 .into_iter()
                 .take(layout.chips)
                 .map(|query| {
-                    let shown = fit(&query, layout.search_width * 0.8, CHIP_TEXT_SIZE);
-                    // The chip inverts while hovered, and only then shows its ×.
+                    let shown = text(fit(&query, layout.search_width * 0.8, CHIP_TEXT_SIZE))
+                        .size(CHIP_TEXT_SIZE)
+                        .font(MONO);
+                    if layout.narrow {
+                        return button(shown)
+                            .on_press(Message::SearchFor(query))
+                            .padding([6, 12])
+                            .style(theme::outline_button)
+                            .into();
+                    }
                     let hovered = self.hovered_chip.as_deref() == Some(query.as_str());
                     let remove = button(icon(
                         "close",
@@ -244,7 +261,7 @@ impl App {
                     .padding(0)
                     .style(theme::bare_button);
                     let chip = button(
-                        row![text(shown).size(CHIP_TEXT_SIZE).font(MONO), remove]
+                        row![shown, remove]
                             .spacing(CHIP_CLOSE_GAP)
                             .align_y(Alignment::Center),
                     )
@@ -258,17 +275,7 @@ impl App {
                 })
                 .collect();
         let strip = row(chips).spacing(CHIP_GAP).align_y(Alignment::Center);
-        let line: Element<'_, Message> = if layout.narrow {
-            scrollable(strip)
-                .direction(scrollable::Direction::Horizontal(
-                    scrollable::Scrollbar::hidden(),
-                ))
-                .width(layout.search_width)
-                .into()
-        } else {
-            container(strip).width(layout.search_width).into()
-        };
-        container(line)
+        container(container(strip).width(layout.search_width))
             .width(Length::Fill)
             .height(CHIPS_H)
             .center_x(Length::Fill)
@@ -299,7 +306,8 @@ impl App {
         }
         let heading = section_heading(self.tr_static("Jump back in").to_owned(), None);
         container(
-            column![heading, Space::new().height(HEADING_GAP), grid].width(layout.search_width),
+            column![heading, Space::new().height(layout.spacing.heading), grid]
+                .width(layout.search_width),
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
@@ -361,13 +369,22 @@ impl App {
         // On a phone the length gives its room to the title.
         let show_meta = width >= JUMP_META_MIN_W && !meta.is_empty();
         let meta_width = if show_meta { JUMP_META_W + 12.0 } else { 0.0 };
-        let text_width = (width - 12.0 - JUMP_THUMB - 12.0 - meta_width - more_width).max(40.0);
-        let mut lines = column![label(fit(&title, text_width, TEXT_BODY), TEXT_BODY)]
-            .spacing(TWO_LINES_GAP)
-            .width(Length::Fill);
+        // The entry's padding (6 px each side), the cover and the gaps around the lines.
+        let text_width =
+            (width - 12.0 - 12.0 - JUMP_THUMB - 12.0 - meta_width - more_width).max(40.0);
+        // The lines are cut to fit, never wrapped: a glyph from another font, as an emoji, can run
+        // wider than its cells.
+        let mut lines = column![
+            label(fit(&title, text_width, TEXT_BODY), TEXT_BODY).wrapping(text::Wrapping::None)
+        ]
+        .spacing(TWO_LINES_GAP)
+        .width(Length::Fill);
         if !detail.trim().is_empty() {
-            lines =
-                lines.push(label(fit(&detail, text_width, TEXT_CAPTION), TEXT_CAPTION).color(DIM));
+            lines = lines.push(
+                label(fit(&detail, text_width, TEXT_CAPTION), TEXT_CAPTION)
+                    .color(DIM)
+                    .wrapping(text::Wrapping::None),
+            );
         }
         let mut content = row![self.cover(url, JUMP_THUMB, variant), lines]
             .spacing(12)
@@ -454,7 +471,8 @@ impl App {
             Some(library.into()),
         );
         container(
-            column![heading, Space::new().height(HEADING_GAP), grid].width(layout.search_width),
+            column![heading, Space::new().height(layout.spacing.heading), grid]
+                .width(layout.search_width),
         )
         .width(Length::Fill)
         .center_x(Length::Fill)
@@ -496,7 +514,8 @@ impl App {
         let lines = column![
             text(fit(&name, text_width, name_size))
                 .size(name_size)
-                .font(MONO),
+                .font(MONO)
+                .wrapping(text::Wrapping::None),
             text(self.song_count(count, false))
                 .size(count_size)
                 .font(MONO)
@@ -849,8 +868,10 @@ mod tests {
             chip_queries(&searches, 200.0, false),
             vec!["daft punk".to_string(), "lofi".to_string()]
         );
-        // Phones scroll the row, so every chip counts, up to the limit.
-        assert_eq!(chip_queries(&searches, 200.0, true).len(), 4);
+        // A phone's chips have no ×, so more of them fit: both in 180 px, where a wide window
+        // fits only the first.
+        assert_eq!(chip_queries(&searches, 180.0, false).len(), 1);
+        assert_eq!(chip_queries(&searches, 180.0, true).len(), 2);
         let many: Vec<String> = (0..9).map(|i| format!("q{i}")).collect();
         assert_eq!(chip_queries(&many, 2_000.0, false).len(), MAX_CHIPS);
         assert!(chip_queries(&[], 800.0, false).is_empty());
