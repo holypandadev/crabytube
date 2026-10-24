@@ -704,6 +704,10 @@ mod tests {
         // Installing from such a copy only opens the page; nothing is downloaded.
         drop(app.update(Message::InstallUpdate));
         assert_eq!(app.update, UpdateState::Available(available(false)));
+        assert_eq!(
+            crate::updater::OPENED_PAGES.with(|pages| pages.borrow().clone()),
+            [available(false).notes_url]
+        );
     }
 
     #[test]

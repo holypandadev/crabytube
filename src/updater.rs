@@ -860,6 +860,22 @@ pub fn open_page(url: &str) {
     if !allowed_url(url, false) {
         return;
     }
+    // Tests note the page instead of opening a browser on the machine that runs them.
+    #[cfg(test)]
+    OPENED_PAGES.with(|pages| pages.borrow_mut().push(url.to_owned()));
+    #[cfg(not(test))]
+    open_in_browser(url);
+}
+
+// The pages `open_page` was asked to open on this test thread.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static OPENED_PAGES: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(not(test))]
+fn open_in_browser(url: &str) {
     #[cfg(windows)]
     let opened = std::process::Command::new("explorer").arg(url).spawn();
     #[cfg(target_os = "macos")]
