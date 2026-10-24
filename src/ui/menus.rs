@@ -78,6 +78,10 @@ impl App {
                 self.search_live().get(index).copied()?.track.as_ref()?,
                 RowContext::Plain,
             ),
+            "episodes" => SheetTarget::Song(
+                self.search_episodes().get(index).copied()?.track.as_ref()?,
+                RowContext::Plain,
+            ),
             "jump" => match self.recent.get(index)? {
                 RecentPlay::Track(track) => SheetTarget::Song(track, RowContext::Plain),
                 RecentPlay::Collection(_) => return None,
@@ -209,14 +213,10 @@ impl App {
                 Some(Message::OpenSaveDialog(track.clone())),
             ),
         ];
-        // The artist and album the catalog named. An artist it gave no page for is looked up by
-        // name; an album it did not name gets no "Go to".
+        // The artist, or an episode's podcast, and the album the catalog named. An artist it gave no
+        // page for is looked up by name; an album it did not name gets no "Go to".
         let destinations = super::track_actions::go_to_destinations(track);
-        if !destinations
-            .iter()
-            .any(|(title, _)| *title == "Go to artist")
-            && !track.artist.trim().is_empty()
-        {
+        if track.artist_page.is_none() && !track.artist.trim().is_empty() {
             actions.push((
                 "artist",
                 "Go to artist",

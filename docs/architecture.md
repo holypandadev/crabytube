@@ -19,7 +19,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | --- | --- |
 | `main.rs` | Process entry: allocator tuning on Linux/glibc, logging (`logging.rs`; `crabytube.log` on Windows and macOS), renderer selection, the single-instance check, start of the GUI and, once it ends, the Windows installer of a downloaded update. |
 | `ui.rs`, `ui/` | Iced application (`App`): state, `update`, `view`, subscriptions. |
-| `music.rs`, `music/browse.rs` | `MusicService` trait and its YouTube Music implementation: Home feed, search and suggestions, radio, album/artist/playlist pages and continuations. |
+| `music.rs`, `music/browse.rs` | `MusicService` trait and its YouTube Music implementation: Home feed, search and suggestions, radio, album/artist/playlist/podcast pages and continuations. A podcast's episodes are tracks that name the podcast as their artist and link to its page. |
 | `playback/` | `resolver.rs` (stream resolution), `pot.rs` (PO tokens via the BotGuard helper), `engine.rs` (playback actor, HTTP streaming, decoding, output), `output.rs` (audio device enumeration and opening). |
 | `network.rs` | Shared HTTP client and the switches for network troubleshooting. |
 | `runtime_cache.rs` | Web client values (`ytcfg`) persisted for six hours to avoid fetching the Music page on every launch. |
@@ -40,6 +40,7 @@ see `vendor/iced_tiny_skia/PATCHES.md`) and `rustypipe-botguard` (see
 | `single_instance.rs` | One running copy: a second launch asks the first to show its window and exits. |
 | `app_dirs.rs`, `flatpak.rs`, `background_portal.rs` | Data folders, Flatpak detection, and launch on startup through the Background portal inside the Flatpak. |
 | `playback/live.rs` | Live broadcasts, which have no length and cannot be sought. |
+| `playback/fragments.rs` | Long tracks such as podcast episodes: an MP4 of short fragments is decoded as a stream from its segment index, and a seek starts a new decoder at the fragment that holds the position. Tracks up to 16 MiB come whole, as before. |
 
 Catalog and playback code does not depend on Iced; the UI talks to them through `MusicService`,
 `StreamResolver` and `PlaybackHandle`.
@@ -138,7 +139,7 @@ covers other than the playing track's are dropped and the freed heap is returned
   lists, or a welcome while there are none, in one column as wide as the window; the covers take
   the height the rest leaves, a whole number of them across with the start of the next one at the
   edge, and the gaps open up a little on a page with room to spare), the Library and the page of each
-  of the user's lists (`ui/library.rs`), album/artist/playlist detail (`ui/collection.rs`), Now
+  of the user's lists (`ui/library.rs`), album/artist/playlist/podcast detail (`ui/collection.rs`), Now
   Playing with Up Next and Lyrics (`ui/now_playing.rs`) and Settings (`ui/settings.rs`).
 - `ui/playlists.rs`: the user's lists. Favorite songs is always there; the user makes, edits,
   orders and deletes playlists. Every heart opens the Save panel, which puts its song in any list

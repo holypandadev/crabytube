@@ -558,6 +558,12 @@ pub(super) static CATALOG: Catalog = Catalog {
             "The songs you play and the playlists you make will show here.",
             "你播放的歌曲和创建的播放列表会显示在这里。",
         ),
+        ("More episodes", "更多单集"),
+        ("Episodes", "单集"),
+        ("Podcasts", "播客"),
+        ("Podcast", "播客"),
+        ("Go to podcast", "前往播客"),
+        ("1 episode", "1 集"),
     ],
     templates: &[
         ("Active: {}.", "当前：{0}。"),
@@ -570,6 +576,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("{#} saved tracks", "已收藏 {0} 首歌曲"),
         ("{#} songs", "{0} 首歌曲"),
         ("{#}+ songs", "{0}+ 首歌曲"),
+        ("{#} episodes", "{0} 集"),
+        ("{#}+ episodes", "{0}+ 集"),
         ("{cache} is already empty.", "{0}：已为空。"),
         (
             "Cleared {cache} ({} MiB removed).",

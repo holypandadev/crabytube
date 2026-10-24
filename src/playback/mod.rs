@@ -1,4 +1,5 @@
 mod engine;
+mod fragments;
 mod live;
 pub mod output;
 pub(crate) mod player_config;

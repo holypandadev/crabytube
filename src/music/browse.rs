@@ -12,6 +12,11 @@ pub struct BrowseTarget {
     pub page_type: Option<String>,
 }
 
+/// A podcast's page, which lists its episodes.
+const PODCAST_PAGE: &str = "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE";
+/// An episode's own page. The app plays the episode instead of opening it.
+pub(super) const EPISODE_PAGE: &str = "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE";
+
 impl BrowseTarget {
     pub fn is_public_collection(&self) -> bool {
         match self.page_type.as_deref() {
@@ -19,13 +24,19 @@ impl BrowseTarget {
                 "MUSIC_PAGE_TYPE_PLAYLIST"
                 | "MUSIC_PAGE_TYPE_ALBUM"
                 | "MUSIC_PAGE_TYPE_ARTIST"
-                | "MUSIC_PAGE_TYPE_USER_CHANNEL",
+                | "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                | PODCAST_PAGE,
             ) => true,
             Some("MUSIC_PAGE_TYPE_MIXED_CONTENT") | None => {
                 self.browse_id.starts_with("VL") || self.browse_id.starts_with("RD")
             }
             _ => false,
         }
+    }
+
+    /// A podcast, whose page lists its episodes.
+    pub fn is_podcast(&self) -> bool {
+        self.page_type.as_deref() == Some(PODCAST_PAGE)
     }
 }
 
@@ -41,11 +52,15 @@ pub struct CollectionTrack {
     pub track: Track,
     pub duration: Option<Duration>,
     pub references: Vec<CatalogReference>,
+    /// When an episode came out, as the catalog words it ("2 days ago", "Oct 16").
+    pub published: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Continuation {
     pub token: String,
+    /// The podcast whose further episodes the token loads: they name it as their artist.
+    pub podcast: Option<Box<(String, BrowseTarget)>>,
 }
 
 const MAX_CONTINUATION_TOKEN_BYTES: usize = 32 * 1024;
@@ -267,9 +282,15 @@ pub(super) fn parse_catalog_track(item: &Value) -> Option<CollectionTrack> {
         .iter()
         .find(|reference| is_album_destination(reference))
         .map(|reference| reference.label.clone());
+    // An episode links its podcast where a song links its artist.
     let artist_page = references
         .iter()
         .find(|reference| is_artist_destination(reference))
+        .or_else(|| {
+            references
+                .iter()
+                .find(|reference| reference.target.is_podcast())
+        })
         .map(|reference| reference.target.clone());
     let album_page = references
         .iter()
@@ -314,6 +335,13 @@ pub(super) fn parse_catalog_track(item: &Value) -> Option<CollectionTrack> {
                 .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text")
                 .and_then(text_value)?;
             parse_duration(byline.rsplit('•').next()?.trim())
+        })
+        // A podcast's page gives an episode's length in words ("2 hr 43 min").
+        .or_else(|| {
+            item.pointer("/playbackProgress/musicPlaybackProgressRenderer/durationText")
+                .and_then(text_value)
+                .as_deref()
+                .and_then(parse_spoken_duration)
         });
     Some(CollectionTrack {
         track: Track {
@@ -328,7 +356,53 @@ pub(super) fn parse_catalog_track(item: &Value) -> Option<CollectionTrack> {
         },
         duration,
         references,
+        published: None,
     })
+}
+
+/// An episode row of a podcast's page. Its byline reads "682K views • 20h ago": the episode's
+/// artist is the podcast, which links to the podcast's page, and the date shows in its place.
+fn parse_episode(item: &Value, podcast: &str, target: &BrowseTarget) -> Option<CollectionTrack> {
+    let mut entry = parse_catalog_track(item)?;
+    entry.track.artist = super::bound_catalog_text(podcast, 1_024);
+    entry.track.artist_page = Some(target.clone());
+    entry.published = item
+        .get("subtitle")
+        .and_then(text_value)
+        .and_then(|text| {
+            text.rsplit('•')
+                .next()
+                .map(|date| super::bound_catalog_text(date.trim(), 64))
+        })
+        .filter(|date| !date.is_empty());
+    Some(entry)
+}
+
+/// The rows of a collection's shelf that become tracks: the songs of a playlist or an album, or the
+/// episodes of a podcast, which name the podcast as their artist.
+fn shelf_tracks(
+    rows: &[Value],
+    podcast: Option<(&str, &BrowseTarget)>,
+) -> (Vec<CollectionTrack>, usize) {
+    let mut tracks = Vec::new();
+    let mut unavailable = 0;
+    for row in rows.iter().take(super::MAX_COLLECTION_PAGE_TRACKS) {
+        let parsed = if let Some(item) = row.get("musicResponsiveListItemRenderer") {
+            parse_catalog_track(item)
+        } else if let Some(item) = row.get("musicMultiRowListItemRenderer") {
+            match podcast {
+                Some((title, target)) => parse_episode(item, title, target),
+                None => parse_catalog_track(item),
+            }
+        } else {
+            continue;
+        };
+        match parsed {
+            Some(track) => tracks.push(track),
+            None => unavailable += 1,
+        }
+    }
+    (tracks, unavailable)
 }
 
 /// An artist destination: the page type says so, or, when the response omits it, a channel id.
@@ -340,11 +414,13 @@ fn is_artist_destination(reference: &CatalogReference) -> bool {
 }
 
 /// A linked album or release destination.
+/// An album destination: the page type says so, or, when the response omits it, an `MP` id. Episodes
+/// and podcasts have `MP` ids too, but always with their page type.
 fn is_album_destination(reference: &CatalogReference) -> bool {
-    matches!(
-        reference.target.page_type.as_deref(),
-        Some("MUSIC_PAGE_TYPE_ALBUM")
-    ) || reference.target.browse_id.starts_with("MP")
+    match reference.target.page_type.as_deref() {
+        Some(page_type) => page_type == "MUSIC_PAGE_TYPE_ALBUM",
+        None => reference.target.browse_id.starts_with("MP"),
+    }
 }
 
 pub(super) fn parse_duration(text: &str) -> Option<Duration> {
@@ -361,6 +437,45 @@ pub(super) fn parse_duration(text: &str) -> Option<Duration> {
         seconds = seconds.checked_mul(60)?.checked_add(value)?;
     }
     Some(Duration::from_secs(seconds))
+}
+
+/// A length in words, as podcasts give it: "2 hr 43 min", "2 Std., 43 Min.", "2時間 43 分",
+/// "2小时43分钟". Each number is read with the unit that follows it.
+pub(super) fn parse_spoken_duration(text: &str) -> Option<Duration> {
+    let mut seconds = 0_u64;
+    let mut found = false;
+    let mut rest = text.trim_start_matches(|c: char| !c.is_ascii_digit());
+    while !rest.is_empty() {
+        let digits = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        let value: u64 = rest[..digits].parse().ok()?;
+        let after = rest[digits..].trim_start();
+        let unit: String = after
+            .chars()
+            .take_while(|c| !c.is_ascii_digit() && !c.is_whitespace() && *c != ',')
+            .collect::<String>()
+            .to_lowercase();
+        let scale = if unit.starts_with("min") || unit.starts_with("мин") || unit.starts_with('分')
+        {
+            60
+        } else if unit.starts_with('h')
+            || unit.starts_with("std")
+            || unit.starts_with('ч')
+            || unit.starts_with('時')
+            || unit.starts_with('小')
+        {
+            3_600
+        } else if unit.starts_with('s') || unit.starts_with("сек") || unit.starts_with('秒') {
+            1
+        } else {
+            return None;
+        };
+        seconds = seconds.checked_add(value.checked_mul(scale)?)?;
+        found = true;
+        rest = after.trim_start_matches(|c: char| !c.is_ascii_digit());
+    }
+    found.then(|| Duration::from_secs(seconds))
 }
 
 pub(super) fn find_renderer<'a>(value: &'a Value, names: &[&str]) -> Option<&'a Value> {
@@ -395,6 +510,7 @@ fn parse_continuation(shelf: &Value) -> Option<Continuation> {
 fn continuation_from_token(token: &str) -> Option<Continuation> {
     (!token.is_empty() && token.len() <= MAX_CONTINUATION_TOKEN_BYTES).then(|| Continuation {
         token: token.to_owned(),
+        podcast: None,
     })
 }
 
@@ -433,7 +549,10 @@ pub(super) fn parse_search_more(
     Some((items, continuation))
 }
 
-pub(super) fn parse_browse_more(payload: &Value) -> Result<BrowseMore, MusicError> {
+pub(super) fn parse_browse_more(
+    payload: &Value,
+    podcast: Option<&(String, BrowseTarget)>,
+) -> Result<BrowseMore, MusicError> {
     let shelf = find_renderer(
         payload,
         &[
@@ -456,19 +575,25 @@ pub(super) fn parse_browse_more(payload: &Value) -> Result<BrowseMore, MusicErro
             appended.and_then(|action| action.get("continuationItems").and_then(Value::as_array))
         })
         .ok_or_else(|| MusicError::InvalidResponse("playlist continuation rows missing".into()))?;
-    let tracks = rows
-        .iter()
-        .take(super::MAX_COLLECTION_PAGE_TRACKS)
-        .filter_map(|row| row.get("musicResponsiveListItemRenderer"))
-        .filter_map(parse_catalog_track)
-        .collect();
-    let continuation = shelf.and_then(parse_continuation).or_else(|| {
-        rows.iter().find_map(|row| {
-            row.pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
+    let (tracks, _) = shelf_tracks(
+        rows,
+        podcast.map(|(title, target)| (title.as_str(), target)),
+    );
+    let continuation = shelf
+        .and_then(parse_continuation)
+        .or_else(|| {
+            rows.iter().find_map(|row| {
+                row.pointer(
+                    "/continuationItemRenderer/continuationEndpoint/continuationCommand/token",
+                )
                 .and_then(Value::as_str)
                 .and_then(continuation_from_token)
+            })
         })
-    });
+        .map(|continuation| Continuation {
+            podcast: podcast.cloned().map(Box::new),
+            ..continuation
+        });
     Ok(BrowseMore {
         tracks,
         continuation,
@@ -531,16 +656,8 @@ pub(super) fn parse_browse_page(
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
-    let mut tracks = Vec::new();
-    let mut unavailable_tracks = 0;
-    for row in rows.iter().take(super::MAX_COLLECTION_PAGE_TRACKS) {
-        if let Some(item) = row.get("musicResponsiveListItemRenderer") {
-            match parse_catalog_track(item) {
-                Some(track) => tracks.push(track),
-                None => unavailable_tracks += 1,
-            }
-        }
-    }
+    let podcast = target.is_podcast().then_some((title.as_str(), target));
+    let (tracks, unavailable_tracks) = shelf_tracks(rows, podcast);
     let owner = header
         .pointer("/facepile/avatarStackViewModel/text/content")
         .and_then(Value::as_str)
@@ -569,7 +686,10 @@ pub(super) fn parse_browse_page(
     let continuation = if tracks.len() >= super::MAX_COLLECTION_TRACKS {
         None
     } else {
-        parse_continuation(shelf)
+        parse_continuation(shelf).map(|continuation| Continuation {
+            podcast: podcast.map(|(title, target)| Box::new((title.to_owned(), target.clone()))),
+            ..continuation
+        })
     };
     Ok(BrowsePage::Collection(Box::new(Collection {
         title,
@@ -636,6 +756,109 @@ mod byline_tests {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn podcast() -> BrowseTarget {
+        BrowseTarget {
+            browse_id: "MPSPPLfixture".into(),
+            params: None,
+            page_type: Some(PODCAST_PAGE.into()),
+        }
+    }
+
+    /// An episode row of a podcast's page, as YouTube Music sends it.
+    fn episode_row(id: &str, title: &str, date: &str, length: &str) -> Value {
+        json!({"musicMultiRowListItemRenderer": {
+            "thumbnail": {"musicThumbnailRenderer": {"thumbnail": {"thumbnails": [
+                {"url": format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"), "width": 400, "height": 225}
+            ]}}},
+            "overlay": {"musicItemThumbnailOverlayRenderer": {"content": {"musicPlayButtonRenderer": {
+                "playNavigationEndpoint": {"watchEndpoint": {"videoId": id}}
+            }}}},
+            "onTap": {"watchEndpoint": {"videoId": id}},
+            "title": {"runs": [{"text": title, "navigationEndpoint": {"browseEndpoint": {
+                "browseId": format!("MPED{id}"),
+                "browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": EPISODE_PAGE}}
+            }}}]},
+            "subtitle": {"runs": [{"text": "1.2K views"}, {"text": " • "}, {"text": date}]},
+            "playbackProgress": {"musicPlaybackProgressRenderer": {
+                "durationText": {"runs": [{"text": " • "}, {"text": length}]}
+            }},
+            "description": {"runs": [{"text": "What the episode is about."}]}
+        }})
+    }
+
+    #[test]
+    fn a_podcast_page_lists_its_episodes_with_their_dates_and_lengths() {
+        let payload = json!({"contents": {"twoColumnBrowseResultsRenderer": {
+            "secondaryContents": {"sectionListRenderer": {"contents": [{"musicShelfRenderer": {
+                "contents": [
+                    episode_row("episode-two", "Episode two", "20h ago", "2 hr 43 min"),
+                    episode_row("episode-one", "Episode one", "Oct 16", "58 min")
+                ],
+                "continuations": [{"nextContinuationData": {"continuation": "more-episodes"}}]
+            }}]}},
+            "tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {"contents": [{
+                "musicResponsiveHeaderRenderer": {
+                    "title": {"runs": [{"text": "A fixture podcast"}]},
+                    "straplineTextOne": {"runs": [{"text": "Its host"}]}
+                }
+            }]}}}}]
+        }}});
+        let BrowsePage::Collection(data) = parse_browse_page(&payload, &podcast()).unwrap() else {
+            panic!("a podcast's page is a collection");
+        };
+        assert_eq!(data.title, "A fixture podcast");
+        assert_eq!(data.owner.as_deref(), Some("Its host"));
+        assert_eq!(data.tracks.len(), 2);
+        let first = &data.tracks[0];
+        assert_eq!(first.track.video_id, "episode-two");
+        assert_eq!(first.track.title, "Episode two");
+        // An episode names its podcast as its artist, and links to it.
+        assert_eq!(first.track.artist, "A fixture podcast");
+        assert_eq!(first.track.artist_page, Some(podcast()));
+        assert_eq!(first.published.as_deref(), Some("20h ago"));
+        assert_eq!(
+            first.duration,
+            Some(Duration::from_secs(2 * 3_600 + 43 * 60))
+        );
+        assert_eq!(data.tracks[1].duration, Some(Duration::from_secs(58 * 60)));
+        // Further episodes keep the podcast they belong to.
+        let continuation = data.continuation.unwrap();
+        assert_eq!(continuation.token, "more-episodes");
+        assert_eq!(
+            continuation.podcast.as_deref(),
+            Some(&("A fixture podcast".to_owned(), podcast()))
+        );
+        let more = json!({"continuationContents": {"musicShelfContinuation": {
+            "contents": [episode_row("episode-zero", "Episode zero", "Sep 9", "1 hr")]
+        }}});
+        let more = parse_browse_more(&more, continuation.podcast.as_deref()).unwrap();
+        assert_eq!(more.tracks.len(), 1);
+        assert_eq!(more.tracks[0].track.artist, "A fixture podcast");
+        assert_eq!(more.tracks[0].published.as_deref(), Some("Sep 9"));
+        assert!(more.continuation.is_none());
+    }
+
+    #[test]
+    fn episode_lengths_are_read_in_every_catalog_language() {
+        let two_43 = Some(Duration::from_secs(2 * 3_600 + 43 * 60));
+        for text in [
+            " • 2 hr 43 min",
+            "2 h 43 min",
+            "2 Std., 43 Min.",
+            "2 ч 43 мин",
+            "2 時間 43 分",
+            "2小时43分钟",
+        ] {
+            assert_eq!(parse_spoken_duration(text), two_43, "{text}");
+        }
+        assert_eq!(
+            parse_spoken_duration("58 min 12 sec"),
+            Some(Duration::from_secs(58 * 60 + 12))
+        );
+        assert_eq!(parse_spoken_duration("Played"), None);
+        assert_eq!(parse_spoken_duration("3 days"), None);
+    }
 
     fn target() -> BrowseTarget {
         BrowseTarget {

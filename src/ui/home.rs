@@ -43,6 +43,13 @@ const TOP_RESULT_GAP: f32 = 24.0;
 const TOP_RESULT_SONGS: usize = 4;
 /// Room the carousel arrows and the shortest rule take beside the shelf name.
 const SHELF_ARROWS_W: f32 = 120.0;
+/// The grids of the results page, in the order it shows them.
+pub(super) const SEARCH_GRIDS: [(HomeItemKind, &str); 4] = [
+    (HomeItemKind::Album, "Albums"),
+    (HomeItemKind::Playlist, "Playlists"),
+    (HomeItemKind::Podcast, "Podcasts"),
+    (HomeItemKind::Artist, "Artists"),
+];
 /// Results page: the field floats over the rows, which scroll underneath it.
 const SEARCH_TOP: f32 = 8.0;
 const SEARCH_MARGIN: f32 = 24.0;
@@ -65,6 +72,7 @@ const CARD_TEXT_H: f32 = 10.0 + 20.0 + 18.0;
 const STRIP_CHROME_H: f32 = STRIP_GAP + STRIP_HEADING_H + STRIP_HEADING_GAP + CARD_TEXT_H;
 /// Songs, and collections of each kind, the results page lists.
 const SEARCH_SONGS_SHOWN: usize = 8;
+const SEARCH_EPISODES_SHOWN: usize = 6;
 const SEARCH_COLLECTIONS_SHOWN: usize = 6;
 
 /// The one Home shelf: "All-time essentials", or the first shelf of
@@ -593,6 +601,11 @@ impl HomeLayout {
 /// Live broadcasts come before songs only when the top result is itself a broadcast.
 fn live_first(top: Option<&HomeItem>) -> bool {
     top.is_some_and(|item| item.kind == HomeItemKind::Live)
+}
+
+/// Whether a podcast's episodes lead the results page: its top result is a podcast or an episode.
+fn episodes_lead(top: Option<&HomeItem>) -> bool {
+    top.is_some_and(|item| matches!(item.kind, HomeItemKind::Podcast | HomeItemKind::Episode))
 }
 
 /// `3:45` from a subtitle such as `Song • Artist • Album • 3:45`.
@@ -1147,29 +1160,12 @@ impl App {
             );
         }
         let songs = self.search_songs();
-        let song_queue: Arc<[Track]> = songs.iter().filter_map(|item| item.track.clone()).collect();
-        let song_rows = |range: std::ops::Range<usize>, row_width: f32| {
-            let mut rows = column![].spacing(0);
-            for index in range {
-                if let Some(track) = &songs[index].track {
-                    let duration = songs[index]
-                        .duration
-                        .map(super::format_duration)
-                        .or_else(|| subtitle_duration(&songs[index].subtitle).map(str::to_owned));
-                    rows = rows.push(self.song_row(
-                        track,
-                        duration,
-                        Message::PlayContext(Arc::clone(&song_queue), index),
-                        row_width,
-                        super::messages::RowMenu {
-                            list: "songs",
-                            index,
-                        },
-                    ));
-                }
-            }
-            rows
+        let episodes = self.search_episodes();
+        let queue_of = |items: &[&HomeItem]| -> Arc<[Track]> {
+            items.iter().filter_map(|item| item.track.clone()).collect()
         };
+        let song_queue = queue_of(&songs);
+        let episode_queue = queue_of(&episodes);
         let section = |title: &'static str| {
             column![
                 label(self.tr(title).into_owned(), TEXT_BODY),
@@ -1177,16 +1173,30 @@ impl App {
                 hrule(INK),
             ]
         };
-        // Songs shown beside the top result are not listed again below it.
-        let mut songs_below = 0..songs.len();
         let top = self.catalog_results.first();
+        // The rows that lead the page sit beside the top result: its episodes when it is a
+        // podcast or an episode, the songs otherwise.
+        let lead_episodes = episodes_lead(top) && !episodes.is_empty();
+        let (lead, lead_queue, lead_list, lead_title, more_title) = if lead_episodes {
+            (
+                &episodes,
+                &episode_queue,
+                "episodes",
+                "Episodes",
+                "More episodes",
+            )
+        } else {
+            (&songs, &song_queue, "songs", "Songs", "More songs")
+        };
+        // Rows shown beside the top result are not listed again below it.
+        let mut lead_below = 0..lead.len();
         if let Some(top) = top {
             content = content.push(Space::new().height(18));
-            if width >= TOP_RESULT_SPLIT_W && !songs.is_empty() {
+            if width >= TOP_RESULT_SPLIT_W && !lead.is_empty() {
                 let left = (width * 0.4).floor();
                 let right = width - left - TOP_RESULT_GAP;
-                let beside = songs.len().min(TOP_RESULT_SONGS);
-                songs_below = beside..songs.len();
+                let beside = lead.len().min(TOP_RESULT_SONGS);
+                lead_below = beside..lead.len();
                 content = content.push(
                     row![
                         column![
@@ -1195,7 +1205,11 @@ impl App {
                             self.top_result(top, left),
                         ]
                         .width(left),
-                        column![section("Songs"), song_rows(0..beside, right)].width(right),
+                        column![
+                            section(lead_title),
+                            self.result_rows(lead, lead_queue, lead_list, 0..beside, right)
+                        ]
+                        .width(right),
                     ]
                     .spacing(TOP_RESULT_GAP),
                 );
@@ -1226,31 +1240,42 @@ impl App {
             }
             block
         });
-        let songs_section = (!songs_below.is_empty()).then(|| {
-            let title = if songs_below.start > 0 {
-                "More songs"
+        let block =
+            |title: &'static str, list| column![Space::new().height(22), section(title), list];
+        let lead_section = (!lead_below.is_empty()).then(|| {
+            let title = if lead_below.start > 0 {
+                more_title
             } else {
-                "Songs"
+                lead_title
             };
-            column![
-                Space::new().height(22),
-                section(title),
-                song_rows(songs_below.clone(), width)
-            ]
+            block(
+                title,
+                self.result_rows(lead, lead_queue, lead_list, lead_below.clone(), width),
+            )
         });
-        let (first, second) = if live_first(top) {
-            (live_section, songs_section)
+        // The list that does not lead follows the others in full.
+        let (other, other_queue, other_list, other_title) = if lead_episodes {
+            (&songs, &song_queue, "songs", "Songs")
         } else {
-            (songs_section, live_section)
+            (&episodes, &episode_queue, "episodes", "Episodes")
         };
-        for block in [first, second].into_iter().flatten() {
+        let other_section = (!other.is_empty()).then(|| {
+            block(
+                other_title,
+                self.result_rows(other, other_queue, other_list, 0..other.len(), width),
+            )
+        });
+        let blocks = if lead_episodes {
+            [lead_section, other_section, live_section]
+        } else if live_first(top) {
+            [live_section, lead_section, other_section]
+        } else {
+            [lead_section, live_section, other_section]
+        };
+        for block in blocks.into_iter().flatten() {
             content = content.push(block);
         }
-        for (kind, title) in [
-            (HomeItemKind::Album, "Albums"),
-            (HomeItemKind::Playlist, "Playlists"),
-            (HomeItemKind::Artist, "Artists"),
-        ] {
+        for (kind, title) in SEARCH_GRIDS {
             let items = self.search_collections(kind);
             if items.is_empty() {
                 continue;
@@ -1295,6 +1320,15 @@ impl App {
         self.with_suggestions(base, search_width, search_x, SEARCH_TOP + SEARCH_H)
     }
 
+    /// Podcast episodes the results page lists under "Episodes", after the songs.
+    pub(super) fn search_episodes(&self) -> Vec<&HomeItem> {
+        self.catalog_results
+            .iter()
+            .filter(|item| item.kind == HomeItemKind::Episode && item.track.is_some())
+            .take(SEARCH_EPISODES_SHOWN)
+            .collect()
+    }
+
     /// Live broadcasts the results page lists above "Songs".
     pub(super) fn search_live(&self) -> Vec<&HomeItem> {
         self.catalog_results
@@ -1313,20 +1347,30 @@ impl App {
         }
         let songs = self.search_songs().len();
         let live = self.search_live().len();
+        let episodes = self.search_episodes().len();
         let top = self.catalog_results.first();
+        let lead_episodes = episodes_lead(top) && episodes > 0;
+        let (lead, lead_list, other, other_list) = if lead_episodes {
+            (episodes, "episodes", songs, "songs")
+        } else {
+            (songs, "songs", episodes, "episodes")
+        };
         let beside = if top.is_some() && self.area.width.max(280.0) >= TOP_RESULT_SPLIT_W {
-            songs.min(TOP_RESULT_SONGS)
+            lead.min(TOP_RESULT_SONGS)
         } else {
             0
         };
         let row = |list: &'static str, index: usize| super::messages::RowMenu { list, index };
-        let mut order: Vec<_> = (0..beside).map(|index| row("songs", index)).collect();
-        let songs_below = (beside..songs).map(|index| row("songs", index));
+        let mut order: Vec<_> = (0..beside).map(|index| row(lead_list, index)).collect();
+        let lead_below = (beside..lead).map(|index| row(lead_list, index));
         let live_rows = (0..live).map(|index| row("live", index));
-        if live_first(top) {
-            order.extend(live_rows.chain(songs_below));
+        let other_rows = (0..other).map(|index| row(other_list, index));
+        if lead_episodes {
+            order.extend(lead_below.chain(other_rows).chain(live_rows));
+        } else if live_first(top) {
+            order.extend(live_rows.chain(lead_below).chain(other_rows));
         } else {
-            order.extend(songs_below.chain(live_rows));
+            order.extend(lead_below.chain(live_rows).chain(other_rows));
         }
         order
     }
@@ -1416,6 +1460,35 @@ impl App {
         .padding(14)
         .style(theme::boxed)
         .into()
+    }
+
+    /// Rows of songs or episodes of the results page, which play `queue` from the row pressed. A
+    /// song without a length of its own takes the one its byline ends with.
+    fn result_rows<'a>(
+        &'a self,
+        items: &[&'a HomeItem],
+        queue: &Arc<[Track]>,
+        list: &'static str,
+        range: std::ops::Range<usize>,
+        width: f32,
+    ) -> iced::widget::Column<'a, Message> {
+        let mut rows = column![].spacing(0);
+        for index in range {
+            if let Some(track) = &items[index].track {
+                let duration = items[index]
+                    .duration
+                    .map(super::format_duration)
+                    .or_else(|| subtitle_duration(&items[index].subtitle).map(str::to_owned));
+                rows = rows.push(self.song_row(
+                    track,
+                    duration,
+                    Message::PlayContext(Arc::clone(queue), index),
+                    width,
+                    super::messages::RowMenu { list, index },
+                ));
+            }
+        }
+        rows
     }
 
     /// One song row: cover, "Title — Artist", duration and the ••• actions.
@@ -1606,6 +1679,61 @@ mod tests {
         assert!(!live_first(Some(&item(HomeItemKind::Song))));
         assert!(!live_first(Some(&item(HomeItemKind::Album))));
         assert!(!live_first(None));
+    }
+
+    #[test]
+    fn a_podcast_top_result_puts_its_episodes_beside_it_and_before_the_songs() {
+        let item = |kind, id: &str| HomeItem {
+            title: id.into(),
+            subtitle: String::new(),
+            thumbnail_url: None,
+            kind,
+            browse_id: None,
+            browse_target: None,
+            track: (kind != HomeItemKind::Podcast).then(|| Track {
+                video_id: id.into(),
+                title: id.into(),
+                artist: String::new(),
+                album: None,
+                artist_page: None,
+                album_page: None,
+                thumbnail_url: None,
+                duration_secs: None,
+            }),
+            duration: None,
+        };
+        let mut results = vec![item(HomeItemKind::Podcast, "show")];
+        results.extend((0..2).map(|index| item(HomeItemKind::Song, &format!("song-{index}"))));
+        results
+            .extend((0..5).map(|index| item(HomeItemKind::Episode, &format!("episode-{index}"))));
+        let mut app = App {
+            page: super::super::Page::Search,
+            search_committed: true,
+            catalog_results: results,
+            ..App::default()
+        };
+        app.area = iced::Size::new(1_200.0, 700.0);
+        let order: Vec<_> = app
+            .search_row_order()
+            .into_iter()
+            .map(|row| (row.list, row.index))
+            .collect();
+        let episodes = (0..5).map(|index| ("episodes", index));
+        let songs = (0..2).map(|index| ("songs", index));
+        assert_eq!(order, episodes.chain(songs).collect::<Vec<_>>());
+        // After a song, the songs lead and the episodes follow them.
+        app.catalog_results.remove(0);
+        let order: Vec<_> = app
+            .search_row_order()
+            .into_iter()
+            .map(|row| row.list)
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "songs", "songs", "episodes", "episodes", "episodes", "episodes", "episodes"
+            ]
+        );
     }
 
     #[test]

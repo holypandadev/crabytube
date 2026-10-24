@@ -2865,6 +2865,17 @@ impl App {
         }
     }
 
+    /// "12 episodes", or "100+ episodes" for a podcast with more episodes than the ones loaded.
+    fn episode_count(&self, count: usize, more: bool) -> String {
+        if more {
+            self.tr_string(format!("{count}+ episodes"))
+        } else if count == 1 {
+            self.tr_static("1 episode").to_owned()
+        } else {
+            self.tr_string(format!("{count} episodes"))
+        }
+    }
+
     fn tr_string(&self, source: String) -> String {
         match crate::i18n::translate(self.preferences.ui_language, &source) {
             std::borrow::Cow::Borrowed(_) => source,
@@ -4036,9 +4047,19 @@ fn parse_clock(clock: &str) -> Option<Duration> {
     Some(Duration::from_secs(seconds))
 }
 
+/// "3:45", or "2:56:52" from an hour on, as a podcast episode can last.
 fn format_duration(duration: Duration) -> String {
     let seconds = duration.as_secs();
-    format!("{}:{:02}", seconds / 60, seconds % 60)
+    if seconds >= 3_600 {
+        format!(
+            "{}:{:02}:{:02}",
+            seconds / 3_600,
+            seconds / 60 % 60,
+            seconds % 60
+        )
+    } else {
+        format!("{}:{:02}", seconds / 60, seconds % 60)
+    }
 }
 
 fn catalog_item_key(item: &HomeItem) -> (HomeItemKind, String, Option<String>, Option<String>) {
@@ -5489,6 +5510,7 @@ mod tests {
             catalog_results: vec![item("first")],
             catalog_continuation: Some(Continuation {
                 token: "next".into(),
+                podcast: None,
             }),
             ..App::default()
         };
@@ -5507,6 +5529,7 @@ mod tests {
                 items: vec![item("first"), item("second")],
                 continuation: Some(Continuation {
                     token: "next-2".into(),
+                    podcast: None,
                 }),
             })),
         }));
@@ -7112,6 +7135,7 @@ mod tests {
                 items: vec![item("first")],
                 continuation: Some(Continuation {
                     token: "next".into(),
+                    podcast: None,
                 }),
             })),
         }));

@@ -642,6 +642,12 @@ pub(super) static CATALOG: Catalog = Catalog {
             "The songs you play and the playlists you make will show here.",
             "Aquí aparecerán las canciones que escuches y las listas que crees.",
         ),
+        ("More episodes", "Más episodios"),
+        ("Episodes", "Episodios"),
+        ("Podcasts", "Pódcasts"),
+        ("Podcast", "Pódcast"),
+        ("Go to podcast", "Ir al pódcast"),
+        ("1 episode", "1 episodio"),
     ],
     templates: &[
         ("Active: {}.", "Activa: {0}."),
@@ -657,6 +663,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("{#} songs", "{0} {0:canción|canciones}"),
         ("{#}+ songs", "{0}+ canciones"),
+        ("{#} episodes", "{0} {0:episodio|episodios}"),
+        ("{#}+ episodes", "{0}+ episodios"),
         (
             "{cache} is already empty.",
             "No hay nada que borrar en {0}.",

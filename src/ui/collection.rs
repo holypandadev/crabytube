@@ -553,11 +553,12 @@ impl App {
                 )
                 .color(ink.title),
             ];
-            // A row without an artist keeps its title alone, centred, rather than over an empty line.
-            if !track.artist.trim().is_empty() {
+            // A podcast's episodes all name the podcast, so their rows give the date instead. A row
+            // without either keeps its title alone, centred, rather than over an empty line.
+            let byline = entry.published.as_deref().unwrap_or(&track.artist);
+            if !byline.trim().is_empty() {
                 names = names.push(
-                    label(fit(&track.artist, title_w, TEXT_CAPTION), TEXT_CAPTION)
-                        .color(ink.secondary),
+                    label(fit(byline, title_w, TEXT_CAPTION), TEXT_CAPTION).color(ink.secondary),
                 );
             }
             cells = cells.push(names.spacing(4).width(Length::Fill));
@@ -689,6 +690,7 @@ mod tests {
             track: track(id),
             duration: None,
             references: Vec::new(),
+            published: None,
         }
     }
 
@@ -704,7 +706,10 @@ mod tests {
             thumbnail_url: None,
             summary: None,
             tracks,
-            continuation: continuation.map(|token| crate::music::Continuation { token }),
+            continuation: continuation.map(|token| crate::music::Continuation {
+                token,
+                podcast: None,
+            }),
             unavailable_tracks: 0,
             related: Vec::new(),
             all_songs: None,
@@ -776,6 +781,7 @@ mod tests {
                 tracks: vec![entry("b"), entry("c")],
                 continuation: Some(crate::music::Continuation {
                     token: "tok-2".into(),
+                    podcast: None,
                 }),
             }),
         });
@@ -799,6 +805,7 @@ mod tests {
                 tracks: vec![entry("b"), entry("c")],
                 continuation: Some(crate::music::Continuation {
                     token: "tok-2".into(),
+                    podcast: None,
                 }),
             }),
         });

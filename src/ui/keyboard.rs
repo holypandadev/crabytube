@@ -187,11 +187,11 @@ impl App {
                     play: Message::OpenCollection(collection.browse.clone()),
                 }),
             },
-            list @ ("songs" | "live") => {
-                let items = if list == "songs" {
-                    self.search_songs()
-                } else {
-                    self.search_live()
+            list @ ("songs" | "live" | "episodes") => {
+                let items = match list {
+                    "songs" => self.search_songs(),
+                    "live" => self.search_live(),
+                    _ => self.search_episodes(),
                 };
                 let queue: Arc<[Track]> =
                     items.iter().filter_map(|item| item.track.clone()).collect();
@@ -276,7 +276,7 @@ impl App {
     fn reveal_row(&self, row: &RowMenu) -> Task<Message> {
         let density = self.preferences.ui_density;
         let (scroll_id, pitch) = match row.list {
-            "songs" | "live" => ("search-content", None),
+            "songs" | "live" | "episodes" => ("search-content", None),
             "favorites" | "playlist" => (
                 "library-content",
                 Some(super::library::song_row_pitch(density)),

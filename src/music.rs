@@ -39,10 +39,14 @@ pub enum HomeItemKind {
     Song,
     /// A live broadcast: a track that plays as a stream with no end.
     Live,
+    /// A podcast episode: a track, usually long, that names its podcast as its artist.
+    Episode,
     Album,
     Artist,
     Playlist,
     Mix,
+    /// A podcast, whose page lists its episodes.
+    Podcast,
     Unknown,
 }
 
@@ -51,10 +55,12 @@ impl HomeItemKind {
         match self {
             Self::Song => "Song",
             Self::Live => "Live",
+            Self::Episode => "Episode",
             Self::Album => "Album",
             Self::Artist => "Artist",
             Self::Playlist => "Playlist",
             Self::Mix => "Mix",
+            Self::Podcast => "Podcast",
             Self::Unknown => "Music",
         }
     }
@@ -706,7 +712,7 @@ impl MusicService for YouTubeMusicService {
         let payload = self
             .catalog_payload("browse", json!({"continuation": continuation.token}))
             .await?;
-        browse::parse_browse_more(&payload)
+        browse::parse_browse_more(&payload, continuation.podcast.as_deref())
     }
 
     async fn suggestions(&self, query: &str) -> Result<Vec<String>, MusicError> {
@@ -1305,6 +1311,9 @@ fn parse_home_item(raw: &Value) -> Option<HomeItem> {
         match target.page_type.as_deref() {
             Some("MUSIC_PAGE_TYPE_ALBUM") => HomeItemKind::Album,
             Some("MUSIC_PAGE_TYPE_ARTIST" | "MUSIC_PAGE_TYPE_USER_CHANNEL") => HomeItemKind::Artist,
+            // An episode opens a page of its own; the app plays it instead.
+            Some(browse::EPISODE_PAGE) if track.is_some() => HomeItemKind::Episode,
+            _ if target.is_podcast() => HomeItemKind::Podcast,
             _ if target.is_public_collection() => {
                 if target.browse_id.trim_start_matches("VL").starts_with("RD") {
                     HomeItemKind::Mix
@@ -1426,6 +1435,53 @@ mod tests {
         assert!(CatalogFilter::All.params().is_none());
         assert!(CatalogFilter::Playlists.matches(HomeItemKind::Mix));
         assert!(!CatalogFilter::Albums.matches(HomeItemKind::Song));
+    }
+
+    #[test]
+    fn podcasts_and_their_episodes_are_found_in_search() {
+        let podcast = json!({"browseEndpoint": {"browseId": "MPSPPLshow",
+            "browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"}}}});
+        let payload = json!({"contents": [
+            {"musicResponsiveListItemRenderer": {
+                "flexColumns": [
+                    {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "A show"}]}}},
+                    {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Podcast"}, {"text": " • "}, {"text": "Its host"}]}}}
+                ],
+                "navigationEndpoint": podcast
+            }},
+            {"musicResponsiveListItemRenderer": {
+                "overlay": {"musicItemThumbnailOverlayRenderer": {"content": {"musicPlayButtonRenderer": {
+                    "playNavigationEndpoint": {"watchEndpoint": {"videoId": "episode"}}}}}},
+                "flexColumns": [
+                    {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "An episode",
+                        "navigationEndpoint": {"browseEndpoint": {"browseId": "MPEDepisode",
+                            "browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"}}}}}]}}},
+                    {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
+                        {"text": "Episode"}, {"text": " • "}, {"text": "Dec 25, 2025"}, {"text": " • "},
+                        {"text": "A show", "navigationEndpoint": podcast}
+                    ]}}}
+                ]
+            }}
+        ]});
+        let items = parse_catalog_results(&payload);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].kind, HomeItemKind::Podcast);
+        assert!(
+            items[0]
+                .browse_target
+                .as_ref()
+                .unwrap()
+                .is_public_collection()
+        );
+        assert_eq!(items[1].kind, HomeItemKind::Episode);
+        let episode = items[1].track.as_ref().unwrap();
+        assert_eq!(episode.video_id, "episode");
+        assert_eq!(episode.artist, "A show");
+        // The podcast's name opens its page, as an artist's name opens theirs.
+        assert!(episode.artist_page.as_ref().unwrap().is_podcast());
+        // Neither the episode's own page nor its podcast is an album.
+        assert_eq!(episode.album, None);
+        assert_eq!(episode.album_page, None);
     }
 
     #[test]

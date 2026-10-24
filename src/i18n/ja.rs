@@ -630,6 +630,12 @@ pub(super) static CATALOG: Catalog = Catalog {
             "The songs you play and the playlists you make will show here.",
             "再生した曲と作成したプレイリストがここに表示されます。",
         ),
+        ("More episodes", "その他のエピソード"),
+        ("Episodes", "エピソード"),
+        ("Podcasts", "ポッドキャスト"),
+        ("Podcast", "ポッドキャスト"),
+        ("Go to podcast", "ポッドキャストへ移動"),
+        ("1 episode", "1 エピソード"),
     ],
     templates: &[
         ("Active: {}.", "使用中：{0}。"),
@@ -642,6 +648,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ("{#} saved tracks", "保存した曲：{0}曲"),
         ("{#} songs", "{0}曲"),
         ("{#}+ songs", "{0}+曲"),
+        ("{#} episodes", "{0} エピソード"),
+        ("{#}+ episodes", "{0}+ エピソード"),
         ("{cache} is already empty.", "{0}：すでに空です。"),
         (
             "Cleared {cache} ({} MiB removed).",

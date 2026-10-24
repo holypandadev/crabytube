@@ -16,7 +16,7 @@ use futures_util::{
     Stream, StreamExt,
     stream::{self, BoxStream},
 };
-use rodio::{Decoder, Player, Source};
+use rodio::{Player, Source};
 use stream_download::{
     Settings, StreamDownload,
     source::{DecodeError, SourceStream},
@@ -2074,25 +2074,18 @@ where
         MediaKind::Live => None,
     };
     tokio::task::spawn_blocking(move || {
-        let builder = Decoder::builder()
-            .with_data(reader)
-            .with_mime_type("audio/mp4")
-            .with_seekable(byte_len.is_some());
-        let builder = match byte_len {
-            Some(length) => builder.with_byte_len(length),
-            None => builder,
-        };
-        let decoder = match builder.build() {
-            Ok(decoder) => decoder,
-            Err(error) => {
-                if let Some(message) = fetch_error_message(&fetch_error) {
-                    let _ = prepared_tx.send(Err(EngineError::Network(message)));
-                } else {
-                    let _ = prepared_tx.send(Err(EngineError::Decoder(error.to_string())));
+        let decoder =
+            match super::fragments::TrackDecoder::open(reader, byte_len, WHOLE_TRACK_BYTES) {
+                Ok(decoder) => decoder,
+                Err(error) => {
+                    if let Some(message) = fetch_error_message(&fetch_error) {
+                        let _ = prepared_tx.send(Err(EngineError::Network(message)));
+                    } else {
+                        let _ = prepared_tx.send(Err(EngineError::Decoder(error.to_string())));
+                    }
+                    return;
                 }
-                return;
-            }
-        };
+            };
         let rate = decoder.sample_rate();
         let channels = decoder.channels();
         let rate_u32 = rate.get();
@@ -2204,8 +2197,7 @@ where
                     match command {
                         Some(WorkerCommand::Stop) => break,
                         Some(WorkerCommand::Seek(target, reply)) => {
-                            let result =
-                                decoder.try_seek(target).map_err(|error| error.to_string());
+                            let result = decoder.try_seek(target);
                             if result.is_ok() {
                                 // Chunks decoded before the seek belong to the old position.
                                 pending = None;

@@ -110,6 +110,8 @@ const ENGLISH_COUNTS: &[(&str, &str)] = &[
     ("{#} saved tracks", "{0} saved {0:track|tracks}"),
     ("{#} songs", "{0} {0:song|songs}"),
     ("{#}+ songs", "{0}+ songs"),
+    ("{#} episodes", "{0} {0:episode|episodes}"),
+    ("{#}+ episodes", "{0}+ episodes"),
     (
         "Brings {} favorites and {} queued songs, plus its settings.",
         "Brings {0} {0:favorite|favorites} and {1} queued {1:song|songs}, plus its settings.",

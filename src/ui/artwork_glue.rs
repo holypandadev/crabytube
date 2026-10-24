@@ -267,15 +267,15 @@ impl App {
         let top = self.catalog_results.first().and_then(|item| {
             cover_request(item.thumbnail_url.as_deref(), crate::artwork::CARD_MID_MAX)
         });
-        // Same order as the results page: live broadcasts, then songs, then the grids.
-        let songs = self.search_live().into_iter().chain(self.search_songs());
-        let collections = [
-            HomeItemKind::Album,
-            HomeItemKind::Playlist,
-            HomeItemKind::Artist,
-        ]
-        .into_iter()
-        .flat_map(|kind| self.search_collections(kind));
+        // Same order as the results page: live broadcasts, songs and episodes, then the grids.
+        let songs = self
+            .search_live()
+            .into_iter()
+            .chain(self.search_songs())
+            .chain(self.search_episodes());
+        let collections = super::home::SEARCH_GRIDS
+            .into_iter()
+            .flat_map(|(kind, _)| self.search_collections(kind));
         top.into_iter()
             .chain(songs.chain(collections).filter_map(|item| {
                 cover_request(item.thumbnail_url.as_deref(), crate::artwork::THUMB_MAX)
@@ -651,6 +651,7 @@ mod tests {
                     track: track(&index.to_string()),
                     duration: None,
                     references: Vec::new(),
+                    published: None,
                 })
                 .collect(),
             continuation: None,

@@ -120,8 +120,13 @@ impl App {
 /// The "Go to" entries of a track menu, in menu order. Only the destinations the catalog named
 /// are offered.
 pub(super) fn go_to_destinations(track: &Track) -> Vec<(&'static str, BrowseTarget)> {
+    // An episode's "artist" is its podcast.
+    let artist = match &track.artist_page {
+        Some(page) if page.is_podcast() => "Go to podcast",
+        _ => "Go to artist",
+    };
     [
-        ("Go to artist", track.artist_page.clone()),
+        (artist, track.artist_page.clone()),
         ("Go to album", track.album_page.clone()),
     ]
     .into_iter()

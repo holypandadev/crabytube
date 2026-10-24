@@ -347,11 +347,17 @@ impl App {
                 collection.title.clone(),
                 self.tr_static(if collection.album {
                     "Album"
+                } else if collection.browse.is_podcast() {
+                    "Podcast"
                 } else {
                     "Playlist"
                 })
                 .to_owned(),
-                self.song_count(collection.track_count, collection.more),
+                if collection.browse.is_podcast() {
+                    self.episode_count(collection.track_count, collection.more)
+                } else {
+                    self.song_count(collection.track_count, collection.more)
+                },
                 Message::OpenCollection(collection.browse.clone()),
             ),
         };
