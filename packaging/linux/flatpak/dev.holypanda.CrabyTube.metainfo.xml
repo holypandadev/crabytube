@@ -48,6 +48,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.1" date="2026-10-24">
+      <description>
+        <p>Podcasts: search finds podcasts and their episodes, a podcast opens on its episodes
+        with their dates and lengths, and long episodes start at once and seek anywhere in them.
+        Lengths of an hour or more read as hours.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-22">
       <description>
         <p>Playlists: Favorite songs and your own lists in a Library, a Save to panel on every
