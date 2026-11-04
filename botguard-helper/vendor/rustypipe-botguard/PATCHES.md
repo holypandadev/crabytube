@@ -43,6 +43,8 @@ crate's `CHANGELOG.md` is not included.
   the header announces), removed when it cannot be read, and written readable by the user alone.
 - Environment variables read when building the HTTP client:
   `CRABYTUBE_FORCE_IPV4` binds to an IPv4 local address, `CRABYTUBE_HTTP1_ONLY` disables HTTP/2.
+- The HTTP client accepts up to 256 KiB of HTTP/2 response headers instead of 16 KiB: YouTube's
+  responses carry more than 16 KiB of headers, and a response past the limit fails.
 
 ### `js/99_main.js`
 

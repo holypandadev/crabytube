@@ -1246,6 +1246,8 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "futures-util",
+ "h2",
+ "http",
  "iced",
  "image",
  "jiff",

@@ -63,6 +63,12 @@ unicode-width = "0.2"
 roxmltree = "0.20"
 rand = "0.8"
 
+[dev-dependencies]
+# A local HTTP/2 server for the network tests; already in the build through reqwest.
+h2 = "0.4"
+http = "1"
+tokio = { version = "1", features = ["net"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Both renderers are compiled in. tiny-skia (CPU, patched copy in
 # vendor/iced_tiny_skia) is the default; the "GPU rendering" preference makes

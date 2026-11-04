@@ -249,7 +249,9 @@ impl<'a> BotguardBuilder<'a> {
         let mut client_builder = Client::builder()
             .user_agent(self.user_agent.unwrap_or(DEFAULT_UA))
             .gzip(true)
-            .brotli(true);
+            .brotli(true)
+            // The HTTP/2 client stops at 16 KiB of response headers, and YouTube sends more.
+            .http2_max_header_list_size(256 * 1024);
         if std::env::var_os("CRABYTUBE_FORCE_IPV4").is_some() {
             client_builder = client_builder.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
         }
