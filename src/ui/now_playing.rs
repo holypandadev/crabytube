@@ -401,10 +401,12 @@ impl App {
         // beside the buttons a finger needs.
         let mobile = self.mobile();
         let gap = if mobile { 12.0 } else { 20.0 };
-        let text_width = if mobile {
-            width - cover - 3.0 * gap - self.row_more_width() - HEART_W - 24.0
-        } else {
-            width - cover - 20.0 - 64.0 - 44.0 - 24.0 - HEART_W - 20.0
+        // A phone's row: the cover, the two lines, the ••• and the heart. A wider one has the
+        // length too, which takes its own width: "3:13" or, for an episode, "4:35:00".
+        let mobile_width = width - cover - 3.0 * gap - self.row_more_width() - HEART_W - 24.0;
+        let row_width = |duration: &str| {
+            let length = duration.chars().count() as f32 * TEXT_CAPTION * 0.6;
+            width - 16.0 - cover - 4.0 * gap - length - self.row_more_width() - HEART_W - 4.0
         };
         let dragged = self.dragged_row(DragList::Queue);
         for index in range.clone() {
@@ -427,6 +429,11 @@ impl App {
                 ink.title = theme::FADED;
                 ink.secondary = theme::FADED;
             }
+            let text_width = if mobile {
+                mobile_width
+            } else {
+                row_width(&duration)
+            };
             let title = display_title(&entry.title);
             let title = if current {
                 format!("▶ {title}")
@@ -441,7 +448,8 @@ impl App {
                 text(fit(&title, text_width, TEXT_BODY))
                     .size(TEXT_BODY)
                     .font(MONO)
-                    .color(ink.title),
+                    .color(ink.title)
+                    .wrapping(text::Wrapping::None),
             ];
             // A track without an artist (an album's, before it plays) keeps its title alone, centred,
             // rather than over an empty line.
