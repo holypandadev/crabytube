@@ -19,7 +19,7 @@ pub(super) const RAIL_FROM: f32 = 960.0;
 pub(super) const RAIL_W: f32 = 72.0;
 /// The panel takes this share of the window, between the two widths after it.
 const PANEL_SHARE: f32 = 0.19;
-const PANEL_MIN_W: f32 = 232.0;
+const PANEL_MIN_W: f32 = 250.0;
 const PANEL_MAX_W: f32 = 300.0;
 /// A row of Home, Library or Settings.
 const NAV_H: f32 = 40.0;
@@ -32,7 +32,7 @@ const TWO_LINES_GAP: f32 = 3.0;
 const MARKER_W: f32 = 2.0;
 /// Space around the panel's content.
 const PAD_TOP: f32 = 12.0;
-const PAD_X: f32 = 8.0;
+pub(super) const PAD_X: f32 = 8.0;
 /// Height of the line with "Your lists" and the button that makes a playlist.
 const LISTS_HEAD_H: f32 = 32.0;
 /// Space above and below the rule between the sections and the lists.
