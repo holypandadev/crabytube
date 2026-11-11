@@ -237,6 +237,9 @@ pub(super) struct HomeExtras {
     pub lists: usize,
     /// The line that says Home could not be refreshed shows under the greeting.
     pub notice: bool,
+    /// The side panel lists the user's lists, so Home leaves them out; the welcome for a user
+    /// without any still shows.
+    pub lists_aside: bool,
 }
 
 /// The greeting: large, over the date, while the page has room; one line beside the date when it
@@ -440,7 +443,13 @@ impl HomeLayout {
         };
         let welcome_n = extras.lists == 0;
         // The rows "Your lists" needs for every list, up to its limit, and the lists `rows` hold.
-        let list_rows = extras.lists.div_ceil(list_columns).clamp(1, MAX_LIST_ROWS);
+        let lists_aside = extras.lists_aside && extras.lists > 0;
+        let list_rows = if lists_aside {
+            0
+        } else {
+            extras.lists.div_ceil(list_columns).clamp(1, MAX_LIST_ROWS)
+        };
+        let one_row = list_rows.min(1);
         let lists_in = |rows: usize| extras.lists.min(list_columns * rows);
         let notice = if extras.notice { NOTICE_H } else { 0.0 };
         let around = |shown: Shown, spacing: Spacing| {
@@ -481,18 +490,18 @@ impl HomeLayout {
                 show(small, chips, jump, list_rows),
                 show(small, chips, jump.min(jump_columns), list_rows),
                 show(small, chips, 0, list_rows),
-                show(small, chips, 0, 1),
-                show(small, 0, 0, 1),
+                show(small, chips, 0, one_row),
+                show(small, 0, 0, one_row),
                 show(small, 0, 0, 0),
             ]
         } else {
             vec![
                 show(GreetingSize::Full, chips, jump, list_rows),
                 show(small, chips, jump, list_rows),
-                show(small, chips, jump, 1),
-                show(small, chips, jump.min(jump_columns), 1),
-                show(small, chips, 0, 1),
-                show(small, 0, 0, 1),
+                show(small, chips, jump, one_row),
+                show(small, chips, jump.min(jump_columns), one_row),
+                show(small, chips, 0, one_row),
+                show(small, 0, 0, one_row),
                 show(small, 0, 0, 0),
             ]
         };
@@ -637,6 +646,7 @@ impl App {
             jump: self.recent.len(),
             lists: self.home_lists().len(),
             notice: self.refresh_error().is_some(),
+            lists_aside: self.side_panel_shown(),
         };
         HomeLayout::new(area, self.home_picks.items.len(), extras)
     }
@@ -1754,6 +1764,7 @@ mod tests {
             jump,
             lists,
             notice: false,
+            lists_aside: false,
         }
     }
 
@@ -1766,6 +1777,10 @@ mod tests {
                     full(0, 0, 0),
                     HomeExtras {
                         notice: true,
+                        ..full(5, 4, 6)
+                    },
+                    HomeExtras {
+                        lists_aside: true,
                         ..full(5, 4, 6)
                     },
                 ] {
@@ -1846,6 +1861,33 @@ mod tests {
         let short = HomeLayout::new(Size::new(1354.0, 671.0), 6, full(4, 2, 4));
         assert!(short.card > layout.card, "{short:?}");
         assert_eq!(short.max_offset(6), 0.0, "{short:?}");
+    }
+
+    #[test]
+    fn beside_the_side_panel_home_leaves_the_lists_to_it_and_the_covers_grow() {
+        // The page area of a 1418x797 window beside a 269 px panel.
+        let area = Size::new(1085.0, 671.0);
+        let with = HomeLayout::new(area, 30, full(4, 4, 4));
+        let aside = HomeLayout::new(
+            area,
+            30,
+            HomeExtras {
+                lists_aside: true,
+                ..full(4, 4, 4)
+            },
+        );
+        assert_eq!((aside.lists, aside.welcome), (0, false), "{aside:?}");
+        assert!(aside.card > with.card, "{with:?} {aside:?}");
+        // Without lists the welcome still says how to start one.
+        let new_user = HomeLayout::new(
+            area,
+            30,
+            HomeExtras {
+                lists_aside: true,
+                ..full(0, 0, 0)
+            },
+        );
+        assert!(new_user.welcome, "{new_user:?}");
     }
 
     #[test]

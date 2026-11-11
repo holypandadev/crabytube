@@ -199,6 +199,30 @@ impl std::fmt::Display for LibrarySort {
     }
 }
 
+/// Where Home, Library and Settings are: tabs in the title bar, or a panel down the left of the
+/// window that also lists the user's playlists. A phone-width window keeps its tab bar at the foot
+/// either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Navigation {
+    #[default]
+    TopTabs,
+    SidePanel,
+}
+
+impl Navigation {
+    pub const ALL: [Self; 2] = [Self::TopTabs, Self::SidePanel];
+}
+
+impl std::fmt::Display for Navigation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::TopTabs => "Top tabs",
+            Self::SidePanel => "Side panel",
+        };
+        f.write_str(crate::i18n::translate(crate::i18n::current_language(), label).as_ref())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiDensity {
     Compact,
@@ -373,6 +397,8 @@ pub struct Preferences {
     pub ui_font_family: UiFontFamily,
     pub ui_language: UiLanguage,
     pub ui_density: UiDensity,
+    /// Tabs in the title bar or a panel on the left.
+    pub navigation: Navigation,
     /// The order of the playlists on the Library page.
     pub library_sort: LibrarySort,
     pub startup: bool,
@@ -434,6 +460,7 @@ impl Default for Preferences {
             ui_font_family: UiFontFamily::default(),
             ui_language: UiLanguage::default(),
             ui_density: UiDensity::default(),
+            navigation: Navigation::default(),
             library_sort: LibrarySort::default(),
             startup: false,
             close_to_tray: true,
@@ -1389,6 +1416,20 @@ mod tests {
 
         let legacy: Preferences = serde_json::from_str(r#"{"ui_density":"Compact"}"#).unwrap();
         assert_eq!(legacy.ui_language, UiLanguage::English);
+    }
+
+    #[test]
+    fn navigation_round_trips_and_older_state_keeps_the_top_tabs() {
+        let preferences = Preferences {
+            navigation: Navigation::SidePanel,
+            ..Preferences::default()
+        };
+        let restored: Preferences =
+            serde_json::from_slice(&serde_json::to_vec(&preferences).unwrap()).unwrap();
+        assert_eq!(restored.navigation, Navigation::SidePanel);
+
+        let legacy: Preferences = serde_json::from_str(r#"{"ui_density":"Compact"}"#).unwrap();
+        assert_eq!(legacy.navigation, Navigation::TopTabs);
     }
 
     #[test]

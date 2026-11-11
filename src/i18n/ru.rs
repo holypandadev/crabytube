@@ -351,6 +351,13 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Close to tray", "Сворачивать в область уведомлений"),
         ("Compact mode", "Компактный режим"),
+        ("Navigation", "Навигация"),
+        (
+            "Where Home, Library and Settings sit.",
+            "Где находятся Главная, Библиотека и Настройки.",
+        ),
+        ("Top tabs", "Вкладки сверху"),
+        ("Side panel", "Боковая панель"),
         ("[ COULD NOT LOAD ]", "[ НЕ УДАЛОСЬ ЗАГРУЗИТЬ ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "Настройте приложение под себя"),

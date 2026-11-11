@@ -122,6 +122,7 @@ pub(super) enum Preference {
     LyricsFollow(bool),
     UiLanguage(crate::preferences::UiLanguage),
     UiDensity(crate::preferences::UiDensity),
+    Navigation(crate::preferences::Navigation),
     LibrarySort(crate::preferences::LibrarySort),
     ShowLyricsDefault(bool),
     SearchSuggestions(bool),
@@ -290,6 +291,8 @@ pub(super) enum Message {
     },
     LibraryScrolled(AbsoluteOffset),
     LibraryListsScrolled(AbsoluteOffset),
+    /// The lists of the side panel scrolled.
+    PanelListsScrolled(AbsoluteOffset),
     /// The text that filters the playlists on the Library page.
     LibraryFilterChanged(String),
     QueueScrolled(AbsoluteOffset),

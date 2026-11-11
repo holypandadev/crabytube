@@ -195,7 +195,26 @@ impl App {
                 bottom: 0.0,
                 left: gutter,
             });
-        let mut body = column![self.header(), content];
+        let body_row: Element<'_, Message> = if self.side_panel_shown() {
+            row![
+                self.navigation_panel(),
+                container(Space::new())
+                    .width(theme::hairline())
+                    .height(Length::Fill)
+                    .style(theme::filled(RULE)),
+                content,
+            ]
+            .height(Length::Fill)
+            .into()
+        } else {
+            content.into()
+        };
+        let header = if self.side_panel_shown() {
+            self.panel_header()
+        } else {
+            self.header()
+        };
+        let mut body = column![header, body_row];
         if self.player_bar_shown() {
             body = body.push(hrule(INK)).push(
                 container(responsive(move |size| self.player_bar(size.width)))
@@ -332,6 +351,70 @@ impl App {
             header = header.push(hrule(RULE)).push(self.tab_row(true));
         }
         header.push(hrule(INK)).into()
+    }
+
+    /// The header beside the side panel: the brand over the panel, Back and Forward lined up with
+    /// the left edge of the page under them, and the window buttons. On macOS the system's buttons sit over the panel instead and
+    /// the brand goes to the right. The empty part moves the window and a double click maximizes it.
+    fn panel_header(&self) -> Element<'_, Message> {
+        let panel = super::side_panel::panel_width(self.window_width) + theme::hairline();
+        let rail = panel < BRAND_INSET + LOGO_W + 10.0 + WORDMARK_H * WORDMARK_ASPECT + 8.0;
+        let mut brand = row![svg(logo_handle()).width(LOGO_W).height(LOGO_W)]
+            .spacing(10)
+            .align_y(Alignment::Center);
+        if !rail {
+            brand = brand.push(
+                svg(wordmark_handle())
+                    .width(WORDMARK_H * WORDMARK_ASPECT)
+                    .height(WORDMARK_H)
+                    .style(|_, _| svg::Style { color: Some(INK) }),
+            );
+        }
+        let drag = mouse_area(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::StartDrag)
+        .on_double_click(Message::ToggleMaximize);
+        let arrows = row![
+            self.nav_arrow(
+                "chev-left",
+                self.back_available().then_some(Message::Back),
+                HEADER_H
+            ),
+            self.nav_arrow(
+                "chev-right",
+                self.forward_available().then_some(Message::Forward),
+                HEADER_H
+            ),
+        ];
+        // The arrow's icon sits in the middle of its square button: the button starts that far
+        // before the page's gutter so the icon lines up with the page's text.
+        let inset = (HEADER_H - NAV_ICON) / 2.0;
+        let to_page = (gutter_for(self.window_width) - inset).max(0.0);
+        let bar = if cfg!(target_os = "macos") {
+            row![
+                Space::new().width(panel.max(NATIVE_BUTTONS_W)),
+                Space::new().width(to_page),
+                arrows,
+                drag,
+                brand,
+                Space::new().width(BRAND_INSET),
+            ]
+        } else {
+            row![
+                container(row![Space::new().width(BRAND_INSET), brand].align_y(Alignment::Center))
+                    .width(panel)
+                    .height(HEADER_H)
+                    .center_y(HEADER_H),
+                Space::new().width(to_page),
+                arrows,
+                drag,
+                window_buttons(false),
+            ]
+        };
+        column![bar.height(HEADER_H).align_y(Alignment::Center), hrule(INK)].into()
     }
 
     /// Whether the window is as narrow as a phone: the tabs go to a bar at its foot, and rows take
@@ -488,7 +571,7 @@ impl App {
             theme::ICON_IDLE
         };
         button(
-            container(icon(name, 16.0, color))
+            container(icon(name, NAV_ICON, color))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
         )
@@ -907,6 +990,8 @@ pub(super) const TAB_BAR_H: f32 = 56.0;
 /// Space between the header and the top of every page.
 const PAGE_TOP: f32 = 20.0;
 const TAB_UNDERLINE: f32 = 2.0;
+/// The size of the Back and Forward icons.
+const NAV_ICON: f32 = 16.0;
 /// Room on each side of a tab label in the bar.
 const TAB_PADDING: f32 = 16.0;
 const LOGO_W: f32 = 20.0;

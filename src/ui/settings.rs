@@ -9,7 +9,7 @@ use super::theme::{
 };
 use super::{App, Message, Preference};
 use crate::playback::PlaybackState;
-use crate::preferences::{UiDensity, UiLanguage};
+use crate::preferences::{Navigation, UiDensity, UiLanguage};
 use iced::widget::{
     Column, Space, button, column, container, pick_list, row, scrollable, slider, text,
 };
@@ -28,6 +28,9 @@ const ROW_ESTIMATE: f32 = 64.0;
 /// The language drop-down fits the longest name, "Português (Brasil)", at any window size:
 /// eighteen monospaced characters, the padding and the arrow.
 const LANGUAGE_PICKER_WIDTH: f32 = 204.0;
+/// The navigation drop-down as wide as the language one: its choices take at most eighteen
+/// characters in every language.
+const NAVIGATION_PICKER_WIDTH: f32 = LANGUAGE_PICKER_WIDTH;
 
 /// A settings box with its row count, which estimates its height for the column layout.
 struct Section<'a> {
@@ -422,6 +425,17 @@ impl App {
                         UiLanguage::ALL.to_vec(),
                         Some(p.ui_language),
                         |value| Message::Preference(Preference::UiLanguage(value)),
+                    ),
+                    width,
+                ),
+                self.setting(
+                    "Navigation",
+                    Some("Where Home, Library and Settings sit.".into()),
+                    self.picker_at_least(
+                        NAVIGATION_PICKER_WIDTH,
+                        Navigation::ALL.to_vec(),
+                        Some(p.navigation),
+                        |value| Message::Preference(Preference::Navigation(value)),
                     ),
                     width,
                 ),

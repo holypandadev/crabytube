@@ -110,6 +110,8 @@ impl App {
     /// covers requested are the ones on screen.
     pub(super) fn current_page_artwork(&self) -> Vec<CoverRequest> {
         let mut requests = self.page_artwork();
+        // The side panel's lists sit beside the page.
+        requests.extend(self.panel_artwork());
         // The Save panel draws over the page.
         requests.extend(self.save_dialog_artwork());
         requests

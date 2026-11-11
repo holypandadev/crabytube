@@ -288,6 +288,21 @@ impl App {
                         self.update(Message::Navigate(Page::Library)),
                         self.update(Message::LibraryFilterChanged("tour".into())),
                     ]),
+                    // The side panel in place of the header's tabs, on Home and beside a playlist.
+                    29 => Task::batch([
+                        self.update(Message::LibraryFilterChanged(String::new())),
+                        self.update(Message::Preference(super::Preference::Navigation(
+                            crate::preferences::Navigation::SidePanel,
+                        ))),
+                        self.update(Message::Navigate(Page::Home)),
+                    ]),
+                    30 => match diagnostic_playlist(self) {
+                        Some(id) => self.update(Message::Navigate(Page::List(
+                            super::messages::ListId::Playlist(id),
+                        ))),
+                        None => Task::none(),
+                    },
+                    31 => self.update(Message::Navigate(Page::NowPlaying)),
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -485,7 +500,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 /// `--screenshots <dir>`: page name and the wait before each capture. Steps 7 and 8 open the
 /// lyrics without a seek and check that the position moved on between their captures.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 29] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 32] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -515,6 +530,9 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 29] = [
     ("queue-undo", 1_000),
     ("home-lists", 3_000),
     ("library-filter", 1_500),
+    ("side-panel-home", 3_000),
+    ("side-panel-playlist", 2_000),
+    ("side-panel-now-playing", 2_000),
 ];
 
 /// The playlist the tour made, the last of its name.

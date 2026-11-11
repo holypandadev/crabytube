@@ -134,6 +134,11 @@ covers other than the playing track's are dropped and the freed heap is returned
   Linux and Windows; on macOS the system frame stays, with a transparent, untitled bar that the
   app's bar fills. At a phone's width the tabs become a bar of icons at the foot, under a smaller
   player, and the ••• and heart buttons of rows grow to a finger's size.
+- `ui/side_panel.rs`: the panel down the left of the window that Settings can put in place of the
+  header's tabs: Home, Library and Settings, and under them Favorite songs and the playlists in the
+  Library's order. It takes about a fifth of the window, becomes a rail of icons and covers with
+  their names in tooltips on a narrow window, and gives way to the tab bar at a phone's width. Home
+  leaves "Your lists" to it.
 - Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`; Home fits the window without
   scrolling: the greeting, the search field, Jump back in, one shelf of the feed and the user's
   lists, or a welcome while there are none, in one column as wide as the window; the covers take

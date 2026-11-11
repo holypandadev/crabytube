@@ -363,6 +363,13 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Close to tray", "In den Infobereich schließen"),
         ("Compact mode", "Kompakter Modus"),
+        ("Navigation", "Navigation"),
+        (
+            "Where Home, Library and Settings sit.",
+            "Wo Start, Mediathek und Einstellungen liegen.",
+        ),
+        ("Top tabs", "Tabs oben"),
+        ("Side panel", "Seitenleiste"),
         ("[ COULD NOT LOAD ]", "[ LADEN FEHLGESCHLAGEN ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "Passe die App an"),

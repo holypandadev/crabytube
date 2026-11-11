@@ -354,6 +354,13 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Close to tray", "閉じるとトレイに格納"),
         ("Compact mode", "コンパクトモード"),
+        ("Navigation", "ナビゲーション"),
+        (
+            "Where Home, Library and Settings sit.",
+            "ホーム、ライブラリ、設定の表示位置。",
+        ),
+        ("Top tabs", "上部のタブ"),
+        ("Side panel", "サイドパネル"),
         ("[ COULD NOT LOAD ]", "[ 読み込めませんでした ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "使い方に合わせて調整"),

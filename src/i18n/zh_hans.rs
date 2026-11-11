@@ -315,6 +315,13 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Close to tray", "关闭时最小化到托盘"),
         ("Compact mode", "紧凑模式"),
+        ("Navigation", "导航"),
+        (
+            "Where Home, Library and Settings sit.",
+            "首页、音乐库和设置所在的位置。",
+        ),
+        ("Top tabs", "顶部标签"),
+        ("Side panel", "侧边栏"),
         ("[ COULD NOT LOAD ]", "[ 无法加载 ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "按你的喜好调整"),

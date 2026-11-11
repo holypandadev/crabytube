@@ -354,6 +354,13 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Close to tray", "Cerrar a la bandeja"),
         ("Compact mode", "Modo compacto"),
+        ("Navigation", "Navegación"),
+        (
+            "Where Home, Library and Settings sit.",
+            "Dónde van Inicio, Biblioteca y Ajustes.",
+        ),
+        ("Top tabs", "Pestañas arriba"),
+        ("Side panel", "Panel lateral"),
         ("[ COULD NOT LOAD ]", "[ NO SE PUDO CARGAR ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "Personaliza tu experiencia"),

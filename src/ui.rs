@@ -14,6 +14,7 @@ mod playback_glue;
 mod playlists;
 mod settings;
 mod shell;
+mod side_panel;
 mod subscriptions;
 mod theme;
 #[cfg(feature = "diagnostics")]
@@ -135,6 +136,8 @@ struct App {
     drag_tick: u64,
     /// Where the Library page's list of lists stood.
     lists_scroll: AbsoluteOffset,
+    /// Where the side panel's lists stood.
+    panel_scroll: AbsoluteOffset,
     /// The playlist the panel asks about deleting.
     delete_prompt: Option<u64>,
     /// The playlist's name, not the search, is the text typed in last. A text field takes the
@@ -425,6 +428,7 @@ fn keeps_confirmation(message: &Message) -> bool {
         | Message::SearchScrolled { .. }
         | Message::LibraryScrolled(_)
         | Message::LibraryListsScrolled(_)
+        | Message::PanelListsScrolled(_)
         | Message::DragMoved(..)
         | Message::DragTick(_)
         | Message::LoadingPulse
@@ -757,7 +761,10 @@ impl App {
             self.os_window = (width, height);
             self.apply_ui_zoom();
             self.zoom_applied = self.ui_zoom;
-            self.area = estimated_area(self.window_width, self.window_height);
+            self.area = estimated_area(
+                self.window_width - self.side_panel_width(),
+                self.window_height,
+            );
             let size = requested_window_size((width, height), self.preferences.scale_with_window);
             let (_, open) = iced::window::open(main_window_settings(
                 size,
@@ -1449,6 +1456,12 @@ impl App {
                         }
                         self.preferences.ui_density = v;
                     }
+                    Preference::Navigation(v) => {
+                        self.preferences.navigation = v;
+                        self.persist();
+                        // The page loses or gains the panel's width; its covers follow.
+                        return self.preload_current_page_artwork();
+                    }
                 }
                 if !continuous {
                     self.persist();
@@ -1911,6 +1924,10 @@ impl App {
             }
             Message::LibraryListsScrolled(offset) => {
                 self.lists_scroll = offset;
+                return self.scroll_preload_task();
+            }
+            Message::PanelListsScrolled(offset) => {
+                self.panel_scroll = offset;
                 return self.scroll_preload_task();
             }
             Message::QueueScrolled(offset) => {
@@ -2569,6 +2586,7 @@ impl App {
             drag_list_height: 0.0,
             drag_tick: 0,
             lists_scroll: AbsoluteOffset::default(),
+            panel_scroll: AbsoluteOffset::default(),
             delete_prompt: None,
             playlist_name_typed: false,
             library_filter: String::new(),
@@ -2762,7 +2780,7 @@ impl App {
         app.os_window = (window_width, window_height);
         app.apply_ui_zoom();
         app.zoom_applied = app.ui_zoom;
-        app.area = estimated_area(app.window_width, app.window_height);
+        app.area = estimated_area(app.window_width - app.side_panel_width(), app.window_height);
         // A place no connected screen shows is forgotten, so the next save does not keep it.
         if app.preferences.window_position.is_some() && saved_window_position().is_none() {
             app.preferences.window_position = None;
@@ -4005,7 +4023,7 @@ fn ui_zoom_for(width: f32, height: f32, enabled: bool) -> f32 {
     (zoom * 100.0).floor() / 100.0
 }
 
-/// Page area for a window size, before the first layout reports the real one.
+/// Page area for a window size, less the side panel, before the first layout reports the real one.
 fn estimated_area(window_width: f32, window_height: f32) -> iced::Size {
     use theme::{GUTTER, PLAYER_H, TITLE_BAR_H};
     iced::Size::new(
