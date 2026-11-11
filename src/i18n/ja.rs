@@ -361,6 +361,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Top tabs", "上部のタブ"),
         ("Side panel", "サイドパネル"),
+        ("Collapse the panel", "パネルを縮める"),
+        ("Expand the panel", "パネルを広げる"),
         ("[ COULD NOT LOAD ]", "[ 読み込めませんでした ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "使い方に合わせて調整"),

@@ -303,6 +303,11 @@ impl App {
                         None => Task::none(),
                     },
                     31 => self.update(Message::Navigate(Page::NowPlaying)),
+                    // The panel collapsed to its rail on a wide window, beside Home.
+                    32 => Task::batch([
+                        self.update(Message::Preference(super::Preference::PanelCollapsed(true))),
+                        self.update(Message::Navigate(Page::Home)),
+                    ]),
                     _ => Task::none(),
                 };
                 let delay = Duration::from_millis(*delay_ms);
@@ -500,7 +505,7 @@ pub fn set_diagnostic_autoplay(request: DiagnosticAutoplay) {
 /// `--screenshots <dir>`: page name and the wait before each capture. Steps 7 and 8 open the
 /// lyrics without a seek and check that the position moved on between their captures.
 #[cfg(feature = "diagnostics")]
-pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 32] = [
+pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 33] = [
     ("home", 0),
     ("settings", 1_000),
     ("typing", 3_000),
@@ -533,6 +538,7 @@ pub(super) const DIAGNOSTIC_TOUR: [(&str, u64); 32] = [
     ("side-panel-home", 3_000),
     ("side-panel-playlist", 2_000),
     ("side-panel-now-playing", 2_000),
+    ("side-panel-collapsed", 2_000),
 ];
 
 /// The playlist the tour made, the last of its name.

@@ -361,6 +361,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Top tabs", "Onglets en haut"),
         ("Side panel", "Panneau latéral"),
+        ("Collapse the panel", "Réduire le panneau"),
+        ("Expand the panel", "Agrandir le panneau"),
         ("[ COULD NOT LOAD ]", "[ CHARGEMENT IMPOSSIBLE ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         (

@@ -123,6 +123,7 @@ pub(super) enum Preference {
     UiLanguage(crate::preferences::UiLanguage),
     UiDensity(crate::preferences::UiDensity),
     Navigation(crate::preferences::Navigation),
+    PanelCollapsed(bool),
     LibrarySort(crate::preferences::LibrarySort),
     ShowLyricsDefault(bool),
     SearchSuggestions(bool),

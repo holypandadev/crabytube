@@ -399,6 +399,8 @@ pub struct Preferences {
     pub ui_density: UiDensity,
     /// Tabs in the title bar or a panel on the left.
     pub navigation: Navigation,
+    /// The side panel shows icons and covers only, as on a narrow window.
+    pub panel_collapsed: bool,
     /// The order of the playlists on the Library page.
     pub library_sort: LibrarySort,
     pub startup: bool,
@@ -461,6 +463,7 @@ impl Default for Preferences {
             ui_language: UiLanguage::default(),
             ui_density: UiDensity::default(),
             navigation: Navigation::default(),
+            panel_collapsed: false,
             library_sort: LibrarySort::default(),
             startup: false,
             close_to_tray: true,
@@ -1424,12 +1427,18 @@ mod tests {
             navigation: Navigation::SidePanel,
             ..Preferences::default()
         };
+        let preferences = Preferences {
+            panel_collapsed: true,
+            ..preferences
+        };
         let restored: Preferences =
             serde_json::from_slice(&serde_json::to_vec(&preferences).unwrap()).unwrap();
         assert_eq!(restored.navigation, Navigation::SidePanel);
+        assert!(restored.panel_collapsed);
 
         let legacy: Preferences = serde_json::from_str(r#"{"ui_density":"Compact"}"#).unwrap();
         assert_eq!(legacy.navigation, Navigation::TopTabs);
+        assert!(!legacy.panel_collapsed);
     }
 
     #[test]

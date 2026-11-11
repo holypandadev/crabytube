@@ -358,10 +358,10 @@ impl App {
     /// brand and line up with the left edge of the page instead. On macOS the system's buttons sit over the panel instead and
     /// the brand goes to the right. The empty part moves the window and a double click maximizes it.
     fn panel_header(&self) -> Element<'_, Message> {
-        let panel = super::side_panel::panel_width(self.window_width) + theme::hairline();
+        let panel = self.panel_w() + theme::hairline();
         // The arrow's icon sits in the middle of its square button, `inset` from its edges.
         let inset = (HEADER_H - NAV_ICON) / 2.0;
-        let panel_w = super::side_panel::panel_width(self.window_width);
+        let panel_w = self.panel_w();
         let arrows_w = 2.0 * HEADER_H;
         // Over the panel, Forward's icon ends where the panel's rows and its + button end.
         let end = (panel_w - super::side_panel::PAD_X + inset).min(panel);

@@ -1462,6 +1462,11 @@ impl App {
                         // The page loses or gains the panel's width; its covers follow.
                         return self.preload_current_page_artwork();
                     }
+                    Preference::PanelCollapsed(v) => {
+                        self.preferences.panel_collapsed = v;
+                        self.persist();
+                        return self.preload_current_page_artwork();
+                    }
                 }
                 if !continuous {
                     self.persist();

@@ -358,6 +358,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Top tabs", "Вкладки сверху"),
         ("Side panel", "Боковая панель"),
+        ("Collapse the panel", "Свернуть панель"),
+        ("Expand the panel", "Развернуть панель"),
         ("[ COULD NOT LOAD ]", "[ НЕ УДАЛОСЬ ЗАГРУЗИТЬ ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "Настройте приложение под себя"),

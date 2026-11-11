@@ -75,9 +75,9 @@ fn panel_row(mark: Mark) -> impl Fn(&Theme, button::Status) -> button::Style {
 }
 
 /// The panel's width for a window as wide as `window_width`, between `PANEL_MIN_W` and
-/// `PANEL_MAX_W`, or the rail's below `RAIL_FROM`.
-pub(super) fn panel_width(window_width: f32) -> f32 {
-    if window_width < RAIL_FROM {
+/// `PANEL_MAX_W`, or the rail's below `RAIL_FROM` and while the user keeps it collapsed.
+pub(super) fn panel_width(window_width: f32, collapsed: bool) -> f32 {
+    if collapsed || window_width < RAIL_FROM {
         RAIL_W
     } else {
         (window_width * PANEL_SHARE)
@@ -96,15 +96,26 @@ impl App {
     /// The width the panel takes from the page, its rule included; 0 without it.
     pub(super) fn side_panel_width(&self) -> f32 {
         if self.side_panel_shown() {
-            panel_width(self.window_width) + theme::hairline()
+            self.panel_w() + theme::hairline()
         } else {
             0.0
         }
     }
 
-    /// Whether the panel shows icons and covers only.
+    /// The panel's own width, without its rule.
+    pub(super) fn panel_w(&self) -> f32 {
+        panel_width(self.window_width, self.preferences.panel_collapsed)
+    }
+
+    /// Whether the panel shows icons and covers only: on a narrow window, or collapsed.
     fn side_panel_rail(&self) -> bool {
-        self.window_width < RAIL_FROM
+        self.preferences.panel_collapsed || self.window_width < RAIL_FROM
+    }
+
+    /// Whether the window has room for the whole panel, so the button that collapses or expands
+    /// it shows.
+    fn panel_can_expand(&self) -> bool {
+        self.window_width >= RAIL_FROM
     }
 
     /// The lists of the panel: Favorite songs first, then the playlists in the Library's order.
@@ -166,8 +177,46 @@ impl App {
             - PAD_TOP
             - 3.0 * NAV_H
             - 2.0 * RULE_GAP
-            - LISTS_HEAD_H)
-            .max(0.0)
+            - self.lists_head_height())
+        .max(0.0)
+    }
+
+    /// The height of the head of the lists: one line, or on a collapsed rail the button that
+    /// expands the panel over the one that makes a playlist.
+    fn lists_head_height(&self) -> f32 {
+        if self.side_panel_rail() && self.panel_can_expand() {
+            2.0 * LISTS_HEAD_H
+        } else {
+            LISTS_HEAD_H
+        }
+    }
+
+    /// The button that collapses the panel to its rail, or expands it again.
+    fn panel_toggle(&self, collapsed: bool) -> Element<'_, Message> {
+        let (glyph, tip) = if collapsed {
+            ("panel-expand", "Expand the panel")
+        } else {
+            ("panel-collapse", "Collapse the panel")
+        };
+        let toggle = button(
+            container(icon(glyph, 18.0, INK))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .on_press(Message::Preference(super::Preference::PanelCollapsed(
+            !collapsed,
+        )))
+        .width(28)
+        .height(28)
+        .padding(0)
+        .style(theme::icon_button);
+        // Beside the whole panel the tip goes under the button, clear of the + beside it.
+        let position = if collapsed {
+            tooltip::Position::Right
+        } else {
+            tooltip::Position::Bottom
+        };
+        self.with_tooltip_at(toggle.into(), self.tr(tip).into_owned(), position)
     }
 
     /// How the row of Home, Library or Settings is marked.
@@ -193,7 +242,7 @@ impl App {
     /// The panel: Home, Library and Settings, a rule, and the user's lists, which scroll.
     pub(super) fn navigation_panel(&self) -> Element<'_, Message> {
         let rail = self.side_panel_rail();
-        let width = panel_width(self.window_width);
+        let width = self.panel_w();
         let inner = width - 2.0 * PAD_X;
         let mut sections = column![].spacing(0);
         for (page, glyph, name) in [
@@ -223,16 +272,27 @@ impl App {
         .height(28)
         .padding(0)
         .style(theme::icon_button_active);
+        let new = self.with_tooltip(new.into(), self.tr("New playlist").into_owned());
         let head: Element<'_, Message> = if rail {
-            container(self.with_tooltip(new.into(), self.tr("New playlist").into_owned()))
+            let mut head = column![].align_x(Alignment::Center);
+            if self.panel_can_expand() {
+                head = head.push(
+                    container(self.panel_toggle(true))
+                        .center_y(LISTS_HEAD_H)
+                        .height(LISTS_HEAD_H),
+                );
+            }
+            container(head.push(container(new).center_y(LISTS_HEAD_H).height(LISTS_HEAD_H)))
                 .center_x(Length::Fill)
-                .height(LISTS_HEAD_H)
+                .height(self.lists_head_height())
                 .into()
         } else {
             row![
                 Space::new().width(MARKER_W + 12.0),
                 label(self.tr("Your lists").into_owned(), TEXT_BODY),
                 Space::new().width(Length::Fill),
+                self.panel_toggle(false),
+                Space::new().width(6),
                 new,
             ]
             .height(LISTS_HEAD_H)
@@ -368,12 +428,22 @@ impl App {
         content: Element<'a, Message>,
         name: String,
     ) -> Element<'a, Message> {
+        self.with_tooltip_at(content, name, tooltip::Position::Right)
+    }
+
+    /// `content` with `name` at `position` while hovered.
+    fn with_tooltip_at<'a>(
+        &self,
+        content: Element<'a, Message>,
+        name: String,
+        position: tooltip::Position,
+    ) -> Element<'a, Message> {
         tooltip(
             content,
             container(label(name, TEXT_CAPTION))
                 .padding([6, 10])
                 .style(theme::boxed),
-            tooltip::Position::Right,
+            position,
         )
         .gap(6)
         .into()
@@ -386,10 +456,13 @@ mod tests {
 
     #[test]
     fn the_panel_grows_with_the_window_between_its_limits_and_is_a_rail_below_them() {
-        assert_eq!(panel_width(700.0), RAIL_W);
-        assert_eq!(panel_width(959.0), RAIL_W);
-        assert_eq!(panel_width(960.0), PANEL_MIN_W);
-        assert_eq!(panel_width(1418.0), 269.0);
-        assert_eq!(panel_width(2560.0), PANEL_MAX_W);
+        assert_eq!(panel_width(700.0, false), RAIL_W);
+        assert_eq!(panel_width(959.0, false), RAIL_W);
+        assert_eq!(panel_width(960.0, false), PANEL_MIN_W);
+        assert_eq!(panel_width(1418.0, false), 269.0);
+        assert_eq!(panel_width(2560.0, false), PANEL_MAX_W);
+        // Collapsed, the panel is the rail at any width.
+        assert_eq!(panel_width(1418.0, true), RAIL_W);
+        assert_eq!(panel_width(2560.0, true), RAIL_W);
     }
 }

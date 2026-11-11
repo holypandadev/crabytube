@@ -370,6 +370,8 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Top tabs", "Tabs oben"),
         ("Side panel", "Seitenleiste"),
+        ("Collapse the panel", "Seitenleiste einklappen"),
+        ("Expand the panel", "Seitenleiste ausklappen"),
         ("[ COULD NOT LOAD ]", "[ LADEN FEHLGESCHLAGEN ]"),
         ("CRABYTUBE", "CRABYTUBE"),
         ("Customize your experience", "Passe die App an"),

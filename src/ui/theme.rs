@@ -601,6 +601,8 @@ fn icon_handle(name: &'static str) -> svg::Handle {
         "home",
         "library",
         "settings",
+        "panel-collapse",
+        "panel-expand",
     )
 }
 
