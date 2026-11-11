@@ -353,37 +353,32 @@ impl App {
         header.push(hrule(INK)).into()
     }
 
-    /// The header beside the side panel: the brand and, at the panel's right edge, Back and Forward
-    /// over the panel, and the window buttons. On the narrow rail the arrows do not fit beside the
-    /// brand and line up with the left edge of the page instead. On macOS the system's buttons sit over the panel instead and
-    /// the brand goes to the right. The empty part moves the window and a double click maximizes it.
+    /// The header beside the side panel: Back and Forward first, at the window's corner, then the
+    /// brand, and the window buttons at the other end. The arrows keep their place whatever the
+    /// panel's width. Over the rail, which is as wide as the two arrows, the logo alone follows at
+    /// the left edge of the page. On macOS the arrows come after the system's buttons and the
+    /// brand is on the right. The empty part moves the window and a double click maximizes it.
     fn panel_header(&self) -> Element<'_, Message> {
         let panel = self.panel_w() + theme::hairline();
-        // The arrow's icon sits in the middle of its square button, `inset` from its edges.
-        let inset = (HEADER_H - NAV_ICON) / 2.0;
-        let panel_w = self.panel_w();
+        let rail = self.panel_w() <= super::side_panel::RAIL_W;
+        let arrows = row![
+            self.nav_arrow(
+                "chev-left",
+                self.back_available().then_some(Message::Back),
+                HEADER_H
+            ),
+            self.nav_arrow(
+                "chev-right",
+                self.forward_available().then_some(Message::Forward),
+                HEADER_H
+            ),
+        ];
         let arrows_w = 2.0 * HEADER_H;
-        // Over the panel, Forward's icon ends where the panel's rows and its + button end.
-        let end = (panel_w - super::side_panel::PAD_X + inset).min(panel);
-        let logo = BRAND_INSET + LOGO_W;
-        let wordmark = 10.0 + WORDMARK_H * WORDMARK_ASPECT;
-        // The arrows sit over the panel when they fit beside the logo, and the wordmark shows when
-        // it fits too. macOS has its own buttons there instead of the brand.
-        let lead = if cfg!(target_os = "macos") {
-            NATIVE_BUTTONS_W
-        } else {
-            logo
-        };
-        let over_panel = lead + arrows_w + 8.0 <= end;
-        let rail = if cfg!(target_os = "macos") {
-            panel < logo + wordmark + 8.0
-        } else {
-            logo + wordmark + if over_panel { arrows_w } else { 0.0 } + 8.0 > end
-        };
         let mut brand = row![svg(logo_handle()).width(LOGO_W).height(LOGO_W)]
             .spacing(10)
             .align_y(Alignment::Center);
-        if !rail {
+        // The wordmark goes with the whole panel; macOS has the room for it at the right.
+        if !rail || cfg!(target_os = "macos") {
             brand = brand.push(
                 svg(wordmark_handle())
                     .width(WORDMARK_H * WORDMARK_ASPECT)
@@ -398,71 +393,26 @@ impl App {
         )
         .on_press(Message::StartDrag)
         .on_double_click(Message::ToggleMaximize);
-        let arrows = row![
-            self.nav_arrow(
-                "chev-left",
-                self.back_available().then_some(Message::Back),
-                HEADER_H
-            ),
-            self.nav_arrow(
-                "chev-right",
-                self.forward_available().then_some(Message::Forward),
-                HEADER_H
-            ),
-        ];
-        if over_panel {
-            let bar = if cfg!(target_os = "macos") {
-                row![
-                    Space::new().width(end - arrows_w),
-                    arrows,
-                    Space::new().width(panel - end),
-                    drag,
-                    brand,
-                    Space::new().width(BRAND_INSET),
-                ]
-            } else {
-                row![
-                    container(
-                        row![
-                            Space::new().width(BRAND_INSET),
-                            brand,
-                            Space::new().width(Length::Fill),
-                            arrows
-                        ]
-                        .align_y(Alignment::Center)
-                    )
-                    .width(end)
-                    .height(HEADER_H)
-                    .center_y(HEADER_H),
-                    Space::new().width(panel - end),
-                    drag,
-                    window_buttons(false),
-                ]
-            };
-            return column![bar.height(HEADER_H).align_y(Alignment::Center), hrule(INK)].into();
-        }
-        // On the rail the button starts that far before the page's gutter so the icon lines up
-        // with the page's text.
-        let to_page = (gutter_for(self.window_width) - inset).max(0.0);
         let bar = if cfg!(target_os = "macos") {
             row![
-                Space::new().width(panel.max(NATIVE_BUTTONS_W)),
-                Space::new().width(to_page),
+                Space::new().width(NATIVE_BUTTONS_W),
                 arrows,
                 drag,
                 brand,
                 Space::new().width(BRAND_INSET),
             ]
         } else {
+            // Beside the whole panel the brand follows the arrows; past the rail it starts where
+            // the page's text does.
+            let to_brand = if rail {
+                (panel + gutter_for(self.window_width) - arrows_w).max(BRAND_GAP)
+            } else {
+                BRAND_GAP
+            };
             row![
-                // The logo alone, centred over the rail like the icons under it.
-                container(brand)
-                    .width(panel)
-                    .height(HEADER_H)
-                    .center_x(panel)
-                    .center_y(HEADER_H),
-                Space::new().width(to_page),
                 arrows,
+                Space::new().width(to_brand),
+                brand,
                 drag,
                 window_buttons(false),
             ]
@@ -1049,6 +999,8 @@ const NAV_ICON: f32 = 16.0;
 const TAB_PADDING: f32 = 16.0;
 const LOGO_W: f32 = 20.0;
 const BRAND_INSET: f32 = 14.0;
+/// Space between Back and Forward and the brand after them, beside the side panel.
+const BRAND_GAP: f32 = 6.0;
 /// The least room left between the tabs and each side zone.
 const SIDE_GAP: f32 = 8.0;
 

@@ -38,7 +38,7 @@ const TWO_LINES_GAP: f32 = 3.0;
 const MARKER_W: f32 = 2.0;
 /// Space around the panel's content.
 const PAD_TOP: f32 = 12.0;
-pub(super) const PAD_X: f32 = 8.0;
+const PAD_X: f32 = 8.0;
 /// Height of the line with "Your lists" and the button that makes a playlist.
 const LISTS_HEAD_H: f32 = 32.0;
 /// Space above and below the rule between the sections and the lists.
