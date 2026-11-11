@@ -48,6 +48,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.3" date="2026-11-11">
+      <description>
+        <p>A side panel: Settings can put Home, Library and Settings in a panel down the left of
+        the window, with your lists under them, in place of the tabs. The panel collapses to a
+        strip of icons and covers.</p>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-11-04">
       <description>
         <p>YouTube Music works again: Home, search, playlists and playback had stopped loading,
