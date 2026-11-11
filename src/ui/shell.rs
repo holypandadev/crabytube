@@ -455,9 +455,11 @@ impl App {
             ]
         } else {
             row![
-                container(row![Space::new().width(BRAND_INSET), brand].align_y(Alignment::Center))
+                // The logo alone, centred over the rail like the icons under it.
+                container(brand)
                     .width(panel)
                     .height(HEADER_H)
+                    .center_x(panel)
                     .center_y(HEADER_H),
                 Space::new().width(to_page),
                 arrows,

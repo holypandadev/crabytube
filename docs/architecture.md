@@ -137,8 +137,7 @@ covers other than the playing track's are dropped and the freed heap is returned
 - `ui/side_panel.rs`: the panel down the left of the window that Settings can put in place of the
   header's tabs: Home, Library and Settings, and under them Favorite songs and the playlists in the
   Library's order. It takes about a fifth of the window, becomes a rail of icons and covers with
-  their names in tooltips on a narrow window or when the user collapses it with the button beside
-  "Your lists", and gives way to the tab bar at a phone's width. Home
+  their names in tooltips on a narrow window or when the user collapses it with the row at its foot, and gives way to the tab bar at a phone's width. Home
   leaves "Your lists" to it.
 - Pages (`ui/messages.rs::Page`): Home and Search (`ui/home.rs`; Home fits the window without
   scrolling: the greeting, the search field, Jump back in, one shelf of the feed and the user's

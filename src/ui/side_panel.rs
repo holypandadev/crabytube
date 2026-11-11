@@ -21,8 +21,14 @@ pub(super) const RAIL_W: f32 = 72.0;
 const PANEL_SHARE: f32 = 0.19;
 const PANEL_MIN_W: f32 = 250.0;
 const PANEL_MAX_W: f32 = 300.0;
-/// A row of Home, Library or Settings.
+/// A row of Home, Library or Settings, and on the rail, where each is a cell with its icon alone.
 const NAV_H: f32 = 40.0;
+const RAIL_NAV_H: f32 = 48.0;
+/// The icon of a row of the panel, and on the rail.
+const NAV_ICON: f32 = 18.0;
+const RAIL_NAV_ICON: f32 = 20.0;
+/// Space above and below the row at the panel's foot that collapses or expands it.
+const FOOT_GAP: f32 = 8.0;
 /// A row of a list: its cover with the name and the number of songs beside it.
 pub(super) const LIST_ROW_H: f32 = 56.0;
 const LIST_COVER: f32 = 40.0;
@@ -175,48 +181,40 @@ impl App {
             - theme::TITLE_BAR_H
             - player
             - PAD_TOP
-            - 3.0 * NAV_H
+            - 3.0 * self.nav_height()
             - 2.0 * RULE_GAP
-            - self.lists_head_height())
+            - self.lists_head_height()
+            - self.foot_height())
         .max(0.0)
     }
 
-    /// The height of the head of the lists: one line, or on a collapsed rail the button that
-    /// expands the panel over the one that makes a playlist.
+    /// The height of a row of Home, Library or Settings.
+    fn nav_height(&self) -> f32 {
+        if self.side_panel_rail() {
+            RAIL_NAV_H
+        } else {
+            NAV_H
+        }
+    }
+
+    /// The height of the head of the lists: the line with "Your lists", or on the rail the cell
+    /// of the button that makes a playlist, as tall as a list's.
     fn lists_head_height(&self) -> f32 {
-        if self.side_panel_rail() && self.panel_can_expand() {
-            2.0 * LISTS_HEAD_H
+        if self.side_panel_rail() {
+            LIST_ROW_H
         } else {
             LISTS_HEAD_H
         }
     }
 
-    /// The button that collapses the panel to its rail, or expands it again.
-    fn panel_toggle(&self, collapsed: bool) -> Element<'_, Message> {
-        let (glyph, tip) = if collapsed {
-            ("panel-expand", "Expand the panel")
+    /// The height of the foot, with its rule: the row that collapses or expands the panel, on a
+    /// window with room for the whole panel.
+    fn foot_height(&self) -> f32 {
+        if self.panel_can_expand() {
+            theme::hairline() + 2.0 * FOOT_GAP + self.nav_height()
         } else {
-            ("panel-collapse", "Collapse the panel")
-        };
-        let toggle = button(
-            container(icon(glyph, 18.0, INK))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
-        )
-        .on_press(Message::Preference(super::Preference::PanelCollapsed(
-            !collapsed,
-        )))
-        .width(28)
-        .height(28)
-        .padding(0)
-        .style(theme::icon_button);
-        // Beside the whole panel the tip goes under the button, clear of the + beside it.
-        let position = if collapsed {
-            tooltip::Position::Right
-        } else {
-            tooltip::Position::Bottom
-        };
-        self.with_tooltip_at(toggle.into(), self.tr(tip).into_owned(), position)
+            0.0
+        }
     }
 
     /// How the row of Home, Library or Settings is marked.
@@ -244,6 +242,7 @@ impl App {
         let rail = self.side_panel_rail();
         let width = self.panel_w();
         let inner = width - 2.0 * PAD_X;
+        let nav_icon = if rail { RAIL_NAV_ICON } else { NAV_ICON };
         let mut sections = column![].spacing(0);
         for (page, glyph, name) in [
             (Page::Home, "home", "Home"),
@@ -254,45 +253,43 @@ impl App {
             let title = self.tr(name).into_owned();
             sections = sections.push(self.panel_entry(
                 mark,
-                icon(glyph, 18.0, if mark == Mark::None { DIM } else { INK }),
+                icon(glyph, nav_icon, if mark == Mark::None { DIM } else { INK }),
                 (!rail).then(|| label(title.clone(), TEXT_BODY).into()),
                 title,
                 Message::Navigate(page),
-                NAV_H,
+                self.nav_height(),
                 inner,
             ));
         }
+        // On the rail the button that makes a playlist is a box the size of a cover, in a cell of
+        // its own, so it lines up with the lists under it.
+        let (new_size, new_icon) = if rail {
+            (LIST_COVER, 16.0)
+        } else {
+            (28.0, 14.0)
+        };
         let new = button(
-            container(icon("plus", 14.0, INK))
+            container(icon("plus", new_icon, INK))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
         )
         .on_press(Message::NewPlaylist(None))
-        .width(28)
-        .height(28)
+        .width(new_size)
+        .height(new_size)
         .padding(0)
         .style(theme::icon_button_active);
         let new = self.with_tooltip(new.into(), self.tr("New playlist").into_owned());
         let head: Element<'_, Message> = if rail {
-            let mut head = column![].align_x(Alignment::Center);
-            if self.panel_can_expand() {
-                head = head.push(
-                    container(self.panel_toggle(true))
-                        .center_y(LISTS_HEAD_H)
-                        .height(LISTS_HEAD_H),
-                );
-            }
-            container(head.push(container(new).center_y(LISTS_HEAD_H).height(LISTS_HEAD_H)))
+            container(new)
                 .center_x(Length::Fill)
-                .height(self.lists_head_height())
+                .center_y(LIST_ROW_H)
+                .height(LIST_ROW_H)
                 .into()
         } else {
             row![
                 Space::new().width(MARKER_W + 12.0),
                 label(self.tr("Your lists").into_owned(), TEXT_BODY),
                 Space::new().width(Length::Fill),
-                self.panel_toggle(false),
-                Space::new().width(6),
                 new,
             ]
             .height(LISTS_HEAD_H)
@@ -347,7 +344,7 @@ impl App {
             .direction(theme::vbar())
             .style(theme::scroll_style)
             .height(Length::Fill);
-        container(column![
+        let mut panel = column![
             Space::new().height(PAD_TOP),
             sections,
             Space::new().height(RULE_GAP),
@@ -355,16 +352,41 @@ impl App {
             Space::new().height(RULE_GAP),
             head,
             lists,
-        ])
-        .width(width)
-        .height(Length::Fill)
-        .padding(iced::Padding {
-            top: 0.0,
-            right: PAD_X,
-            bottom: 0.0,
-            left: PAD_X,
-        })
-        .into()
+        ];
+        // The foot: one row, always in the same place, that collapses the panel or expands it.
+        if self.panel_can_expand() {
+            let (glyph, tip) = if rail {
+                ("panel-expand", "Expand the panel")
+            } else {
+                ("panel-collapse", "Collapse the panel")
+            };
+            let tip = self.tr(tip).into_owned();
+            let text_width = (inner - MARKER_W - 10.0 - NAV_ICON - 12.0 - 8.0).max(40.0);
+            let shown = super::shell::fit(&tip, text_width, TEXT_BODY);
+            panel = panel
+                .push(hrule(RULE))
+                .push(Space::new().height(FOOT_GAP))
+                .push(self.panel_entry(
+                    Mark::None,
+                    icon(glyph, nav_icon, DIM),
+                    (!rail).then(|| label(shown, TEXT_BODY).into()),
+                    tip,
+                    Message::Preference(super::Preference::PanelCollapsed(!rail)),
+                    self.nav_height(),
+                    inner,
+                ))
+                .push(Space::new().height(FOOT_GAP));
+        }
+        container(panel)
+            .width(width)
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: PAD_X,
+                bottom: 0.0,
+                left: PAD_X,
+            })
+            .into()
     }
 
     /// A row of the panel: the marker, a picture, and the text beside it; on the rail, the picture
@@ -404,13 +426,15 @@ impl App {
             .into(),
         };
         let rail = self.side_panel_rail();
+        // On the rail the picture sits at the centre of the cell, between the marker and an equal
+        // space on the other side.
         let entry = button(content)
             .on_press(message)
             .width(width)
             .height(height)
             .padding(iced::Padding {
                 top: 0.0,
-                right: 8.0,
+                right: if rail { 0.0 } else { 8.0 },
                 bottom: 0.0,
                 left: 0.0,
             })
@@ -428,22 +452,12 @@ impl App {
         content: Element<'a, Message>,
         name: String,
     ) -> Element<'a, Message> {
-        self.with_tooltip_at(content, name, tooltip::Position::Right)
-    }
-
-    /// `content` with `name` at `position` while hovered.
-    fn with_tooltip_at<'a>(
-        &self,
-        content: Element<'a, Message>,
-        name: String,
-        position: tooltip::Position,
-    ) -> Element<'a, Message> {
         tooltip(
             content,
             container(label(name, TEXT_CAPTION))
                 .padding([6, 10])
                 .style(theme::boxed),
-            position,
+            tooltip::Position::Right,
         )
         .gap(6)
         .into()
