@@ -2400,9 +2400,28 @@ impl App {
             Message::AreaMeasured(area) => {
                 let changed = (self.area.width - area.width).abs() > 0.5
                     || (self.area.height - area.height).abs() > 0.5;
+                // The card the carousel started at, before the cards change size with the page.
+                let first_card = (self.carousel.offset / self.home_layout(self.area).stride())
+                    .round()
+                    .max(0.0);
                 self.area = area;
                 if changed {
-                    return self.schedule_resize_work();
+                    let resize = self.schedule_resize_work();
+                    if self.carousel.offset <= 0.0 || self.carousel.animating() {
+                        return resize;
+                    }
+                    // A carousel that was stepped along keeps starting at the same card, whole.
+                    let layout = self.home_layout(area);
+                    let target = (first_card * layout.stride())
+                        .min(layout.max_offset(self.home_picks.items.len()));
+                    self.carousel.start(target, true);
+                    return Task::batch([
+                        resize,
+                        operation::scroll_to(
+                            home::CAROUSEL_ID,
+                            AbsoluteOffset { x: target, y: 0.0 },
+                        ),
+                    ]);
                 }
             }
             Message::CarouselStep { forward } => {
