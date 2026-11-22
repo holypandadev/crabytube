@@ -477,9 +477,20 @@ async fn poll_once(
         },
         None => url.clone(),
     };
+    // A media server that does not answer over one route is asked over IPv4 beside it.
+    let ipv4 = match super::engine::shared_media_client_ipv4() {
+        Ok(ipv4) => ipv4,
+        Err(error) => return Poll::Failed(format!("live poll failed: {error}")),
+    };
+    let poll = crate::network::send_media(&target, client, ipv4, |client| {
+        client
+            .get(target.clone())
+            .headers(headers.clone())
+            .header(reqwest::header::RANGE, "bytes=0-")
+    });
     let response = tokio::select! {
         _ = cancellation.cancelled() => return Poll::Cancelled,
-        response = client.get(target).headers(headers.clone()).header(reqwest::header::RANGE, "bytes=0-").send() => response,
+        response = poll => response,
     };
     let response = match response {
         Ok(response) => response,

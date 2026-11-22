@@ -77,6 +77,11 @@ Track (video ID)
   configuration requests (Music page, watch page, player script) are retried a bounded number of
   times on transient failures. Player and media requests are not retried on their own; a
   resolution whose stream googlevideo refuses is attempted again a bounded number of times.
+- **Media servers over IPv4.** Some media servers accept a connection over IPv6 and then never
+  answer, while they answer over IPv4 at once. A media request (the preflight, an audio range, a
+  live poll) that has no answer after a second and a half is sent again over IPv4 beside the first,
+  and the first answer wins. A server that answered only over IPv4 is asked there first for the
+  next half hour.
 - **Tokens.** Session and content PO tokens are cached in memory and in `pot.json` (owner-only
   permissions) until shortly before they expire. When the helper runs, it also mints content
   tokens for the next tracks in the queue, so later tracks usually need no helper run.

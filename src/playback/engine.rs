@@ -1767,18 +1767,20 @@ impl YoutubeHttpSource {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         tracing::debug!(range, host = self.url.host_str(), ?query_keys, %url_fingerprint, "requesting audio byte range");
-        let response = self
-            .client
-            .get(self.url.clone())
-            .headers(self.headers.clone())
-            .header(reqwest::header::RANGE, range.clone())
-            .send()
-            .await
-            .map_err(|error| {
-                let message = error.without_url().to_string();
-                record_fetch_error(&self.last_error, message.clone());
-                YoutubeHttpError::Request(message)
-            })?;
+        // A media server that does not answer over one route is asked over IPv4 beside it.
+        let ipv4 = shared_media_client_ipv4().map_err(YoutubeHttpError::Request)?;
+        let response = crate::network::send_media(&self.url, &self.client, ipv4, |client| {
+            client
+                .get(self.url.clone())
+                .headers(self.headers.clone())
+                .header(reqwest::header::RANGE, range.clone())
+        })
+        .await
+        .map_err(|error| {
+            let message = error.without_url().to_string();
+            record_fetch_error(&self.last_error, message.clone());
+            YoutubeHttpError::Request(message)
+        })?;
         tracing::debug!(status = %response.status(), range, "audio byte range response");
         if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             let status = response.status();
@@ -1930,16 +1932,32 @@ fn shared_media_client() -> Result<&'static reqwest::Client, EngineError> {
     static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
         std::sync::OnceLock::new();
     CLIENT
-        .get_or_init(|| {
-            crate::network::configure_http(reqwest::Client::builder())
-                .connect_timeout(Duration::from_secs(6))
-                // A per-read timeout: a total timeout cuts off slow links that are still delivering data.
-                .read_timeout(Duration::from_secs(15))
-                .build()
-                .map_err(|error| error.to_string())
-        })
+        .get_or_init(|| media_client(crate::network::configure_http(reqwest::Client::builder())))
         .as_ref()
         .map_err(|message| EngineError::Network(message.clone()))
+}
+
+/// The media client bound to IPv4, for a media server that does not answer over another route.
+pub(super) fn shared_media_client_ipv4() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            media_client(crate::network::ipv4_only(crate::network::configure_http(
+                reqwest::Client::builder(),
+            )))
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+fn media_client(builder: reqwest::ClientBuilder) -> Result<reqwest::Client, String> {
+    builder
+        .connect_timeout(Duration::from_secs(6))
+        // A per-read timeout: a total timeout cuts off slow links that are still delivering data.
+        .read_timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 /// The headers a stream's requests carry. They are sent with each request, not baked into the shared client.

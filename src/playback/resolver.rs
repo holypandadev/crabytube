@@ -1001,13 +1001,25 @@ impl YouTubeStreamResolver {
                 );
             }
             let preflight_client = crate::network::shared().map_err(StreamError::Network)?;
+            let preflight_ipv4 = crate::network::shared_ipv4().map_err(StreamError::Network)?;
+            let preflight_url = reqwest::Url::parse(&audio_stream.url)
+                .map_err(|error| StreamError::Network(error.to_string()))?;
             info!(resolution_id, validation_attempt, "GVS preflight started");
+            // A media server that does not answer over one route is asked over IPv4 beside it.
+            let preflight = crate::network::send_media(
+                &preflight_url,
+                preflight_client,
+                preflight_ipv4,
+                |client| {
+                    client
+                        .get(preflight_url.clone())
+                        .headers(headers.clone())
+                        .header(reqwest::header::RANGE, "bytes=0-1")
+                },
+            );
             let response = tokio::select! {
                 _ = cancellation.cancelled() => return Err(StreamError::Cancelled),
-                response = preflight_client.get(&audio_stream.url)
-                    .headers(headers)
-                    .header(reqwest::header::RANGE, "bytes=0-1")
-                    .send() => response.map_err(|error| StreamError::Network(format!("GVS preflight request failed ({})", sanitized_reqwest_error(&error))))?,
+                response = preflight => response.map_err(|error| StreamError::Network(format!("GVS preflight request failed ({})", sanitized_reqwest_error(&error))))?,
             };
             let status = response.status();
             drop(response);
