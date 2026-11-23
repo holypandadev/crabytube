@@ -48,6 +48,12 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.4" date="2026-11-22">
+      <description>
+        <p>Songs start again where they took twenty seconds or failed: an audio server that does
+        not answer over IPv6 is now asked over IPv4 as well.</p>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-11-11">
       <description>
         <p>A side panel: Settings can put Home, Library and Settings in a panel down the left of
