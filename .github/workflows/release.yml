@@ -32,6 +32,11 @@ jobs:
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08@sha256:6ed6921bb5a9e1a916989971844f159b854b7b225880c381fa34f7a158863039
       options: --privileged
+      # An empty volume over the image's own Flatpak installation: the SDK is installed anew from
+      # Flathub, because updating the copy inside the image fails once Flathub has a newer one (a
+      # directory of an image layer cannot be renamed).
+      volumes:
+        - /var/lib/flatpak
     steps:
       # actions/checkout v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
