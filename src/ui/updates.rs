@@ -75,6 +75,16 @@ impl UpdateState {
     }
 }
 
+/// The notice of a newer version at the top of the window.
+pub(super) struct UpdateNotice {
+    /// What Settings says about the update.
+    pub(super) text: String,
+    /// Update now, Download page or Restart, as in Settings; none while one is under way.
+    pub(super) action: Option<(&'static str, Message)>,
+    /// The version that closing the notice hides it for; none while the update is under way.
+    pub(super) dismiss: Option<String>,
+}
+
 /// The repository answered that it has nothing newer than the installed version.
 const FLATPAK_NOTHING_NEW: &str =
     "The Flatpak repository has no newer version yet. Try again later.";
@@ -317,6 +327,14 @@ impl App {
                 }
                 Task::none()
             }
+            Message::DismissUpdateNotice(version) => {
+                if self.preferences.dismissed_update.as_ref() != Some(&version) {
+                    tracing::info!(%version, "the notice of the newer version was closed");
+                    self.preferences.dismissed_update = Some(version);
+                    self.persist();
+                }
+                Task::none()
+            }
             _ => unreachable!("update_inner routes only this group here"),
         }
     }
@@ -440,6 +458,25 @@ impl App {
                 },
             ),
         }
+    }
+
+    /// The notice at the top of every page while a newer version is known: what Settings says
+    /// about it, with the same button. Closed, it stays hidden until another version is out; a
+    /// download or an install under way shows all the same, as the user started it.
+    pub(super) fn update_notice(&self) -> Option<UpdateNotice> {
+        let available = self.update.available()?;
+        let busy = self.update.busy();
+        if !busy && self.preferences.dismissed_update.as_deref() == Some(available.version.as_str())
+        {
+            return None;
+        }
+        let dismiss = (!busy).then(|| available.version.clone());
+        let (text, action) = self.update_status();
+        Some(UpdateNotice {
+            text,
+            action,
+            dismiss,
+        })
     }
 
     /// Update now where the app installs it, the release page elsewhere.
@@ -746,6 +783,137 @@ mod tests {
                 .units(),
             0
         );
+    }
+
+    #[test]
+    fn an_automatic_check_that_finds_a_version_shows_the_notice_on_every_page() {
+        let mut app = App {
+            update_install: Install::WindowsMsi,
+            ..App::default()
+        };
+        assert!(app.update_notice().is_none());
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Ok(Some(available(true))),
+        }));
+        let notice = app.update_notice().expect("a notice for the version found");
+        assert_eq!(notice.text, "Version 9.9.9 is available.");
+        assert!(matches!(
+            notice.action,
+            Some(("Update now", Message::InstallUpdate))
+        ));
+        assert_eq!(notice.dismiss.as_deref(), Some("9.9.9"));
+        // A copy that cannot install offers the release page, as Settings does.
+        app.update_install = Install::Manual;
+        assert!(matches!(
+            app.update_notice().unwrap().action,
+            Some(("Download page", Message::OpenUpdatePage))
+        ));
+    }
+
+    #[test]
+    fn a_closed_notice_stays_hidden_until_another_version_is_out() {
+        let mut app = App {
+            update_install: Install::Flatpak,
+            ..App::default()
+        };
+        app.update = UpdateState::Available(available(false));
+        drop(app.update(Message::DismissUpdateNotice("9.9.9".into())));
+        assert!(app.update_notice().is_none());
+        assert_eq!(app.preferences.dismissed_update.as_deref(), Some("9.9.9"));
+        // The link on Home and the line in Settings still offer it.
+        assert_eq!(app.update_status().0, "Version 9.9.9 is available.");
+        // The check of the next start finds the same version: the notice stays closed.
+        app.update = UpdateState::Idle;
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Ok(Some(available(false))),
+        }));
+        assert!(app.update_notice().is_none());
+        // A newer one brings it back.
+        let newer = Available {
+            version: "10.0.0".into(),
+            ..available(false)
+        };
+        app.update = UpdateState::Idle;
+        drop(app.update(Message::UpdateChecked {
+            manual: false,
+            result: Ok(Some(newer)),
+        }));
+        let notice = app
+            .update_notice()
+            .expect("the notice of the newer version");
+        assert_eq!(notice.text, "Version 10.0.0 is available.");
+        assert_eq!(notice.dismiss.as_deref(), Some("10.0.0"));
+    }
+
+    #[test]
+    fn the_closed_version_is_saved_with_the_preferences() {
+        let mut preferences = crate::preferences::Preferences::default();
+        let saved = serde_json::to_value(&preferences).unwrap();
+        assert!(saved.get("dismissed_update").is_none());
+        preferences.dismissed_update = Some("9.9.9".into());
+        let saved = serde_json::to_string(&preferences).unwrap();
+        let loaded: crate::preferences::Preferences = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.dismissed_update.as_deref(), Some("9.9.9"));
+    }
+
+    #[test]
+    fn the_notice_follows_the_update_once_it_is_started() {
+        let mut app = App {
+            update_install: Install::Flatpak,
+            ..App::default()
+        };
+        app.preferences.dismissed_update = Some("9.9.9".into());
+        // Started from Settings after the notice was closed: the progress shows all the same,
+        // with nothing to press or close.
+        app.update = UpdateState::Available(available(false));
+        drop(app.update(Message::InstallUpdate));
+        drop(app.update(Message::FlatpakUpdateProgress(FlatpakProgress::Running(42))));
+        let notice = app.update_notice().expect("the progress");
+        assert_eq!(notice.text, "Updating to version 9.9.9… 42%");
+        assert!(notice.action.is_none() && notice.dismiss.is_none());
+        // Installed, the notice offers the restart until it is closed again.
+        app.preferences.dismissed_update = None;
+        drop(app.update(Message::FlatpakUpdateProgress(FlatpakProgress::Done)));
+        let notice = app.update_notice().expect("the restart");
+        assert!(matches!(
+            notice.action,
+            Some(("Restart", Message::RestartForUpdate))
+        ));
+        drop(app.update(Message::RestartForUpdate));
+        let notice = app.update_notice().expect("restarting");
+        assert_eq!(notice.text, "Restarting…");
+        assert!(notice.action.is_none() && notice.dismiss.is_none());
+        // A Windows download shows its progress too.
+        let mut app = App {
+            update_install: Install::WindowsMsi,
+            ..App::default()
+        };
+        app.update = UpdateState::Downloading {
+            available: available(true),
+            received: 5,
+            total: 10,
+        };
+        assert_eq!(
+            app.update_notice().unwrap().text,
+            "Downloading version 9.9.9… 50%"
+        );
+    }
+
+    #[test]
+    fn the_close_button_has_a_name_in_every_language() {
+        for language in crate::preferences::UiLanguage::ALL {
+            if language == crate::preferences::UiLanguage::English {
+                continue;
+            }
+            let text = "Hide until the next version";
+            assert_ne!(
+                crate::i18n::translate(language, text),
+                text,
+                "{language:?}: {text}"
+            );
+        }
     }
 
     #[test]

@@ -57,6 +57,10 @@ pub(super) static CATALOG: Catalog = Catalog {
         ),
         ("Update available", "Atualização disponível"),
         (
+            "Hide until the next version",
+            "Ocultar até a próxima versão",
+        ),
+        (
             "Could not reach GitHub. Try again later.",
             "Não foi possível acessar o GitHub. Tente mais tarde.",
         ),

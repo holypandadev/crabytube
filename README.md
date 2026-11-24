@@ -129,7 +129,9 @@ Nothing else needs to be installed: the Visual C++ runtime is built into the exe
 
 ## Updates
 
-On Windows, on macOS and in the Flatpak, CrabyTube looks once a day for a newer version, and
+On Windows, on macOS and in the Flatpak, CrabyTube looks for a newer version shortly after it
+opens and then once a day. When it finds one, a white strip at the top of every page says so, with
+the same button as Settings; its close button hides it until the next version comes out.
 **Settings → Updates** shows what it found and has **Check now**. The daily check can be turned off
 there.
 
