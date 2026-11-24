@@ -48,6 +48,12 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.5" date="2026-11-24">
+      <description>
+        <p>A newer version is easier to notice: a strip at the top of every page says when one is
+        out, with the button that installs it, and can be closed until the next version.</p>
+      </description>
+    </release>
     <release version="0.2.4" date="2026-11-22">
       <description>
         <p>Songs start again where they took twenty seconds or failed: an audio server that does
