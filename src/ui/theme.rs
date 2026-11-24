@@ -335,6 +335,52 @@ pub(super) fn icon_button(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// The notice of a newer version at the top of the window: inverted, white with black text, so
+/// it reads at a glance on any page.
+pub(super) fn notice_strip(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(INK)),
+        text_color: Some(BLACK),
+        ..Default::default()
+    }
+}
+
+/// The button of the notice: black on the white strip, white with a black outline while hovered.
+pub(super) fn notice_button(_: &Theme, status: button::Status) -> button::Style {
+    let (background, text_color) = match status {
+        button::Status::Hovered | button::Status::Pressed => (INK, BLACK),
+        button::Status::Active | button::Status::Disabled => (BLACK, INK),
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            color: BLACK,
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// The close button of the notice: a black icon that hovering outlines in black.
+pub(super) fn notice_icon_button(_: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: None,
+        text_color: BLACK,
+        border: Border {
+            color: if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                BLACK
+            } else {
+                Color::TRANSPARENT
+            },
+            width: hairline(),
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 /// Icon button whose outline stays visible, for an opened menu or a toggle that is on.
 pub(super) fn icon_button_active(_: &Theme, _: button::Status) -> button::Style {
     button::Style {

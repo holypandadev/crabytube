@@ -426,6 +426,10 @@ pub struct Preferences {
     pub scale_with_window: bool,
     /// Asks the latest release on GitHub once a day whether a newer version is out.
     pub check_updates: bool,
+    /// The newer version whose notice at the top of the window was closed: it stays hidden until
+    /// another version is out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dismissed_update: Option<String>,
     pub lyrics_offset_ms: i64,
     pub lyrics_font_size: f32,
     pub lyrics_show_translation: bool,
@@ -479,6 +483,7 @@ impl Default for Preferences {
             track_notifications: false,
             scale_with_window: true,
             check_updates: true,
+            dismissed_update: None,
             lyrics_offset_ms: 0,
             lyrics_font_size: 16.0,
             lyrics_show_translation: true,

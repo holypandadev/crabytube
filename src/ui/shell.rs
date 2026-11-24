@@ -1,7 +1,7 @@
 //! Window chrome shared by every page: title bar, top tabs and player bar.
 
 use super::theme::{
-    self, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, PLAYER_H, RULE, TEXT_BODY, TEXT_CAPTION,
+    self, BLACK, DIM, FADED, GUTTER, INK, MONO, MONO_BOLD, PLAYER_H, RULE, TEXT_BODY, TEXT_CAPTION,
     TEXT_SECTION, TITLE_BAR_H, hrule, icon, label, vrule,
 };
 use super::{App, Message, Page, Preference, format_duration};
@@ -9,7 +9,8 @@ use crate::music::Track;
 use crate::playback::PlaybackState;
 use crate::preferences::RepeatMode;
 use iced::widget::{
-    Space, button, column, container, image, mouse_area, responsive, row, sensor, slider, svg, text,
+    Space, button, column, container, image, mouse_area, responsive, row, sensor, slider, svg,
+    text, tooltip,
 };
 use iced::{Alignment, Color, Element, Length, Size};
 use unicode_segmentation::UnicodeSegmentation;
@@ -214,7 +215,11 @@ impl App {
         } else {
             self.header()
         };
-        let mut body = column![header, body_row];
+        let mut body = column![header];
+        if let Some(notice) = self.update_notice_bar() {
+            body = body.push(notice);
+        }
+        let mut body = body.push(body_row);
         if self.player_bar_shown() {
             body = body.push(hrule(INK)).push(
                 container(responsive(move |size| self.player_bar(size.width)))
@@ -418,6 +423,58 @@ impl App {
             ]
         };
         column![bar.height(HEADER_H).align_y(Alignment::Center), hrule(INK)].into()
+    }
+
+    /// The notice of a newer version, under the header on every page: a white strip with what
+    /// Settings says, its button and a close button that hides it until the next version.
+    fn update_notice_bar(&self) -> Option<Element<'_, Message>> {
+        let notice = self.update_notice()?;
+        let mut line = row![
+            text(notice.text)
+                .size(TEXT_BODY)
+                .font(MONO_BOLD)
+                .color(BLACK)
+                .width(Length::Fill)
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        if let Some((title, message)) = notice.action {
+            line = line.push(
+                button(label(title, TEXT_CAPTION))
+                    .on_press(message)
+                    .padding([6, 12])
+                    .style(theme::notice_button),
+            );
+        }
+        if let Some(version) = notice.dismiss {
+            line = line.push(
+                tooltip(
+                    button(icon("close", 14.0, BLACK))
+                        .on_press(Message::DismissUpdateNotice(version))
+                        .padding(6)
+                        .style(theme::notice_icon_button),
+                    container(label(self.tr("Hide until the next version"), TEXT_CAPTION))
+                        .padding([6, 10])
+                        .style(theme::boxed),
+                    tooltip::Position::Bottom,
+                )
+                .gap(6),
+            );
+        }
+        let gutter = gutter_for(self.window_width);
+        Some(
+            container(line)
+                .width(Length::Fill)
+                .height(Length::Shrink)
+                .padding(iced::Padding {
+                    top: 8.0,
+                    right: gutter,
+                    bottom: 8.0,
+                    left: gutter,
+                })
+                .style(theme::notice_strip)
+                .into(),
+        )
     }
 
     /// Whether the window is as narrow as a phone: the tabs go to a bar at its foot, and rows take

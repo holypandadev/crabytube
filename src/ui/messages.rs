@@ -170,6 +170,8 @@ pub(super) enum Message {
     RestartForUpdate,
     RestartStarted(Result<(), crate::updater::UpdateError>),
     OpenUpdatePage,
+    /// Hides the notice of a newer version until a version other than this one is out.
+    DismissUpdateNotice(String),
     /// The main window exists: at start, or opened again from the tray.
     WindowOpened(iced::window::Id),
     QuitApp,

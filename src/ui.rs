@@ -1962,7 +1962,8 @@ impl App {
             | Message::FlatpakUpdateProgress(_)
             | Message::RestartForUpdate
             | Message::RestartStarted(_)
-            | Message::OpenUpdatePage => return self.update_updates(message),
+            | Message::OpenUpdatePage
+            | Message::DismissUpdateNotice(_) => return self.update_updates(message),
             Message::ShowWindowRequested => {
                 return self.show_window_from_tray_task();
             }

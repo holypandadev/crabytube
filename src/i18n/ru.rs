@@ -53,6 +53,7 @@ pub(super) static CATALOG: Catalog = Catalog {
             "Не удалось установить обновление. Если CrabyTube был установлен из файла версии старше 0.1.2, один раз установите новую версию со страницы загрузки.",
         ),
         ("Update available", "Доступно обновление"),
+        ("Hide until the next version", "Скрыть до следующей версии"),
         (
             "Could not reach GitHub. Try again later.",
             "Не удалось связаться с GitHub. Попробуйте позже.",
